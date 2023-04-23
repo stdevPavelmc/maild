@@ -2,17 +2,10 @@
 set -m
 
 if [ ! -f /etc/clamav/configured ] ; then
-    if ! [ -z "${CLAMAV_PROXY_SERVER}" ]; then
-        echo "HTTPProxyServer ${CLAMAV_PROXY_SERVER}" >> /etc/clamav/freshclam.conf
-    fi
-
-    if ! [ -z "${CLAMAV_PROXY_PORT}" ]; then
-        echo "HTTPProxyPort ${CLAMAV_PROXY_PORT}" >> /etc/clamav/freshclam.conf
-    fi
     # config alternate mirrors
-    if [ ! -z "${CLAMAV_ALTERNATE_MIRROR}" ]; then
+    if [ "${ALTERNATE_MIRROR}" ]; then
         sed -i s/"DatabaseMirror .*$"/""/g /etc/clamav/freshclam.conf
-        echo "DatabaseMirror ${CLAMAV_ALTERNATE_MIRROR}" >> /etc/clamav/freshclam.conf
+        echo "DatabaseMirror ${ALTERNATE_MIRROR}" >> /etc/clamav/freshclam.conf
     fi
 
     touch /etc/clamav/configured
@@ -28,10 +21,10 @@ MAIN_FILE="$DB_DIR/main.cvd"
 
 # start of the magic
 freshclam -d &
-echo -e "waiting for clam to update..."
 
 until [ -e ${MAIN_FILE} ] ; do
-    :
+    echo -e "waiting for clam to update..."
+    sleep 3
 done
 
 echo -e "starting clamd..."

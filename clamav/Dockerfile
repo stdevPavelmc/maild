@@ -1,7 +1,7 @@
-FROM ubuntu:focal
+FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2022-02-10
+ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && \

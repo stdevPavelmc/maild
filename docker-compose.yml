@@ -3,18 +3,19 @@ version: "3.7"
 networks:
   maild:
 
+
 volumes:
   # mail storage
   vmail:
-  spool:
-  # certs storage
-  certs:
-  # AV storage
-  clamav:
-  # filtering storage
+  spool: # certs storage
+
+  certs: # AV storage
+
+  clamav: # filtering storage
+
   amavis:
-  spamassassin:
-  # database storage
+  spamassassin: # database storage
+
   db:
 
 
@@ -49,7 +50,7 @@ services:
       - db
     networks:
       - maild
-      
+
   mda:
     image: maild/mda
     build: ./mda/
@@ -96,30 +97,32 @@ services:
   #     - "465:465"
   #     - "587:587"
   #     - "10025:10025"
-  #   networks:
-  #     - maild
   #   volumes:
   #     - vmail:/home/vmail
   #     - certs:/certs
+  #   networks:
+  #     - maild
 
-  # clamav:
-  #   image: mailad/clamav
-  #   build: ./clamav/
-  #   domainname: ${DOMAIN}
-  #   hostname: clamav
-  #   healthcheck:
-  #       test: ["CMD", "./check.sh"]
-  #       interval: 60s
-  #       retries: 3
-  #       start_period: 120s
-  #   environment:
-  #     # CLAMAV_PROXY_SERVER: 10.1.2.3
-  #     # CLAMAV_PROXY_PORT: 3128
-  #     CLAMAV_ALTERNATE_MIRROR: clamav.ddns.net
-  #   ports:
-  #     - "3310"
-  #   volumes:
-  #     - clamav:/var/lib/clamav
+  clamav:
+    image: mailad/clamav
+    build: ./clamav/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-clamav
+    hostname: clamav
+    healthcheck:
+      test: [ "CMD", "./check.sh" ]
+      interval: 60s
+      retries: 3
+      start_period: 120s
+    env_file:
+      - vars/clamav.env
+      - .env
+    # ports:
+    #   - "3310"
+    volumes:
+      - clamav:/var/lib/clamav
+    networks:
+      - maild
 
   # amavis:
   #   image: mailad/amavis
@@ -140,3 +143,5 @@ services:
   #   volumes:
   #     - amavis:/var/lib/amavis
   #     - spamassassin:/var/lib/spamassassin
+  #   networks:
+  #     - maild
