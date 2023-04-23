@@ -1,10 +1,10 @@
-# MailAD, docker MailAD...
+# MailD docker version of the MailAD project but using a DB as backend
 
-[Mailad](https://github.com/stdevPavelmc/mailad) is a on-prem solution to deploy fully functional linux mailserver based on Postfix, Dovecot, Amavis, ClamAv, Spamassasin, etc, to get more details use the previous link.
+This project is inspired on [MailAD-Docker](https://github.com/stdevPavelmc/mailad-docker), that is also based on [Mailad](https://github.com/stdevPavelmc/mailad).
 
-This is the docker version for that solution & a work in progress right now, we have a [telegram group](https://t.me/MailAD_dev) to discuss the development, feel free to join.
+This is the docker version with a DB as a backend instead of a domain controler LDAP we have a [telegram group](https://t.me/MailAD_dev) to discuss the development, feel free to join.
 
-**Warning**: This and the other readmes are written on spare time and amost past 2300 local, so may hide typos, syntax errors, etc, remember this is a early alpha code/repo.
+**Warning**: This and the other readmes are written on spare time and amost past 2300 local, so mayy hid typoss, sysntax errrors ;), remember this is a early alpha code/repo.
 
 ## How to test it?
 
@@ -18,13 +18,14 @@ You are done, it's runnig, if you nee more info (and I hope you need it) keep re
 
 ## Services
 
-To create a realy dynamic setup we split the mailserver in services:
+To create a realy dynamic setup we split the mail server in services:
 
 - [**MTA** (Mail Transport Agent)](./mta/) this is the Postfix field, basically the reception and dispatching of mails to and form the mail server/users.
 - [**MDA** (Mail Delivery Agent)](./mda/) This is the Dovecot field, this has to do with the users checking his mails from the mailbox, quotas, etc.
-- [**Active Directory**](./samba/) As a test, dev or even production Active directory service, MailAD needs a AD-DC to use as user base.
-- **AMAVIS** Advanced filtering, it comprises attachments, anti-virus, anti-spam, etc.
-- **WebManagement** This is a simple WebManagement interface maintained by the CUJAE team (insert link)
+- [**AMAVIS** (Advanced filtering)](./amavis), it comprises attachments, anti-virus, anti-spam, etc.
+- [**ClamAV**](./clamav/) AV scanning solution
+- **Postgres DB** this is the database lo hold the users data.
+- **PostfixAdmin** This is a simple WebM anagement interface
 
 Follow the links for each service to get details for each image.
 

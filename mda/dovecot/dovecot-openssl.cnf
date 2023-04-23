@@ -7,19 +7,19 @@ prompt = no
 
 [ req_dn ]
 # country (2 letter code)
-C=CU
+C=_COUNTRY_
 
 # State or Province Name (full name)
-ST=Camaguey
+ST=_STATE_
 
 # Locality Name (eg. city)
-L=Camagüey
+L=_CITY_
 
 # Organization (eg. company)
-O=Mailad
+O=_ORG_
 
 # Organizational Unit Name (eg. section)
-OU=IT System administration
+OU=_OU_
 
 # Common Name (*.example.com is also possible)
 CN=_DOMAIN_

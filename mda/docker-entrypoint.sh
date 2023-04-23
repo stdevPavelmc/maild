@@ -4,16 +4,26 @@ set -e
 if [ ! -f /etc/dovecot/configured ]; then
     # create the local config file
     CFILE=/etc/dovecot/config.local
-    echo "DOMAIN=${DOVECOT_DOMAIN}" > "${CFILE}"
+    # Domain
+    echo "DOMAIN=${DOMAIN}" > "${CFILE}"
+    echo "COUNTRY=${COUNTRY}" >> ${CFILE}
+    echo "STATE=${STATE}" >> ${CFILE}
+    echo "CITY=${CITY}" >> ${CFILE}
+    echo "ORG=${ORG}" >> ${CFILE}
+    echo "OU=${OU}" >> ${CFILE}
+    # #TODO
     echo "DEFAULT_MAILBOX_SIZE=${DOVECOT_DEFAULT_MAILBOX_SIZE}" >> "${CFILE}"
-    echo "LDAPURI=${DOVECOT_LDAP_URI}" >> "${CFILE}"
-    echo "LDAPSEARCHBASE=${DOVECOT_LDAP_SEARCH_BASE}" >> "${CFILE}"
-    echo "LDAPBINDUSER=${DOVECOT_LDAP_BINDUSER}" >> "${CFILE}"
-    echo "LDAPBINDPASSWD=\"${DOVECOT_LDAP_BINDUSER_PASSWD}\"" >> "${CFILE}"
+    # DB
+    echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
+    echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
+    echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
+    echo "POSTGRES_HOST=${POSTGRES_HOST}" >> "${CFILE}"
 
     # config dump
-    echo "Config file dump:"
-    cat ${CFILE}
+    if [ "${DEBUG}" ] ; then
+        echo "Config file dump:"
+        cat ${CFILE}
+    fi
 
     # force creation of sive fodler
     mkdir -p /var/lib/dovecot/sieve/
@@ -34,6 +44,10 @@ if [ ! -f /etc/dovecot/configured ]; then
     sievec /var/lib/dovecot/sieve/default.sieve
     echo "Sieve compilation done"
 
+    # Run the configuration
+    echo "Config starting"
+    /configure.sh
+
     ## dhparms generation
     if [ ! -f /certs/RSA2048.pem ] ; then
         echo "Generation of SAFE dhparam, this may take a time, be patient..."
@@ -44,26 +58,14 @@ if [ ! -f /etc/dovecot/configured ]; then
         echo "DHparam already present, skiping generation!"
     fi
 
-    # get the DC hostname from the ldap var
-    DC=`echo "${DOVECOT_LDAP_URI}" | cut -d "/" -f 3 | cut -d ":" -f 1 | tr [:lower:] [:upper:]`
-    echo "Using ${DC} as LDAP Server"
-
-    echo "Get & Install of the samba ssl cert for the LDAP connections"
-    echo | openssl s_client -connect ${DC}:636 2>&1 | sed --quiet '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > /etc/ssl/certs/samba.crt
-    cat /etc/ssl/certs/samba.crt | head
-
-    # install the cert into the LDAP client setting
-    cat /etc/ldap/ldap.conf | grep -v TLS_CACERT > /tmp/1
-    echo "TLS_CACERT /etc/ssl/certs/samba.crt" >> /tmp/1
-    cat /tmp/1 > /etc/ldap/ldap.conf
-
-    # Run the configuration
-    echo "Config starting"
-    /configure.sh
-
     # create the flag file
     touch /etc/dovecot/configured
     echo "Flag created: container ready!"
+
+    # debug, remove the config file at the end or not if debugging
+    if [ -z "${DEBUG}" ] ; then
+        rm ${CFILE}
+    fi
 fi
 
 if [ "$1" = 'dovecot' ]; then

@@ -1,21 +1,21 @@
-FROM ubuntu:focal
+FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2022-02-04
+ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && \
     apt-get install -y \
-    sed \
-    dovecot-pop3d \
-    dovecot-imapd \
-    dovecot-ldap \
-    dovecot-sieve \
-    dovecot-lmtpd \
-    dovecot-managesieved
+        sed \
+        dovecot-pop3d \
+        dovecot-imapd \
+        dovecot-pgsql \
+        dovecot-sieve \
+        dovecot-lmtpd \
+        dovecot-managesieved
 
 # TODO: REMOVE on PRODUCTION
-RUN apt-get install -y nano ldap-utils net-tools
+RUN apt-get install -y nano net-tools
 
 RUN mkdir /home/vmail && \
     chown -R 5000:5000 /home/vmail && \
