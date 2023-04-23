@@ -22,10 +22,10 @@ O=_ORG_
 OU=_OU_
 
 # Common Name (*.example.com is also possible)
-CN=_DOMAIN_
+CN=_DEFAULT_DOMAIN_
 
 # E-mail contact
-emailAddress=postmaster@_DOMAIN_
+emailAddress=postmaster@_DEFAULT_DOMAIN_
 
 [ cert_type ]
 nsCertType = server

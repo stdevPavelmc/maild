@@ -10,49 +10,45 @@ cp /etc/postfix/master.cf.s ${MASTER}
 ### Vars handling
 
 # optionals
-if [ -z "${POSTFIX_RELAY}" ] ; then
+if [ -z "${RELAY}" ] ; then
     POSTFIX_RELAY=""
 fi
-if [ -z "${POSTFIX_MAX_MESSAGESIZE}" ] ; then
+if [ -z "${MAX_MESSAGESIZE}" ] ; then
     POSTFIX_MAX_MESSAGESIZE=2264924
 fi
-if [ -z "${POSTFIX_ALWAYS_BCC}" ] ; then
+if [ -z "${ALWAYS_BCC}" ] ; then
     POSTFIX_ALWAYS_BCC=
 fi
-if [ -z "${POSTFIX_NATIONAL}" ] ; then
-    POSTFIX_NATIONAL=cu
+if [ -z "${SPF_ENABLE}" ] ; then
+    SPF_ENABLE='no'
 fi
-if [ -z "${POSTFIX_SPF_ENABLE}" ] ; then
-    ENABLE_SPF=${POSTFIX_SPF_ENABLE}
+if [ -z "${DNSBL_ENABLE}" ] ; then
+    DNSBL_ENABLE='no'
 fi
 
 # mandatory
 HOSTNAME=`hostname -f`
-SYSADMINS=`echo ${POSTFIX_MAILADMIN} | sed s/"@"/"\\\@"/`
-HOSTAD=`echo ${POSTFIX_LDAP_URI} | cut -d "/" -f 3 | cut -d ":" -f 1`
+SYSADMINS=`echo ${MAILADMIN} | sed s/"@"/"\\\@"/`
 
 # create the local config file
 CFILE=/etc/postfix/config.local
-echo "DOMAIN=${POSTFIX_DOMAIN}" > "${CFILE}"
-echo "MESSAGESIZE=${POSTFIX_MAX_MESSAGESIZE}" >> "${CFILE}"
-echo "LDAPURI=${POSTFIX_LDAP_URI}" >> "${CFILE}"
-echo "LDAPSEARCHBASE=${POSTFIX_LDAP_SEARCH_BASE}" >> "${CFILE}"
-echo "LDAPBINDUSER=${POSTFIX_LDAP_BINDUSER}" >> "${CFILE}"
-echo "LDAPBINDPASSWD=\"${POSTFIX_LDAP_BINDUSER_PASSWD}\"" >> "${CFILE}"
+echo "DOMAIN=${DEFAULT_DOMAIN}" > "${CFILE}"
+echo "MESSAGESIZE=${MAX_MESSAGESIZE}" >> "${CFILE}"
 echo "HOSTNAME=${HOSTNAME}" >> "${CFILE}"
-echo "RELAY=${POSTFIX_RELAY}" >> "${CFILE}"
-echo "ALWAYSBCC=${POSTFIX_ALWAYS_BCC}" >> "${CFILE}"
+echo "RELAY=${RELAY}" >> "${CFILE}"
+echo "ALWAYSBCC=${ALWAYS_BCC}" >> "${CFILE}"
 echo "SYSADMINS=${SYSADMINS}" >> "${CFILE}"
-echo "HOSTAD=${HOSTAD}" >> "${CFILE}"
-echo "AMAVISHN=${POSTFIX_AMAVIS}" >> "${CFILE}"
-AMAVISIP=`host ${POSTFIX_AMAVIS} | awk '/has address/ { print $4 }'`
+echo "AMAVISHN=${AMAVIS}" >> "${CFILE}"
+AMAVISIP=`host ${AMAVIS} | awk '/has address/ { print $4 }'`
 echo "AMAVISIP=${AMAVISIP}" >> "${CFILE}"
 OWN_IP=`ifconfig eth0 | grep inet | awk '{print $2}'`
 echo "OWN_IP=${OWN_IP}" >> "${CFILE}"
 
 # config dump
-echo "Config file dump:"
-cat ${CFILE}
+if [ "${DEBUG}" ] ; then
+    echo "Config file dump:"
+    cat ${CFILE}
+fi
 
 # loading configs
 . "${CFILE}"
@@ -71,11 +67,11 @@ for v in `echo "${VARS}" | xargs` ; do
     sed -i s/"\_${v}\_"/"${CONT}"/g ${MAIN}
     sed -i s/"\_${v}\_"/"${CONT}"/g ${MASTER}
 
-    find "/etc/postfix/ldap" -type f -exec sed s/"\_$v\_"/"${CONT}"/g -i {} \; -print
+    #  find "/etc/postfix/ldap" -type f -exec sed s/"\_$v\_"/"${CONT}"/g -i {} \; -print
 done
 
 # check for SPF activation
-if [ -z "${ENABLE_SPF}" -o "${ENABLE_SPF}" == "no" -o "${ENABLE_SPF}" == "No" -o "${ENABLE_SPF}" == "False" -o "${ENABLE_SPF}" == "false"  ] ; then
+if [ -z "${SPF_ENABLE}" -o "${SPF_ENABLE}" == "no" -o "${SPF_ENABLE}" == "No" -o "${SPF_ENABLE}" == "False" -o "${SPF_ENABLE}" == "false"  ] ; then
     # disable SPF
     sed -i s/"^.*spf.*$"/''/g ${MAIN}
 
@@ -84,7 +80,7 @@ if [ -z "${ENABLE_SPF}" -o "${ENABLE_SPF}" == "no" -o "${ENABLE_SPF}" == "No" -o
 fi
 
 ### DNSBL
-if [ "${POSTFIX_DNSBL}" == "yes" -o "${POSTFIX_DNSBL}" == "Yes" -o "${POSTFIX_DNSBL}" == "True" -o "${POSTFIX_DNSBL}" == "true" ] ; then
+if [ "${DNSBL_ENABLE}" == "yes" -o "${DNSBL_ENABLE}" == "Yes" -o "${DNSBL_ENABLE}" == "True" -o "${DNSBL_ENABLE}" == "true" ] ; then
     # notice
     echo "Enabled DNSBL filtering as requested by the config"
 
@@ -123,16 +119,18 @@ find /etc/postfix -type f -exec chmod g-w,o-w {} \;
 ### Accesory files
 
 # everyone list
-if [ "${POSTFIX_EVERYONE}" ] ; then
-    echo "EVERYONE list configured at: ${POSTFIX_EVERYONE}"
+if [ "${EVERYONE}" ] ; then
+    echo "EVERYONE list configured at: ${EVERYONE}"
 
     FILE=/etc/postfix/aliases/everyone_list_check
-    LINE="$POSTFIX_EVERYONE         everyone_list"
+    LINE="$EVERYONE         everyone_list"
 
     ISTHERE=`cat ${FILE} | grep everyone_list`
     if [ "${ISTHERE}" ] ; then
+        # update
         sed -i s/"^.*everyone_list.*$"/"${LINE}"/ ${FILE}
     else
+        # create
         echo "{$LINE}" >> ${FILE}
     fi
 fi
@@ -153,27 +151,6 @@ echo "spamasassin:       root" >> $ALIASES
 echo "root:     $SYSADMINS" >> $ALIASES
 # apply changes
 /usr/bin/newaliases
-
-### DC certs for SSL-LDAP use
-# get the DC hostname from the ldap var
-DC=`echo "${POSTFIX_LDAP_URI}" | cut -d "/" -f 3 | cut -d ":" -f 1 `
-echo "Using ${DC}.${DOMAIN} as LDAP Server"
-
-echo "Get & Install of the samba ssl cert for the LDAP connections"
-echo | openssl s_client -connect ${DC}:636 2>&1 | sed --quiet '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > /etc/ssl/certs/samba.crt
-cat /etc/ssl/certs/samba.crt | head -n 3
-
-# install the cert into the LDAP client setting
-echo "TLS_CACERT /etc/ssl/certs/samba.crt" >> /etc/ldap/ldap.conf
-
-### escaped domain for the local restrictions on postfix
-ESCDOMAIN=${POSTFIX_DOMAIN//./\\\\\\.}
-# escaped national or enterprise wide domain
-ESCNATIONAL=${POSTFIX_NATIONAL//./\\\\\\.}
-
-# action goes here
-sed s/"_ESCDOMAIN_"/"${ESCDOMAIN}"/g -i /etc/postfix/rules/filter_loc
-sed s/"_ESCNATIONAL_"/"${ESCNATIONAL}"/g -i /etc/postfix/rules/filter_nat
 
 ### dhparms generation
 if [ ! -f /certs/RSA2048.pem ] ; then

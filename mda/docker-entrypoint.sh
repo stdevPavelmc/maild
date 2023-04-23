@@ -5,14 +5,14 @@ if [ ! -f /etc/dovecot/configured ]; then
     # create the local config file
     CFILE=/etc/dovecot/config.local
     # Domain
-    echo "DOMAIN=${DOMAIN}" > "${CFILE}"
+    echo "DEFAULT_DOMAIN=${DEFAULT_DOMAIN}" > "${CFILE}"
     echo "COUNTRY=${COUNTRY}" >> ${CFILE}
     echo "STATE=${STATE}" >> ${CFILE}
     echo "CITY=${CITY}" >> ${CFILE}
     echo "ORG=${ORG}" >> ${CFILE}
     echo "OU=${OU}" >> ${CFILE}
     # #TODO
-    echo "DEFAULT_MAILBOX_SIZE=${DOVECOT_DEFAULT_MAILBOX_SIZE}" >> "${CFILE}"
+    echo "DEFAULT_MAILBOX_SIZE=${DEFAULT_MAILBOX_SIZE}" >> "${CFILE}"
     # DB
     echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
     echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"

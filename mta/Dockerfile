@@ -1,7 +1,6 @@
-FROM ubuntu:focal
-
+FROM ubuntu:jammy
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2022-02-04
+ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
 
 # TODO: REMOVE on PRODUCTION
@@ -11,8 +10,7 @@ RUN apt-get update && \
     apt-get install -y \
         postfix \
         postfix-pcre \
-        postfix-ldap \
-        ldap-utils \
+        postfix-pgsql \
         net-tools \
         bind9-host && \
     apt-get clean && \

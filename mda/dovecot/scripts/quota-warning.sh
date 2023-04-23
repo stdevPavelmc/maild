@@ -3,7 +3,7 @@
 PERCENT=$1
 USER=$2
 cat << EOF | /usr/lib/dovecot/dovecot-lda -d $USER -o "plugin/quota=maildir:User quota:noenforcing"
-From: postmaster@_DOMAIN_
+From: postmaster@_DEFAULT_DOMAIN_
 Subject: =?UTF-8?Q?IMPORTANTE=3a_Advertencia_de_buz=c3=b3n_de_correos_al_llenarse!?=
 MIME-Version: 1.0
 Content-Type: multipart/alternative;

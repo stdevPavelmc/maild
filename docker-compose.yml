@@ -22,33 +22,29 @@ services:
   db:
     image: postgres:latest
     container_name: maild-db
-    environment:
-      &db_vars
-      POSTGRES_HOST: ${PG_HOST}
-      POSTGRES_DB: ${PG_DB}
-      POSTGRES_USER: ${PG_USER}
-      POSTGRES_PASSWORD: ${PG_PASSWD}
+    hostname: db
+    env_file:
+      - vars/db.env
+      - .env
     volumes:
       - db:/var/lib/postgresql/data
     networks:
       - maild
 
   admin:
-    image: postfixadmin:latest
+    image: maild/admin
+    build: ./admin/
     container_name: maild-admin
+    hostname: admin
     ports:
       - "8080:80"
     environment:
-      # db
-      POSTFIXADMIN_DB_HOST: ${PG_HOST}
-      POSTFIXADMIN_DB_USER: ${PG_USER}
-      POSTFIXADMIN_DB_PASSWORD: ${PG_PASSWD}
-      POSTFIXADMIN_DB_NAME: ${PG_DB}
-      # specific ones
-      POSTFIXADMIN_DB_TYPE: pgsql
-      POSTFIXADMIN_SMTP_SERVER: mta
-      POSTFIXADMIN_SMTP_PORT: 25
+      POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
       POSTFIXADMIN_SETUP_PASSWORD: ${POSTFIXADMIN_SETUP_PASSWORD}
+    env_file:
+      - vars/db.env
+      - vars/admin.env
+      - .env
     depends_on:
       - db
     networks:
@@ -57,20 +53,14 @@ services:
   mda:
     image: maild/mda
     build: ./mda/
-    domainname: ${DOMAIN}
+    domainname: ${DEFAULT_DOMAIN}
     container_name: maild-mda
     hostname: mda
-    environment:
-      <<: *db_vars
-      # Domain
-      DOMAIN: ${DOMAIN}
-      DOVECOT_DEFAULT_MAILBOX_SIZE: ${DEFAULT_MAILBOX_SIZE}
-      # cert generation
-      COUNTRY: ${COUNTRY}
-      STATE: ${STATE}
-      CITY: ${CITY}
-      ORG: ${ORG}
-      OU: ${OU}
+    env_file:
+      - vars/db.env
+      - vars/mda.env
+      - vars/ssl.env
+      - .env
     ports:
       - "110:110"
       - "143:143"
@@ -88,30 +78,26 @@ services:
       - maild
 
   # mta:
+  #   # TODO: Healthcheck:
+  #   #  - check if $AMAVISIP still has the same IP, if not reboot
+  #   #  - check if 
   #   image: mailad/mta
   #   build: ./mta/
-  #   domainname: ${DOMAIN}
+  #   container_name: maild-mta
+  #   domainname: ${DEFAULT_DOMAIN}
   #   hostname: mta
   #   environment:
-  #     # POSTFIX_MAX_MESSAGESIZE: 2264924 # bytes ~1024 * 1024 * MB * 1.08
-  #     # POSTFIX_REALY: 
-  #     # POSTFIX_ALWAYS_BCC: piler@${DOMAIN}
-  #     # POSTFIX_NATIONAL: cu
-  #     # POSTFIX_EVERYONE: todos@${DOMAIN} # if not explicit: disabled
-  #     # POSTFIX_SPF_ENABLE: True
-  #     # POSTFIX_DNSBL: True
-  #     POSTFIX_DOMAIN: ${DOMAIN}
-  #     POSTFIX_MAILADMIN: ${MAIL_ADMIN_USER}@${DOMAIN}
-  #     POSTFIX_LDAP_URI: "ldap://dc:389"
-  #     POSTFIX_LDAP_SEARCH_BASE: ${LDAP_USER_SEARCH_BASE}
-  #     POSTFIX_LDAP_BINDUSER: ${SAMBA_LINK_USER_CN}
-  #     POSTFIX_LDAP_BINDUSER_PASSWD: ${SAMBA_LINK_USER_PASSWD}
-  #     POSTFIX_AMAVIS: amavis
+  #     MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+  #   env_file:
+  #     - vars/mta.env
+  #     - vars/ssl.env
   #   ports:
   #     - "25:25"
   #     - "465:465"
   #     - "587:587"
   #     - "10025:10025"
+  #   networks:
+  #     - maild
   #   volumes:
   #     - vmail:/home/vmail
   #     - certs:/certs
