@@ -25,6 +25,12 @@ COPY check.sh /
 RUN chown -R clamav:clamav /etc/clamav /docker-entrypoint.sh /check.sh
 RUN chmod +x /docker-entrypoint.sh /check.sh
 
+# DEBUG tools only on debug build
+ARG DEBUG
+RUN if [ "$DEBUG" ]; then \
+    apt-get update && apt-get install -y nano ; \
+    fi
+
 VOLUME ["/var/lib/clamav"]
 
 EXPOSE 3310

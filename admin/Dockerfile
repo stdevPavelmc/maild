@@ -1,4 +1,5 @@
 FROM php:8.1-apache
+
 LABEL maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin)"
 LABEL modified="Pavel Milanes <pavelmc@gmail.com>, to read the database values from a common posttgres variables"
 
@@ -72,6 +73,12 @@ RUN set -eu; \
 
 COPY docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
+
+# DEBUG tools only on debug build
+ARG DEBUG
+RUN if [ "$DEBUG" ]; then \
+    apt-get update && apt-get install -y nano ; \
+    fi
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["apache2-foreground"]

@@ -14,9 +14,6 @@ RUN apt-get update && \
         dovecot-lmtpd \
         dovecot-managesieved
 
-# TODO: REMOVE on PRODUCTION
-RUN apt-get install -y nano net-tools
-
 RUN mkdir /home/vmail && \
     chown -R 5000:5000 /home/vmail && \
     groupadd -r postfix && \
@@ -30,12 +27,17 @@ ADD docker-entrypoint.sh /docker-entrypoint.sh
 ADD configure.sh /configure.sh
 RUN chmod +x /docker-entrypoint.sh && chmod +x /configure.sh
 
+# DEBUG tools only on debug build
+ARG DEBUG
+RUN if [ "$DEBUG" ]; then \
+    apt-get update && apt-get install -y nano net-tools; \
+    fi
+
 VOLUME ["/certs", "/home/vmail"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
 # Ports pop, imap, sieve and sasl
 EXPOSE 110 143 993 995 4190 12345
-
 
 CMD ["dovecot"]

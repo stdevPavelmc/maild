@@ -116,7 +116,6 @@ services:
       start_period: 120s
     env_file:
       - vars/clamav.env
-      - .env
     # ports:
     #   - "3310"
     volumes:
@@ -124,24 +123,23 @@ services:
     networks:
       - maild
 
-  # amavis:
-  #   image: mailad/amavis
-  #   build: ./amavis/
-  #   domainname: ${DOMAIN}
-  #   hostname: amavis
-  #   healthcheck:
-  #       test: ["CMD", "/check.sh"]
-  #       interval: 60s
-  #       retries: 3
-  #       start_period: 120s
-  #   environment:
-  #     AMAVIS_MTA: mta
-  #     AMAVIS_SPAMASSASSIN_DISABLED: 1
-  #     AMAVIS_AV_DISABLED: 1
-  #   ports:
-  #     - "10024:10024"
-  #   volumes:
-  #     - amavis:/var/lib/amavis
-  #     - spamassassin:/var/lib/spamassassin
-  #   networks:
-  #     - maild
+  amavis:
+    image: mailad/amavis
+    build: ./amavis/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-amavis
+    hostname: amavis
+    healthcheck:
+        test: ["CMD", "/check.sh"]
+        interval: 60s
+        retries: 3
+        start_period: 120s
+    env_file:
+      - vars/amavis.env
+    # ports:
+    #   - "10024:10024"
+    volumes:
+      - amavis:/var/lib/amavis
+      - spamassassin:/var/lib/spamassassin
+    networks:
+      - maild

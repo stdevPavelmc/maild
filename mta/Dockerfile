@@ -1,10 +1,8 @@
 FROM ubuntu:jammy
+
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
-
-# TODO: REMOVE on PRODUCTION
-RUN apt-get update && apt-get install -y nano netcat-openbsd
 
 RUN apt-get update && \
     apt-get install -y \
@@ -26,6 +24,12 @@ RUN chmod +x /etc/postfix/scripts/*
 
 ADD docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
+
+# DEBUG tools only on debug build
+ARG DEBUG
+RUN if [ "$DEBUG" ]; then \
+    apt-get update && apt-get install -y nano netcat-openbsd ; \
+    fi
 
 VOLUME ["/certs", "/home/vmail"]
 

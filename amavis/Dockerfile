@@ -1,11 +1,8 @@
-FROM ubuntu:focal
+FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2022-02-10
+ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
-
-# TODO: REMOVE on PRODUCTION
-RUN apt-get update && apt-get install -y nano
 
 RUN apt-get update && \
     apt-get install -y \
@@ -27,6 +24,12 @@ COPY check.sh /
 COPY docker-entrypoint.sh /
 
 RUN chmod +x /docker-entrypoint.sh /check.sh
+
+# DEBUG tools only on debug build
+ARG DEBUG
+RUN if [ "$DEBUG" ]; then \
+    apt-get update && apt-get install -y nano ; \
+    fi
 
 VOLUME ["/var/lib/amavis", "/var/lib/spamassassin"]
 
