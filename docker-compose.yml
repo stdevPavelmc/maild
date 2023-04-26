@@ -3,20 +3,14 @@ version: "3.7"
 networks:
   maild:
 
-
 volumes:
-  # mail storage
-  vmail:
-  spool: # certs storage
-
-  certs: # AV storage
-
-  clamav: # filtering storage
-
-  amavis:
-  spamassassin: # database storage
-
-  db:
+  vmail: # mail storage
+  spool: # temp mail storage
+  certs: # certs storage
+  clamav: # AV storage 
+  amavis: # filtering storage
+  spamassassin: # spam data 
+  db: # database storage
 
 
 services:
@@ -78,30 +72,33 @@ services:
     networks:
       - maild
 
-  # mta:
-  #   # TODO: Healthcheck:
-  #   #  - check if $AMAVISIP still has the same IP, if not reboot
-  #   #  - check if 
-  #   image: mailad/mta
-  #   build: ./mta/
-  #   container_name: maild-mta
-  #   domainname: ${DEFAULT_DOMAIN}
-  #   hostname: mta
-  #   environment:
-  #     MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
-  #   env_file:
-  #     - vars/mta.env
-  #     - vars/ssl.env
-  #   ports:
-  #     - "25:25"
-  #     - "465:465"
-  #     - "587:587"
-  #     - "10025:10025"
-  #   volumes:
-  #     - vmail:/home/vmail
-  #     - certs:/certs
-  #   networks:
-  #     - maild
+  mta:
+    # TODO: Healthcheck:
+    #  - check if $AMAVISIP still has the same IP, if not reboot
+    #  - check if 
+    image: mailad/mta
+    build: ./mta/
+    container_name: maild-mta
+    domainname: ${DEFAULT_DOMAIN}
+    hostname: mta
+    environment:
+      MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+    env_file:
+      - vars/mta.env
+      - vars/ssl.env
+    ports:
+      - "25:25"
+      - "465:465"
+      - "587:587"
+      # - "10025:10025"
+    volumes:
+      - vmail:/home/vmail
+      - certs:/certs
+      - spool:/var/spool/
+    depends_on:
+      - mda
+    networks:
+      - maild
 
   clamav:
     image: mailad/clamav
@@ -136,10 +133,14 @@ services:
         start_period: 120s
     env_file:
       - vars/amavis.env
+      - vars/db.env
+      - .env
     # ports:
     #   - "10024:10024"
     volumes:
       - amavis:/var/lib/amavis
       - spamassassin:/var/lib/spamassassin
+    depends_on:
+      - db
     networks:
       - maild
