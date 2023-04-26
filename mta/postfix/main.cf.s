@@ -187,13 +187,13 @@ always_bcc = _ALWAYSBCC_
 receive_override_options = no_address_mappings
 
 # Debug verbosity for an ip...
-#debug_peer_list = 10.0.3.161
-#debug_peer_level = 16
+debug_peer_list = 172.17.0.1
+debug_peer_level = 16
 
 # virtual domains linking
 virtual_mailbox_domains = proxy:pgsql:/etc/postfix/pgsql/virtual_domains_maps.cf
 virtual_mailbox_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_mailbox_maps.cf
-virtual_alias_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_alias_maps.cf, hash:/etc/postfix/aliases/virtual_aliases
+virtual_alias_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_alias_maps.cf
 relay_domains = $mydestination, proxy:pgsql:/etc/postfix/pgsql/relay_domains.cf
 virtual_mailbox_base = /home/vmail
 virtual_minimum_uid = 100

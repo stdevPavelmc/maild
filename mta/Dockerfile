@@ -10,6 +10,7 @@ RUN apt-get update && \
         postfix-pcre \
         postfix-pgsql \
         net-tools \
+        postgresql-client \
         bind9-host && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*

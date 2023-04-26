@@ -127,12 +127,6 @@ find /etc/postfix -type f -exec chmod g-w,o-w {} \;
 ### Accesory files folders
 mkdir -p /var/spool/postfix
 
-# postfix files to make postmap, with full path
-PMFILES="/etc/postfix/rules/blacklist /etc/postfix/aliases/virtual_aliases"
-for f in `echo "$PMFILES" | xargs` ; do
-    postmap $f
-done
-
 ALIASES="/etc/aliases"
 rm -f $ALIASES || exit 0
 echo "# File modified at provision time, #MailAD" > $ALIASES
@@ -143,6 +137,78 @@ echo "spamasassin:       root" >> $ALIASES
 echo "root:     $SYSADMINS" >> $ALIASES
 # apply changes
 /usr/bin/newaliases
+
+# handle abuse and postmaster locally [not mby default]
+VALIASEFILE="/etc/postfix/aliases/virtual_aliases"
+if [ "$POSTMASTER_ABUSE_SETUP" ] ; then
+
+    function get_domains() {
+        # query to get the domains
+        QUERY="SELECT domain FROM domain;"
+
+        # craaft the auth credentials & secure it
+        echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
+        chmod 0600 ~/.pgpass &1>2
+
+        # Run psql command to connect to database and run query
+        psql -h $POSTGRES_HOST -d $POSTGRES_DB -U $POSTGRES_USER -c "$QUERY" -w > /tmp/domains.txt
+
+        # validate
+        R=$?
+        if [ ! $R -eq 0 ] ; then
+            echo "Error, could not connect to database"
+            exit 1
+        fi
+
+        # output format
+        #  domain
+        #----------
+        # sample1.com.jm
+        # exercises.jm
+        #(2 rows)
+
+        cat /tmp/domains.txt | grep -v ' domain' | grep -v '\-\-\-' | grep -v ' row' | tr -d ' ' | xargs
+    }
+
+    # cycle through domains, if any
+    DOMAINS=$(get_domains)
+    if [ "$DOMAINS" ] ; then
+        for DOMAIN in $DOMAINS ; do
+            # create the postmaster
+            echo "Creating postmaster and abuse for domain '$DOMAIN'"
+
+            # postmaster
+            if [ -z "$(grep 'postmaster@$DOMAIN    $MAILADMIN')" ] ; then
+                echo "postmaster@$DOMAIN    $MAILADMIN" >> $VALIASEFILE
+            fi
+            # abuse
+            if [ -z "$(grep 'abuse@$DOMAIN    $MAILADMIN')" ] ; then
+                echo "abuse@$DOMAIN    $MAILADMIN" >> $VALIASEFILE
+            fi
+        done
+
+        # dump the alias file if DEBUG is active
+        if [ "$DEBUG" ] ; then
+            cat $VALIASEFILE
+        fi
+    else
+        echo "No domains found in the database, exiting"
+        exit 1
+    fi
+fi
+
+# postfix files to make postmap, with full path
+# TODO: everyone?
+PMFILES="/etc/postfix/rules/blacklist $VALIASEFILE /etc/postfix/rules/everyone_list_check"
+for f in `echo "$PMFILES" | xargs` ; do
+    # if the file does not exist, create it
+    if [ ! -f $f ] ; then
+        touch $f
+    fi
+
+    # postmapping
+    postmap $f
+done
 
 ### dhparms generation
 if [ ! -f /certs/RSA2048.pem ] ; then
