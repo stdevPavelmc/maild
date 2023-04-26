@@ -71,8 +71,8 @@ function get_domains() {
     # validate
     R=$?
     if [ ! $R -eq 0 ] ; then
-    echo "Error, could not connect to database"
-    exit 1
+        echo "Error, could not connect to database"
+        exit 1
     fi
 
     # output format
