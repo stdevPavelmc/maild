@@ -71,7 +71,7 @@ $final_banned_destiny     = D_DISCARD;
 $final_spam_destiny       = D_PASS;    
 $final_bad_header_destiny = D_PASS;     # False-positive prone (for spam)
 
-$enable_dkim_verification = 0; #disabled to prevent warning
+# $enable_dkim_verification = 0; #disabled to prevent warning
 
 $virus_admin = "postmaster\@$mydomain"; # due to D_DISCARD default
 
