@@ -11,13 +11,13 @@ cp /etc/postfix/master.cf.s ${MASTER}
 
 # optionals
 if [ -z "${RELAY}" ] ; then
-    POSTFIX_RELAY=""
+    RELAY=""
 fi
 if [ -z "${MAX_MESSAGESIZE}" ] ; then
-    POSTFIX_MAX_MESSAGESIZE=2264924
+    MAX_MESSAGESIZE=2264924
 fi
 if [ -z "${ALWAYS_BCC}" ] ; then
-    POSTFIX_ALWAYS_BCC=
+    ALWAYS_BCC=
 fi
 if [ -z "${SPF_ENABLE}" ] ; then
     SPF_ENABLE='no'
@@ -43,6 +43,11 @@ AMAVISIP=`host ${AMAVIS} | awk '/has address/ { print $4 }'`
 echo "AMAVISIP=${AMAVISIP}" >> "${CFILE}"
 OWN_IP=`ifconfig eth0 | grep inet | awk '{print $2}'`
 echo "OWN_IP=${OWN_IP}" >> "${CFILE}"
+# postgresql data
+echo "POSTGRES_HOST=${POSTGRES_HOST}" >> "${CFILE}"
+echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
+echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
+echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
 
 # config dump
 if [ "${DEBUG}" ] ; then
@@ -51,7 +56,7 @@ if [ "${DEBUG}" ] ; then
 fi
 
 # loading configs
-. "${CFILE}"
+export $(cat "${CFILE}" | xargs)
 
 # get the vars from the file
 VARS=`cat "${CFILE}" | cut -d "=" -f 1`
@@ -64,10 +69,12 @@ for v in `echo "${VARS}" | xargs` ; do
     # escape possible "/" in there
     CONT=`echo ${CONTp//\//\\\\/}`
 
-    sed -i s/"\_${v}\_"/"${CONT}"/g ${MAIN}
-    sed -i s/"\_${v}\_"/"${CONT}"/g ${MASTER}
+    # temp config files 
+    sed s/"\_${v}\_"/"${CONT}"/g -i ${MAIN}
+    sed s/"\_${v}\_"/"${CONT}"/g -i ${MASTER}
 
-    #  find "/etc/postfix/ldap" -type f -exec sed s/"\_$v\_"/"${CONT}"/g -i {} \; -print
+    # pgsql files
+    find /etc/postfix/pgsql/ -type f -exec sed s/"\_${v}\_"/"${CONT}"/g -i {} \;
 done
 
 # check for SPF activation
@@ -113,30 +120,15 @@ cat ${MAIN} > /etc/postfix/main.cf
 cat ${MASTER} > /etc/postfix/master.cf
 
 # make postfix happy with premissions
+chown -R root:postfix /etc/postfix
 find /etc/postfix -type d -exec chmod 0750 {} \;
 find /etc/postfix -type f -exec chmod g-w,o-w {} \;
 
-### Accesory files
-
-# everyone list
-if [ "${EVERYONE}" ] ; then
-    echo "EVERYONE list configured at: ${EVERYONE}"
-
-    FILE=/etc/postfix/aliases/everyone_list_check
-    LINE="$EVERYONE         everyone_list"
-
-    ISTHERE=`cat ${FILE} | grep everyone_list`
-    if [ "${ISTHERE}" ] ; then
-        # update
-        sed -i s/"^.*everyone_list.*$"/"${LINE}"/ ${FILE}
-    else
-        # create
-        echo "{$LINE}" >> ${FILE}
-    fi
-fi
+### Accesory files folders
+mkdir -p /var/spool/postfix
 
 # postfix files to make postmap, with full path
-PMFILES="/etc/postfix/rules/lista_negra /etc/postfix/rules/everyone_list_check /etc/postfix/aliases/alias_virtuales"
+PMFILES="/etc/postfix/rules/blacklist /etc/postfix/aliases/virtual_aliases"
 for f in `echo "$PMFILES" | xargs` ; do
     postmap $f
 done
@@ -176,10 +168,6 @@ else
     echo "SSL certs in place, skipping generation"
 fi
 
-### creation of the groups & aliases
-/etc/postfix/scripts/groups.sh
-
-
 if [ "$1" = 'postfix' ]; then
     if [ ! -f /certs/mail.crt -o ! -f /certs/mail.key -o ! -f /certs/RSA2048.pem ] ; then
         echo "Ooops! There is some SSL files missing"
@@ -188,6 +176,7 @@ if [ "$1" = 'postfix' ]; then
     fi
 
     # configure instance (populate etc)
+    postconf compatibility_level=3.6
     /usr/lib/postfix/configure-instance.sh
 
     # check postfix is happy (also will fix some things)

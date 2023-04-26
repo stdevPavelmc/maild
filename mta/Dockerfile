@@ -20,7 +20,6 @@ RUN mkdir /home/vmail && \
     useradd -d /home/vmail -g 5000 -u 5000 vmail
 
 ADD postfix /etc/postfix
-RUN chmod +x /etc/postfix/scripts/*
 
 ADD docker-entrypoint.sh /docker-entrypoint.sh
 RUN chmod +x /docker-entrypoint.sh
@@ -31,7 +30,7 @@ RUN if [ "$DEBUG" ]; then \
     apt-get update && apt-get install -y nano netcat-openbsd ; \
     fi
 
-VOLUME ["/certs", "/home/vmail"]
+VOLUME ["/certs", "/home/vmail", "/var/spool"]
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 

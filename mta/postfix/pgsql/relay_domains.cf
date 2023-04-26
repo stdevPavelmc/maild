@@ -1,0 +1,5 @@
+user = _POSTGRES_USER_
+password = _POSTGRES_PASSWORD_
+hosts = _POSTGRES_HOST_
+dbname = _POSTGRES_DB_
+query = SELECT domain FROM domain WHERE domain='%s' and backupmx = true

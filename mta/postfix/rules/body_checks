@@ -7,5 +7,5 @@
 # analyze it 
 
 # Expresion				Action  No  Reason
-/^.* [P|p]uta .*/		REJECT (#1) No se permiten Mala palabras
+/^.* [W|w]hore .*/		REJECT (#1) no insults please
 
