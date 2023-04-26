@@ -19,16 +19,23 @@ DB_DIR=$(sed -n 's/^DatabaseDirectory\s\(.*\)\s*$/\1/p' /etc/clamav/freshclam.co
 DB_DIR=${DB_DIR:-'/var/lib/clamav'}
 MAIN_FILE="$DB_DIR/main.cvd"
 
-# start of the magic
-freshclam -d &
+if [ -f "$MAIN_FILE" ] ; then
+    # there is a main.cvd file, start it normally
+    clamd --foreground &
+    # now start the updater
+    freshclam -d &
+else
+    # no updates, start the updater and waith to start the daemon
+    freshclam -d &
 
-until [ -e ${MAIN_FILE} ] ; do
-    echo -e "waiting for clam to update..."
-    sleep 3
-done
+    until [ -e ${MAIN_FILE} ] ; do
+        echo -e "waiting for clam to update..."
+        sleep 3
+    done
 
-echo -e "starting clamd..."
-clamd &
+    # now start the daemon
+    clamd --foreground &
+fi
 
 # recognize PIDs
 pidlist=$(jobs -p)
