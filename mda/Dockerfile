@@ -23,9 +23,8 @@ RUN mkdir /home/vmail && \
 
 ADD dovecot/ /etc/dovecot
 
-ADD docker-entrypoint.sh /docker-entrypoint.sh
-ADD configure.sh /configure.sh
-RUN chmod +x /docker-entrypoint.sh && chmod +x /configure.sh
+ADD docker-entrypoint.sh configure.sh check.sh /
+RUN chmod +x /*.sh
 
 # DEBUG tools only on debug build
 ARG DEBUG
@@ -34,6 +33,10 @@ RUN if [ "$DEBUG" ]; then \
     fi
 
 VOLUME ["/certs", "/home/vmail"]
+
+# Set the HEALTHCHECK command
+HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
+    CMD /check.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 

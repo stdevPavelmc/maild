@@ -49,8 +49,10 @@ echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
 echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
 echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
 
+echo $AMAVISIP > /tmp/AMAVISIP
+
 # config dump
-if [ "${DEBUG}" ] ; then
+if [ "${MTA_DEBUG}" ] ; then
     echo "Config file dump:"
     cat ${CFILE}
 fi
@@ -138,7 +140,7 @@ echo "root:     $SYSADMINS" >> $ALIASES
 # apply changes
 /usr/bin/newaliases
 
-# handle abuse and postmaster locally [not mby default]
+# handle abuse and postmaster locally [not by default]
 VALIASEFILE="/etc/postfix/aliases/virtual_aliases"
 if [ "$POSTMASTER_ABUSE_SETUP" ] ; then
 
@@ -248,6 +250,12 @@ if [ "$1" = 'postfix' ]; then
     # check postfix is happy (also will fix some things)
     echo "postfix >> Checking Postfix Configuration"
     postfix -v check
+    if [ $? -ne 0 ] ; then
+        echo "postfix >> Postfix is NOT OK"
+        exit 1
+    else
+        echo "postfix >> Postfix is OK, starting"
+    fi
 
     # start postfix in foreground
     exec /usr/sbin/postfix start-fg

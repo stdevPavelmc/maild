@@ -2,10 +2,26 @@
 set -m
 
 if [ ! -f /etc/clamav/configured ] ; then
+    # debug
+    if [ "${CLAMAV_DEBUG}" ]; then
+        echo "Instance not configured, configuring"
+    fi
+
     # config alternate mirrors
     if [ "${ALTERNATE_MIRROR}" ]; then
         sed -i s/"DatabaseMirror .*$"/""/g /etc/clamav/freshclam.conf
         echo "DatabaseMirror ${ALTERNATE_MIRROR}" >> /etc/clamav/freshclam.conf
+
+        # debug
+        if [ "${CLAMAV_DEBUG}" ]; then
+            echo "Alternate mirror setup done!"
+        fi
+    fi
+
+    # configure verbose
+    if [ "${CLAMAV_DEBUG}" ]; then
+        sed -i s/"^LogVerbose .*$"/"LogVerbose true"/g /etc/clamav/clamd.conf
+        echo "Setting verbose logging as requested"
     fi
 
     touch /etc/clamav/configured
@@ -34,7 +50,7 @@ else
     done
 
     # now start the daemon
-    clamd --foreground &
+    clamd --foreground&
 fi
 
 # recognize PIDs

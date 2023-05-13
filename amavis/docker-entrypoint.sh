@@ -7,9 +7,14 @@ echo "POSTGRES_HOST=${POSTGRES_HOST}" > "${CFILE}"
 echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
 echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
 echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
+CLAMAVIP=`host ${CLAMAV} | awk '/has address/ { print $4 }'`
+echo "CLAMAVIP=${CLAMAVIP}" >> "${CFILE}"
+
+CLAMAVIP=`host ${CLAMAV} | awk '/has address/ { print $4 }'`
+echo $CLAMAVIP > /tmp/CLAMAVIP
 
 # config dump
-if [ "${DEBUG}" ] ; then
+if [ "${AMAVIS_DEBUG}" ] ; then
     echo "Config file dump:"
     cat ${CFILE}
 fi
@@ -36,24 +41,40 @@ if [ -z "${AMAVIS_MTA}" ]; then
     exit 1;
 fi
 
-SPAM=NO
 # spamassasin enabled
-if [ -z "${SPAMASSASSIN_DISABLED}" ] ; then
+if [ "${SPAM_FILTER_ENABLED}" ] ; then
+    echo "Enabling SpamAssassin"
+
     # enable it
-    echo '@bypass_spam_checks_maps = ( \%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re); ' >> /etc/amavis/conf.d/15-content_filter_mode
-    SPAM=YES
-    echo "SpamAssassin Enabled by default!!!"
+    sed s/"^\.*\@bypass_virus_checks_maps.*$"/'@bypass_spam_checks_maps = ( \%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re); '/ -i /etc/amavis/conf.d/15-content_filter_mode
+
+    # spamassasing logging
+    if [ "${AMAVIS_DEBUG}" ] ; then
+        sed s/"^\$sa_debug.*"/'$sa_debug = 1;'/ -i /etc/amavis/conf.d/45-logging
+    fi
 else
-    echo "SpamAssassin Disabled on request!!!"
+    echo "Disabling SpamAssassin"
+
+    # disable it
+    sed s/"^.*bypass_virus_checks_maps.*$"/'# @bypass_spam_checks_maps = ( \%bypass_spam_checks, \@bypass_spam_checks_acl, \$bypass_spam_checks_re); '/ -i /etc/amavis/conf.d/15-content_filter_mode
+
+    # spamassasing logging
+    if [ ! "${AMAVIS_DEBUG}" ] ; then
+        sed s/"^\$sa_debug.*"/'$sa_debug = 0;'/ -i /etc/amavis/conf.d/45-logging
+    fi
 fi
 
 # AV enabled
-if [ -z "${AV_DISABLED}" ] ; then
-    # enable av
-    echo '@bypass_virus_checks_maps = ( \%bypass_virus_checks, \@bypass_virus_checks_acl, \$bypass_virus_checks_re);' >> /etc/amavis/conf.d/15-content_filter_mode
-    echo "AV Enabled by default!!!"
+if [ "${AV_ENABLED}" ] ; then
+    echo "Enabling AV"
+
+    # enable
+    sed s/"^.*\@bypass_virus_checks_maps.*$"/'@bypass_virus_checks_maps = ( \%bypass_virus_checks, \@bypass_virus_checks_acl, \$bypass_virus_checks_re);'/ -i /etc/amavis/conf.d/15-content_filter_mode
 else
-    echo "AV Disabled on request!!!"
+    echo "Disabling AV"
+
+    # disable it
+    sed s/"^.*\@bypass_virus_checks_maps.*$"/'# @bypass_virus_checks_maps = ( \%bypass_virus_checks, \@bypass_virus_checks_acl, \$bypass_virus_checks_re);'/ -i /etc/amavis/conf.d/15-content_filter_mode
 fi
 
 # dkim functionality
@@ -96,13 +117,11 @@ if [ "${DKIM_SIGNING}" ] ; then
     # get the list of domains
     DKIM_DOMAINS=$(get_domains)
     FILESIGN=/etc/amavis/conf.d/22-dkim_signing
-    # FILESELECTORS=/etc/amavis/conf.d/23-dkim_selectors
-    
+
     # debug dkim_domians if debugging
-    if [ "${DEBUG}" ] ; then
+    if [ "${AMAVIS_DEBUG}" ] ; then
         echo "DKIM_DOMAINS: ${DKIM_DOMAINS}"
         echo "FILESIGN: ${FILESIGN}"
-        # echo "FILESELECTORS: ${FILESELECTORS}"
     fi
 
     # setup only if there are domains to process
@@ -143,24 +162,6 @@ if [ "${DKIM_SIGNING}" ] ; then
         # close that file
         echo '1;' >> ${FILESIGN}
 
-        # # create a file with the selectors
-        # echo "@dkim_signature_options_bysender_maps( {" > ${FILESELECTORS}
-        # for DOMAIN in ${DKIM_DOMAINS} ; do
-        #     KEY=/var/lib/amavis/dkim/${DOMAIN}.pem
-        #     SELECTOR=$(grep ${DOMAIN} ${DKIM_LIST} | head -n1 | cut -d ' ' -f 2)
-        #     echo "    '.${DOMAIN}' => { ttl => 30*24*3600, c => 'relaxed/simple', a => 'rsa-sha256', d => '${DOMAIN}', s => '${SELECTOR}', key => '${KEY}' }," >> ${FILESELECTORS}
-        # done
-        # echo "} );" >> ${FILESELECTORS}
-
-        # # close that file
-        # echo '1;' >> ${FILESELECTORS}
-
-        # # debug dkim_domians if debugging
-        # if [ "${DEBUG}" ] ; then
-        #     echo "Dump of the bymail config:"
-        #     cat "${FILESELECTORS}"
-        # fi
-
         # update the user files
         for DOMAIN in ${DKIM_DOMAINS} ; do
             KEY=/var/lib/amavis/dkim/${DOMAIN}.pem
@@ -180,16 +181,46 @@ fi
 # ensure a defined end oin the file
 echo '1;' >> /etc/amavis/conf.d/15-content_filter_mode
 
-# starting amavis
-echo "Starting amavis"
+# Logging
+if [ "${AMAVIS_DEBUG}" ] ; then
+    echo "Enabling amavis logging"
+
+    # amavis logging
+    sed s/"^\$debug_amavis.*"/'$debug_amavis = 1;'/ -i /etc/amavis/conf.d/45-logging
+    sed s/"^\$log_level.*"/'$log_level = 3;'/ -i /etc/amavis/conf.d/45-logging
+else
+    echo "Disabling amavis logging"
+
+    # amavis logging
+    sed s/"^\$debug_amavis.*"/'$debug_amavis = 1;'/ -i /etc/amavis/conf.d/45-logging
+    sed s/"^\$log_level.*"/'$log_level = 1;'/ -i /etc/amavis/conf.d/45-logging
+fi
+
+# testing amavis config
+echo "Testing amavis"
 rm /var/run/amavis/amavisd.pid 2> /dev/null
-/usr/sbin/amavisd-new -u amavis -g amavis -i docker foreground
+/usr/sbin/amavisd-new test-config
 
 # results
 R=$?
 if [ ! $R -eq 0 ] ; then
-    echo "Error, could not start amavis, dkim?"
-    cat /etc/amavis/conf.d/*dkim*
+    echo "Amavis config testing failed"
+    exit 1
+fi
+
+# test amavis config
+rm /var/run/amavis/amavisd.pid 2> /dev/null
+/usr/sbin/amavisd-new -i docker test-config
+if [ $? -ne 0 ] ; then
+    echo "Amavis config testing failed"
+    exit 1
+fi
+
+# starting amavis
+echo "Starting amavis"
+/usr/sbin/amavisd-new -u amavis -g amavis -i docker foreground
+if [ $? -ne 0 ] ; then
+    echo "Error, could not start amavis !!!"
     exit 1
 fi
 

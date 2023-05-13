@@ -10,6 +10,7 @@ RUN apt-get update && \
         postfix-pcre \
         postfix-pgsql \
         net-tools \
+        netcat \
         postgresql-client \
         bind9-host && \
     apt-get clean && \
@@ -22,14 +23,18 @@ RUN mkdir /home/vmail && \
 
 ADD postfix /etc/postfix
 
-ADD docker-entrypoint.sh /docker-entrypoint.sh
-RUN chmod +x /docker-entrypoint.sh
+ADD docker-entrypoint.sh check.sh /
+RUN chmod +x /*.sh
 
 # DEBUG tools only on debug build
 ARG DEBUG
 RUN if [ "$DEBUG" ]; then \
     apt-get update && apt-get install -y nano netcat-openbsd ; \
     fi
+
+# Set the HEALTHCHECK command
+HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
+    CMD /check.sh
 
 VOLUME ["/certs", "/home/vmail", "/var/spool"]
 

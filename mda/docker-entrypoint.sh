@@ -20,7 +20,7 @@ if [ ! -f /etc/dovecot/configured ]; then
     echo "POSTGRES_HOST=${POSTGRES_HOST}" >> "${CFILE}"
 
     # config dump
-    if [ "${DEBUG}" ] ; then
+    if [ "${MDA_DEBUG_INIT}" ] ; then
         echo "Config file dump:"
         cat ${CFILE}
     fi
@@ -58,12 +58,40 @@ if [ ! -f /etc/dovecot/configured ]; then
         echo "DHparam already present, skiping generation!"
     fi
 
+    # debug
+    if [ "${MDA_DEBUG_AUTH}" ]; then
+        # set auth_verbose & auth_debug to yes
+        sed -i s/"^auth_verbose .*$"/"auth_verbose = yes"/g /etc/dovecot/conf.d/10-logging.conf
+        sed -i s/"^auth_debug .*$"/"auth_debug = yes"/g /etc/dovecot/conf.d/10-logging.conf
+
+        echo "Auth verbose logging set to yes"
+    fi
+    if [ "${MTA_DEBUG_AUTH_PASSWORD}" ]; then
+        # set auth_verbose_passwords & auth_debug_passwords to yes
+        sed -i s/"^auth_verbose_passwords .*$"/"auth_verbose_passwords = yes"/g /etc/dovecot/conf.d/10-logging.conf
+        sed -i s/"^auth_debug_passwords .*$"/"auth_debug_passwords = yes"/g /etc/dovecot/conf.d/10-logging.conf
+
+        echo "Auth passwords verbose logging set to yes"
+    fi
+    if [ "${MTA_DEBUG_MAIL}" ]; then
+        # set mail_debug to yes
+        sed -i s/"^mail_debug .*$"/"mail_debug = yes"/g /etc/dovecot/conf.d/10-logging.conf
+
+        echo "Mail verbose logging set to yes"
+    fi
+    if [ "${MTA_DEBUG_SSL}" ]; then
+        # set verbose_ssl to yes
+        sed -i s/"^verbose_ssl .*$"/"verbose_ssl = yes"/g /etc/dovecot/conf.d/10-logging.conf
+
+        echo "SSL verbose logging set to yes"
+    fi
+
     # create the flag file
     touch /etc/dovecot/configured
     echo "Flag created: container ready!"
 
     # debug, remove the config file at the end or not if debugging
-    if [ -z "${DEBUG}" ] ; then
+    if [ -z "${MDA_DEBUG_INIT}" ] ; then
         rm ${CFILE}
     fi
 fi

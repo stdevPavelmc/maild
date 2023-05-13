@@ -12,7 +12,8 @@ RUN apt-get update && \
         cabextract \
         spamassassin \
         gpg \
-        netcat-openbsd \
+        netcat \
+        bind9-host \
         postgresql-client && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -35,5 +36,9 @@ VOLUME ["/var/lib/amavis", "/var/lib/spamassassin"]
 EXPOSE 10024
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
+
+# Set the HEALTHCHECK command
+HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
+    CMD /check.sh
 
 CMD ["amavis"]

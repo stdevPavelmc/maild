@@ -1,0 +1,23 @@
+# amavis debug
+$debug_amavis = 0;
+
+# 0: No logging
+# 1: Critical errors only
+# 2: Errors and warnings
+# 3: Informational messages
+# 4: Debugging messages
+# 5: Trace messages
+$log_level = 1;
+
+# spamassassinlog devel, only enabled if spamassasing & debug
+$sa_debug = 0;
+
+# log messages to stdout by default
+$log_templ = undef;
+
+$log_recip_templ = undef;
+$DO_SYSLOG = 0;
+$syslog_ident = undef;
+$syslog_facility = undef;
+
+1;

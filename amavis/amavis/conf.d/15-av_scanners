@@ -17,7 +17,7 @@ use strict;
 
 ### http://www.clamav.net/
  ['ClamAV-clamd',
-   \&ask_daemon, ["CONTSCAN {}\n", "clamav:3310"],
+   \&ask_daemon, ["CONTSCAN {}\n", "_CLAMAVIP_:3310"],
    qr/\bOK$/m, qr/\bFOUND$/m,
    qr/^.*?: (?!Infected Archive)(.*) FOUND$/m ],
 # NOTE: run clamd under the same user as amavisd, or run it under its own

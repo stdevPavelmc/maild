@@ -9,33 +9,36 @@ RUN apt-get update && \
         clamav-daemon \
         clamav-freshclam \
         libclamunrar9 \
+        netcat \
         ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # permission juggling
-RUN mkdir /var/run/clamav && \
+RUN mkdir -p /var/run/clamav && \
     chown clamav:clamav /var/run/clamav /var/lib/clamav && \
     chmod 750 /var/run/clamav /var/lib/clamav
 
 COPY clamav/ /etc/clamav/
-COPY docker-entrypoint.sh /
-COPY check.sh /
+COPY docker-entrypoint.sh check.sh /
 
-RUN chown -R clamav:clamav /etc/clamav /docker-entrypoint.sh /check.sh
-RUN chmod +x /docker-entrypoint.sh /check.sh
+RUN chown -R clamav:clamav /etc/clamav
+RUN chmod +x /*.sh 
 
-# DEBUG tools only on debug build
-ARG DEBUG
-RUN if [ "$DEBUG" ]; then \
-    apt-get update && apt-get install -y nano ; \
-    fi
+# addd amavis compatibility
+RUN groupadd -g 114 amavis && \
+    useradd -r -u 114 -g amavis -d /var/lib/amavis -s /usr/sbin/nologin amavis && \
+    usermod -a -G clamav amavis
 
 VOLUME ["/var/lib/clamav"]
+VOLUME ["/var/lib/amavis"]
 
 EXPOSE 3310
 
 USER clamav
 
+# Set the HEALTHCHECK command
+HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
+    CMD /check.sh
+
 CMD ["/docker-entrypoint.sh"]
-HEALTHCHECK CMD ["/check.sh"]

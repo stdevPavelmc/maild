@@ -73,9 +73,6 @@ services:
       - maild
 
   mta:
-    # TODO: Healthcheck:
-    #  - check if $AMAVISIP still has the same IP, if not reboot
-    #  - check if 
     image: mailad/mta
     build: ./mta/
     container_name: maild-mta
@@ -83,6 +80,7 @@ services:
     hostname: mta
     environment:
       MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      DEBUG: 'true'
     env_file:
       - vars/mta.env
       - vars/ssl.env
@@ -98,7 +96,10 @@ services:
       - certs:/certs
       - spool:/var/spool/
     depends_on:
+      - db
       - mda
+      - amavis
+      - clamav
     networks:
       - maild
 
@@ -108,17 +109,18 @@ services:
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-clamav
     hostname: clamav
-    healthcheck:
-      test: [ "CMD", "./check.sh" ]
-      interval: 60s
-      retries: 3
-      start_period: 120s
+    # healthcheck:  # buiilt in the image
+    #   test: [ "CMD", "./check.sh" ]
+    #   interval: 60s
+    #   retries: 3
+    #   start_period: 120s
     env_file:
       - vars/clamav.env
     # ports:
     #   - "3310"
     volumes:
       - clamav:/var/lib/clamav
+      - amavis:/var/lib/amavis
     networks:
       - maild
 
@@ -128,11 +130,11 @@ services:
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-amavis
     hostname: amavis
-    healthcheck:
-        test: ["CMD", "/check.sh"]
-        interval: 60s
-        retries: 3
-        start_period: 120s
+    # healthcheck: # buiilt in the image
+    #     test: ["CMD", "/check.sh"]
+    #     interval: 60s
+    #     retries: 3
+    #     start_period: 120s
     env_file:
       - vars/amavis.env
       - vars/db.env

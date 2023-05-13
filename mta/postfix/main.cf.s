@@ -187,8 +187,8 @@ always_bcc = _ALWAYSBCC_
 receive_override_options = no_address_mappings
 
 # Debug verbosity for an ip...
-debug_peer_list = 172.17.0.1
-debug_peer_level = 16
+# debug_peer_list = 172.17.0.1
+# debug_peer_level = 16
 
 # virtual domains linking
 virtual_mailbox_domains = proxy:pgsql:/etc/postfix/pgsql/virtual_domains_maps.cf
