@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # This script is part of MailD
-# Copyright 2020-2023 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
 #
 # Goals:
 #   - Create a resume of yesterday mail services
