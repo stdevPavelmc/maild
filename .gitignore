@@ -1,3 +1,5 @@
 ldata/*
 *.log
 .env
+test.sh
+snappymail-2.36*
