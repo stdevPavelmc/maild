@@ -4,6 +4,8 @@ LABEL maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin)"
 LABEL modified="Pavel Milanes <pavelmc@gmail.com>"
 LABEL modified_reason="To read the database values from a common postgres variables"
 
+#repodebian
+
 # docker-entrypoint.sh dependencies
 RUN set -eux; \
     apt-get update; \

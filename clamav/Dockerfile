@@ -2,6 +2,8 @@ FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 
+#repoubuntu
+
 ENV REFRESHED_AT=2023-04-23
 ENV DEBIAN_FRONTEND=noninteractive
 

@@ -18,6 +18,10 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2024-07-13 1.0.0-rc1
+
+- Added: setrepos.sh script to allow to use local/net OS repos in dev mode
+
 ## 2024-07-13 1.0.0-rc
 
 - To many to list, preps to release v1.0.0

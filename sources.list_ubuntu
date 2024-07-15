@@ -1,0 +1,9 @@
+# if you publish the repos on localhost and your are using docker then
+# by default on debian/ubuntu the ip 172.17.0.1 is "localhost" from the
+# docker containers
+#
+# if on the net, adjust it as needed. 
+
+deb [trusted=yes] http://172.17.0.1:8081/ubuntu/ jammy main universe multiverse restricted
+deb [trusted=yes] http://172.17.0.1:8081/ubuntu/ jammy-updates main universe multiverse restricted
+deb [trusted=yes] http://172.17.0.1:8081/ubuntu/ jammy-security universe multiverse restricted

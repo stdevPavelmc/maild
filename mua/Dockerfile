@@ -2,6 +2,8 @@ FROM php:8.3-apache
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 
+#repodebian
+
 # old 2.27.3 (You must update the domain.json template!!!)
 #ARG SNAPPY_VERSION=2.35.3
 ARG SNAPPY_VERSION=2.36.4

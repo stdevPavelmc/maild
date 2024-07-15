@@ -83,6 +83,18 @@ you@yourpc:~/$ docker compose up
 you@yourpc:~/$ docker compose up -d
 ```
 
+### You are set, but what about local repos?
+
+If you like to use local repos to speed up things you need:
+
+1. A local OS repos to pull packages for the install, for:
+  - Ubuntu Jammy/22.04 LTS
+  - Debian Bookworm/12
+2. Modify the following files to match your repo's URLs and details:
+  - sources.list_debian
+  - sources.list_ubuntu
+3. Run the `setrepos.h` script with no parameter to setup the local repos, and with any parameter to remove them.
+
 That's it.
 
 ## Bonus tracks: Gitlab & traefik

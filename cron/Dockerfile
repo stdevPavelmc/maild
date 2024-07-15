@@ -2,6 +2,8 @@ FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 
+#repoubuntu
+
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \

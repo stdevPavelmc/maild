@@ -2,6 +2,8 @@ FROM postgres:16-bookworm
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 
+#repodebian
+
 COPY multiple_db.sh /docker-entrypoint-initdb.d/
 RUN chmod +x docker-entrypoint-initdb.d/multiple_db.sh
 
