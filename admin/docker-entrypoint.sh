@@ -1,6 +1,9 @@
 #!/bin/bash
 set -eo pipefail
 
+# This script is part of MailD
+# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+
 # usage: get_env_value VAR [DEFAULT]
 #    ie: get_env_value 'XYZ_DB_PASSWORD' 'example'
 # (will allow for "$XYZ_DB_PASSWORD_FILE" to fill in the value of

@@ -1,6 +1,9 @@
 #!/bin/bash
 set -m -o pipefail
 
+# This script is part of MailD
+# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+
 # copy or overwrite the config files from the default ones
 cd /etc/amavis
 rm -rdf conf.d

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# This script is part of MailD
+# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+
 set -e
 set -u
 

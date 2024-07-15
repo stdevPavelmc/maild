@@ -1,7 +1,9 @@
 #!/bin/bash
 set -m -o pipefail
 
-# Author: Pavel Milane <pavelmc@gmail.com>
+# This script is part of MailD
+# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+#
 # Goal: Configure an instance of snappy mail from the default config file.
 # But with one trick, We must start the apache service first
 
