@@ -1,8 +1,9 @@
 FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2023-04-23
-ENV DEBIAN_FRONTEND noninteractive
+
+ENV REFRESHED_AT=2023-04-23
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
@@ -42,3 +43,4 @@ HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
     CMD /check.sh
 
 CMD ["/docker-entrypoint.sh"]
+

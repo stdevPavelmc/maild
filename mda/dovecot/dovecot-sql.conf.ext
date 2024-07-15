@@ -112,7 +112,11 @@ default_pass_scheme = MD5-CRYPT
 #  SELECT username, domain, password \
 #  FROM users WHERE username = '%n' AND domain = '%d'
 #
-password_query = SELECT password FROM mailbox WHERE username = '%u' AND active = '1'
+# defaault
+#password_query = SELECT password FROM mailbox WHERE username = '%u' AND active = '1'
+#
+# posfix admin
+password_query = SELECT username AS user,password FROM mailbox WHERE username = '%u' AND active='1'
 
 # userdb query to retrieve the user information. It can return fields:
 #   uid - System UID (overrides mail_uid setting)
@@ -134,7 +138,11 @@ password_query = SELECT password FROM mailbox WHERE username = '%u' AND active =
 #  SELECT home, uid, gid \
 #  FROM users WHERE username = '%n' AND domain = '%d'
 #
-user_query = SELECT CONCAT('/home/vmail/', maildir) AS home, 5000 AS uid, 5000 AS gid FROM mailbox WHERE username = '%u' AND active = '1'
+# Default one
+#user_query = SELECT CONCAT('/home/vmail/', maildir) AS home, 5000 AS uid, 5000 AS gid FROM mailbox WHERE username = '%u' AND active = '1'
+#
+# Postfix admin
+user_query = SELECT CONCAT('/home/vmail/', maildir) AS home, 5000 AS uid, 5000 AS gid, CONCAT('*:bytes=', quota) AS quota_rule FROM mailbox WHERE username = '%u' AND active='1'
 
 # If you wish to avoid two SQL lookups (passdb + userdb), you can use
 # userdb prefetch instead of userdb sql in dovecot.conf. In that case you'll
@@ -146,4 +154,8 @@ user_query = SELECT CONCAT('/home/vmail/', maildir) AS home, 5000 AS uid, 5000 A
 #  FROM users WHERE userid = '%u'
 
 # Query to get a list of all usernames.
+# Default
 #iterate_query = SELECT username AS user FROM users
+#
+# Posfix admin
+iterate_query = SELECT username as user FROM mailbox WHERE active = '1'

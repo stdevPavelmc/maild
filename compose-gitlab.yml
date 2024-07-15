@@ -1,6 +1,7 @@
 networks:
   maild:
-    # external: true
+    # You nedd to create it by hand on the target docker host
+    external: true
 
 volumes:
   vmail: # mail storage
@@ -13,7 +14,7 @@ volumes:
 
 services:
   db:
-    image: db:latest
+    image: ${IMG_DB}:${TAG}
     build: ./db/
     container_name: maild-db
     hostname: db
@@ -28,7 +29,7 @@ services:
       - maild
 
   admin:
-    image: admin:latest
+    image: ${IMG_ADMIN}:${TAG}
     build: ./admin/
     container_name: maild-admin
     hostname: admin
@@ -49,15 +50,26 @@ services:
       driver: syslog
       options:
         syslog-address: "unixgram:///dev/log"
+    labels:
+      # main traefik data
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailadmin.rule=Host(`mailadmin.maild.cu`)"
+      - "traefik.http.routers.mailadmin.entrypoints=websecure"
+
+      # custom service (non default port)
+      - "traefik.http.routers.mailadmin.service=mailadmin_custom_port"
+      - "traefik.http.services.mailadmin_custom_port.loadbalancer.server.port=80"
+      # auth and access control, you need to create the chain before activate this middleware
+      #- "traefik.http.routers.mailadmin.middlewares=chain-no-auth-public@file"
 
   mua:
-    image: mua:latest
+    image: ${IMG_MUA}:${TAG}
     build: ./mua/
     container_name: maild-mua
     hostname: mua
     restart: always
-    ports:
-      - "80:80"
+    # ports:
+    #   - "80:80"
     env_file:
       - vars/db.env
       - vars/mua.env
@@ -70,9 +82,19 @@ services:
       driver: syslog
       options:
         syslog-address: "unixgram:///dev/log"
+    labels:
+      # main traefik data
+      - "traefik.enable=true"
+      - "traefik.http.routers.webmail.rule=Host(`webmails.chagod.software`)"
+      - "traefik.http.routers.webmail.entrypoints=websecure"
+      # custom service (non default port)
+      - "traefik.http.routers.webmail.service=webmail_custom_port"
+      - "traefik.http.services.webmail_custom_port.loadbalancer.server.port=80"
+      #  auth and access control
+      - "traefik.http.routers.webmail.middlewares=chain-no-auth@file"
 
   mda:
-    image: mda:latest
+    image: ${IMG_MDA}:${TAG}
     build: ./mda/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-mda
@@ -94,7 +116,7 @@ services:
       - db
     volumes:
       - vmail:/home/vmail
-      - /etc/letsencrypt:/certs
+      - /certs:/certs
       - spool:/var/spool/
     networks:
       - maild
@@ -104,7 +126,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mta:
-    image: mta:latest
+    image: ${IMG_MTA}:${TAG}
     build: ./mta/
     container_name: maild-mta
     domainname: ${DEFAULT_DOMAIN}
@@ -112,6 +134,7 @@ services:
     restart: always
     environment:
       MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      DEBUG: 'true'
     env_file:
       - vars/mta.env
       - vars/ssl.env
@@ -123,7 +146,7 @@ services:
       - "587:587"
     volumes:
       - vmail:/home/vmail
-      - /etc/letsencrypt:/certs
+      - /certs:/certs
       - spool:/var/spool/
     depends_on:
       - db
@@ -138,7 +161,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   clamav:
-    image: clamav:latest
+    image: ${IMG_CLAMAV}:${TAG}
     build: ./clamav/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-clamav
@@ -164,7 +187,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   amavis:
-    image: amavis:latest
+    image: ${IMG_AMAVIS}:${TAG}
     build: ./amavis/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-amavis
@@ -195,7 +218,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   cron:
-    image: cron:latest
+    image: ${IMG_CRON}:${TAG}
     build: ./cron/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-cron

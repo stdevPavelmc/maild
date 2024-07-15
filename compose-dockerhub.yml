@@ -13,7 +13,7 @@ volumes:
 
 services:
   db:
-    image: db:latest
+    image: pavelmc/maild-pg:latest
     build: ./db/
     container_name: maild-db
     hostname: db
@@ -28,13 +28,13 @@ services:
       - maild
 
   admin:
-    image: admin:latest
+    image: pavelmc/maild-admin:latest
     build: ./admin/
     container_name: maild-admin
     hostname: admin
     restart: always
-    # ports:
-    #   - "8080:80"
+    ports:
+      - "8080:80"
     environment:
       POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
@@ -51,13 +51,13 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mua:
-    image: mua:latest
+    image: pavelmc/maild-mua:latest
     build: ./mua/
     container_name: maild-mua
     hostname: mua
     restart: always
-    ports:
-      - "80:80"
+    # ports:
+    #   - "8060:80"
     env_file:
       - vars/db.env
       - vars/mua.env
@@ -72,7 +72,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mda:
-    image: mda:latest
+    image: pavelmc/maild-mda:latest
     build: ./mda/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-mda
@@ -94,7 +94,7 @@ services:
       - db
     volumes:
       - vmail:/home/vmail
-      - /etc/letsencrypt:/certs
+      - /certs:/certs
       - spool:/var/spool/
     networks:
       - maild
@@ -104,7 +104,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mta:
-    image: mta:latest
+    image: pavelmc/maild-mta:latest
     build: ./mta/
     container_name: maild-mta
     domainname: ${DEFAULT_DOMAIN}
@@ -112,6 +112,7 @@ services:
     restart: always
     environment:
       MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      DEBUG: 'true'
     env_file:
       - vars/mta.env
       - vars/ssl.env
@@ -123,7 +124,7 @@ services:
       - "587:587"
     volumes:
       - vmail:/home/vmail
-      - /etc/letsencrypt:/certs
+      - /certs:/certs
       - spool:/var/spool/
     depends_on:
       - db
@@ -138,7 +139,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   clamav:
-    image: clamav:latest
+    image: pavelmc/maild-clamav:latest
     build: ./clamav/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-clamav
@@ -164,7 +165,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   amavis:
-    image: amavis:latest
+    image: pavelmc/maild-amavis:latest
     build: ./amavis/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-amavis
@@ -195,7 +196,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   cron:
-    image: cron:latest
+    image: pavelmc/maild-cron:latest
     build: ./cron/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-cron

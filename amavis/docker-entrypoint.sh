@@ -1,5 +1,10 @@
 #!/bin/bash
-set -m
+set -m -o pipefail
+
+# copy or overwrite the config files from the default ones
+cd /etc/amavis
+rm -rdf conf.d
+cp -rfv conf.default conf.d
 
 # postgresql data
 CFILE=/tmp/config.local
@@ -7,11 +12,35 @@ echo "POSTGRES_HOST=${POSTGRES_HOST}" > "${CFILE}"
 echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
 echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
 echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
+echo "MTA=${MTA}" >> "${CFILE}"
+MTAIP=`host ${MTA} | awk '/has address/ { print $4 }'`
+echo "MTAIP=${MTAIP}" >> "${CFILE}"
 CLAMAVIP=`host ${CLAMAV} | awk '/has address/ { print $4 }'`
 echo "CLAMAVIP=${CLAMAVIP}" >> "${CFILE}"
+CRONIP=`host ${CRON} | awk '/has address/ { print $4 }'`
+echo "CRONIP=${CRONIP}" >> "${CFILE}"
 
-CLAMAVIP=`host ${CLAMAV} | awk '/has address/ { print $4 }'`
+# check if  any of the IPs are empty
+if [ -z "${CLAMAVIP}" ] ; then
+    echo "====== !!!!!!!!!!!!!!!!!! ======="
+    echo "CLAMAV IP is empty"
+    exit 1
+fi
+if [ -z "${MTAIP}" ] ; then
+    echo "====== !!!!!!!!!!!!!!!!!! ======="
+    echo "MTA IP is empty"
+    exit 1
+fi
+if [ -z "${CRONIP}" ] ; then
+    echo "====== !!!!!!!!!!!!!!!!!! ======="
+    echo "CRON IP is empty"
+    exit 1
+fi
+
+# IP data for the checks
 echo $CLAMAVIP > /tmp/CLAMAVIP
+echo $MTAIP > /tmp/MTAIP
+echo $CRONIP > /tmp/CRONIP
 
 # config dump
 if [ "${AMAVIS_DEBUG}" ] ; then
@@ -31,15 +60,8 @@ for v in `echo "${VARS}" | xargs` ; do
     CONT=`echo ${CONTp//\//\\\\/}`
 
     # replace the var
-    find /etc/amavis/ -type f -exec sed -i s/"\_${v}\_"/"${CONT}"/g {} \;
+    find /etc/amavis/conf.d/ -type f -exec sed -i s/"\_${v}\_"/"${CONT}"/g {} \;
 done
-
-# check for the MTA configuration
-if [ -z "${AMAVIS_MTA}" ]; then
-    echo "Error, you must specify a MTA to forward mail to in the 'AMAVIS_MTA' var"
-    echo "Example: AMAVIS_MTA=mta on the vars/amavis.env"
-    exit 1;
-fi
 
 # spamassasin enabled
 if [ "${SPAM_FILTER_ENABLED}" ] ; then
@@ -77,7 +99,7 @@ else
     sed s/"^.*\@bypass_virus_checks_maps.*$"/'# @bypass_virus_checks_maps = ( \%bypass_virus_checks, \@bypass_virus_checks_acl, \$bypass_virus_checks_re);'/ -i /etc/amavis/conf.d/15-content_filter_mode
 fi
 
-# dkim functionality
+# for the dkim functionality
 function get_domains() {
     # query to get the domains
     QUERY="SELECT domain FROM domain;"
@@ -96,14 +118,28 @@ function get_domains() {
         exit 1
     fi
 
+    # debug
+    if [ "${AMAVIS_DEBUG}" ] ; then
+        echo "DB query result dump:" >&2
+        cat /tmp/domains.txt >&2
+    fi
+
     # output format
     #  domain  
     #----------
+    # ALL
     # sample1.com.jm
     # exercises.jm
     #(2 rows)
 
-    cat /tmp/domains.txt | grep -v ' domain' | grep -v '\-\-\-' | grep -v ' row' | tr -d ' ' | xargs
+    # match any domain like string on the results
+    cat /tmp/domains.txt | grep -E '\b[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b' | tr -d ' ' | xargs
+}
+
+# for the dkim functionality
+function get_numbers() {
+    # just output a random string composed of numbers of 20 chars length
+    cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 20 | head -n 1
 }
 
 # dkim folder
@@ -147,7 +183,7 @@ if [ "${DKIM_SIGNING}" ] ; then
             SELECTOR=$(grep ${DOMAIN} ${DKIM_LIST} | head -n1 | cut -d ' ' -f 2)
             if [ -z "$SELECTOR" ] ; then
                 # no selector found, create one and set it on file
-                SELECTOR=$(openssl rand -base64 18)
+                SELECTOR=$(get_numbers)
                 echo "${DOMAIN} ${SELECTOR}" >> ${DKIM_LIST}
             fi
 
@@ -178,8 +214,12 @@ else
     echo "DKIM signing disabled by default!!!"
 fi
 
-# ensure a defined end oin the file
-echo '1;' >> /etc/amavis/conf.d/15-content_filter_mode
+# ensure a defined end oin the file if not there
+F=$(tail -n1 /etc/amavis/conf.d/15-content_filter_mode)
+if [ "$F" != '1;' ] ; then
+    # add defined 1;
+    echo '1;' >> /etc/amavis/conf.d/15-content_filter_mode
+fi
 
 # Logging
 if [ "${AMAVIS_DEBUG}" ] ; then
@@ -195,6 +235,11 @@ else
     sed s/"^\$debug_amavis.*"/'$debug_amavis = 1;'/ -i /etc/amavis/conf.d/45-logging
     sed s/"^\$log_level.*"/'$log_level = 1;'/ -i /etc/amavis/conf.d/45-logging
 fi
+
+# setup correct perms
+chown -R root:root /etc/amavis/conf.d
+find /etc/amavis/ -type f -exec chmod 0644 {} \;
+find /etc/amavis/ -type d -exec chmod 0755 {} \;
 
 # testing amavis config
 echo "Testing amavis"

@@ -15,17 +15,9 @@ This is a note for developers about the recommended tags to keep track of the ch
 - Fixed: for any bug fixes.
 - Security: in case of vulnerabilities.
 
-Dates must be YEAR-MONTH-DAY
+Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2020-02-10
+## 2024-07-13 1.0.0-rc
 
-- Added: clamav folder and integration in prevision of amavis image
-
-## 2020-02-07
-
-- Changed: Completed the first version of the documentation.
-
-## 2022-02-06 v0.0.1
-
-- Added: Repository opened to public
+- To many to list, preps to release v1.0.0

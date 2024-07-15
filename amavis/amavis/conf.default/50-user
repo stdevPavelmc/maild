@@ -8,14 +8,15 @@ use strict;
 # the directives you can use in this file
 #
 
-$notify_method  = "smtp:*:10025";
-$forward_method  = "smtp:*:10025";
+$notify_method  = 'smtp:_MTA_:10025';
+$forward_method  = $notify_method;
 
 # apply policy bank MTA
 $interface_policy{'10024'} = 'MTA';
 
 $policy_bank{'MTA'} = {
-  inet_acl => [qw( 127.0.0.1 [::1] 0.0.0.0/0 )],  # restrict access to these IP addresses
+  #inet_acl => [qw( 127.0.0.1 [::1] _MTAIP_ _CRONIP_ )],  # restrict access to these IP addresses
+  inet_acl => ['0.0.0.0/0', '::/0'],
   originating => 1,
   # auth_required_release => 0,  # don't require secret_id for amavisd-release
 };

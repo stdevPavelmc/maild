@@ -8,4 +8,7 @@
 
 # Expresion				Action  No  Reason
 /^.* [W|w]hore .*/		REJECT (#1) no insults please
-
+/^.*I am a hаckеr who has аccess to your.*/ REJECT (#2) Seriuosly? Blackmailing in 202x?
+/^.*Transfer .* to my bitcoin wallet.*/     REJECT (#2) Seriuosly? Blackmailing in 202x?
+/^.*my perverted friend.*/                  REJECT (#2) Seriuosly? Blackmailing in 202x?
+/^.*videos of you jerking off.*/            REJECT (#2) Seriuosly? Blackmailing in 202x?

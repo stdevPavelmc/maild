@@ -25,7 +25,7 @@ myorigin = $myhostname
 relayhost = _RELAY_
 
 # safe nets, local and amavis only
-mynetworks = 127.0.0.0/8, admin, _AMAVISIP_
+mynetworks = 127.0.0.0/8, _ADMINIP_, _AMAVISIP_
 
 # only IPv4
 inet_protocols = ipv4
@@ -53,7 +53,7 @@ content_filter = smtp-amavis:_AMAVISHN_:10024
 
 # SASL via dovecot
 smtpd_sasl_type = dovecot
-smtpd_sasl_path = inet:mda:12345
+smtpd_sasl_path = inet:_MDAIP_:12345
 
 # SALS settings
 smtpd_sasl_auth_enable = yes
@@ -114,8 +114,8 @@ header_checks = regexp:/etc/postfix/rules/header_checks
 body_checks = regexp:/etc/postfix/rules/body_checks
 
 # POSTSCREEN filtering on port 25
-# By default postscreen withelist the mynetworks net.
-postscreen_access_list = permit_mynetworks
+# By default postscreen withelist the mynetworks net, and have a tunable lins on files
+postscreen_access_list = permit_mynetworks, cidr:/etc/postfix/rules/postscreen_access.cidr
 # action for bad servers in blacklist
 postscreen_blacklist_action = drop
 # if new lines, bad dog!
@@ -135,7 +135,7 @@ postscreen_dnsbl_sites = _DNSBL_LIST_
 
 # sender
 smtpd_sender_restrictions =
-    # me and myself
+    # me and trusted hosts
     permit_mynetworks
 
     # identity checks
@@ -156,14 +156,14 @@ smtpd_sender_restrictions =
 
 # recipients
 smtpd_recipient_restrictions =
+    # me and trusted hosts
+    permit_mynetworks
+
     # quota policy
-    check_policy_service inet:mda:12340
+    check_policy_service inet:_MDAIP_:12340
 
     # check spf settings
     check_policy_service unix:private/policy-spf
-
-    # me and myself
-    permit_mynetworks
 
     # reject nfqn, domain is MUA job
     reject_non_fqdn_recipient
@@ -199,7 +199,7 @@ virtual_mailbox_base = /home/vmail
 virtual_minimum_uid = 100
 virtual_uid_maps = static:5000
 virtual_gid_maps = static:5000
-virtual_transport = lmtp:inet:mda:24
+virtual_transport = lmtp:inet:_MDAIP_:24
 
 # dovecot lmtp 1 by 1
 dovecot_destination_recipient_limit = 1

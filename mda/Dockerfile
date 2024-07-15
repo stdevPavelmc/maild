@@ -1,12 +1,14 @@
 FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2023-04-23
-ENV DEBIAN_FRONTEND noninteractive
+
+ENV REFRESHED_AT=2023-04-23
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y \
         sed \
+        netcat \
         dovecot-pop3d \
         dovecot-imapd \
         dovecot-pgsql \
@@ -44,3 +46,4 @@ ENTRYPOINT ["/docker-entrypoint.sh"]
 EXPOSE 110 143 993 995 4190 12345
 
 CMD ["dovecot"]
+

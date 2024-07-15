@@ -1,6 +1,6 @@
 #!/bin/sh
 
-case "$(echo | nc 127.0.0.1 110 -w1)" in
+case "$(printf "QUIT\n" | nc localhost 110 -w1 | head -n1)" in
 	"+OK Dovecot"*" ready"*)
 		echo "dovecot ready"
 		;;

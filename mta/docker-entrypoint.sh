@@ -39,17 +39,32 @@ echo "RELAY=${RELAY}" >> "${CFILE}"
 echo "ALWAYSBCC=${ALWAYS_BCC}" >> "${CFILE}"
 echo "SYSADMINS=${SYSADMINS}" >> "${CFILE}"
 echo "AMAVISHN=${AMAVIS}" >> "${CFILE}"
+
+# hostnames
 AMAVISIP=`host ${AMAVIS} | awk '/has address/ { print $4 }'`
 echo "AMAVISIP=${AMAVISIP}" >> "${CFILE}"
-OWN_IP=`ifconfig eth0 | grep inet | awk '{print $2}'`
+MDAIP=`host ${MDA} | awk '/has address/ { print $4 }'`
+echo "MDAIP=${MDAIP}" >> "${CFILE}"
+MUAIP=`host ${MUA} | awk '/has address/ { print $4 }'`
+echo "MUAIP=${MUAIP}" >> "${CFILE}"
+ADMINIP=`host ${ADMIN} | awk '/has address/ { print $4 }'`
+echo "ADMINIP=${ADMINIP}" >> "${CFILE}"
+OWN_IP=`ifconfig eth0 | grep inet | awk '{print $2}' | head -n 1`
 echo "OWN_IP=${OWN_IP}" >> "${CFILE}"
+#- set files for checks
+echo $AMAVISIP > /tmp/AMAVISIP
+echo $MDAIP > /tmp/MDAIP
+echo $MUAIP > /tmp/MUAIP
+echo $ADMINIP > /tmp/ADMINIP
+echo $OWNIP > /tmp/OWNIP
+
 # postgresql data
 echo "POSTGRES_HOST=${POSTGRES_HOST}" >> "${CFILE}"
 echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
 echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
 echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
-
-echo $AMAVISIP > /tmp/AMAVISIP
+# dnsbl
+echo "DNSBL_LIST='${DNSBL_LIST}'" >> "${CFILE}"
 
 # config dump
 if [ "${MTA_DEBUG}" ] ; then
@@ -169,7 +184,8 @@ if [ "$POSTMASTER_ABUSE_SETUP" ] ; then
         # exercises.jm
         #(2 rows)
 
-        cat /tmp/domains.txt | grep -v ' domain' | grep -v '\-\-\-' | grep -v ' row' | tr -d ' ' | xargs
+        # match any domain like string on the results
+        cat /tmp/domains.txt | grep -E '\b[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b' | tr -d ' ' | xargs
     }
 
     # cycle through domains, if any

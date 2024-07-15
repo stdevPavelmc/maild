@@ -41,16 +41,18 @@ POSTFIXADMIN_DB_PASSWORD=$(get_env_value "POSTFIXADMIN_DB_PASSWORD" "")
 POSTFIXADMIN_SMTP_SERVER=$(get_env_value "POSTFIXADMIN_SMTP_SERVER" "localhost")
 POSTFIXADMIN_SMTP_PORT=$(get_env_value "POSTFIXADMIN_SMTP_PORT" "25")
 POSTFIXADMIN_ENCRYPT=$(get_env_value "POSTFIXADMIN_ENCRYPT" "md5crypt")
+MAIL_ADMIN_USER=$(get_env_value "MAIL_ADMIN_USER" "")
+DEFAULT_DOMAIN=$(get_env_value "DEFAULT_DOMAIN" "")
 
-
-DEFAULT_SETUP_PASSWORD="changeme"
-POSTFIXADMIN_SETUP_PASSWORD=$(get_env_value "POSTFIXADMIN_SETUP_PASSWORD" "${DEFAULT_SETUP_PASSWORD}")
-
+# Confiigure step
 if [[ "$1" == apache2* ]] || [ "$1" == php-fpm ]; then
 
-	if [ "${POSTFIXADMIN_SETUP_PASSWORD}" = "${DEFAULT_SETUP_PASSWORD}" ]; then
-		echo >&2 "WARNING: setup.php password not set"
-	fi
+	# generate a random password for the setup, and yes, every time, this is an OTP
+	SETUP_PASSWORD=$(date +%M%s | sha256sum | base64 | head -c 32)
+	POSTFIXADMIN_SETUP_PASSWORD=$(htpasswd -B -C 10 -n -b username ${SETUP_PASSWORD} | cut -d ":" -f 2)
+	echo >&2 "#################### !!! #############################"
+	echo >&2 "OTP SETUP PASSWORD: ${SETUP_PASSWORD}"
+	echo >&2 "#################### !!! #############################"
 
 	if ! [ -e index.php ] && ! [ -e scripts/postfixadmin-cli.php ]; then
 		echo >&2 "Postfixadmin not found in $PWD - copying now..."
@@ -109,12 +111,25 @@ if [[ "$1" == apache2* ]] || [ "$1" == php-fpm ]; then
 		\$CONF['setup_password'] = '${POSTFIXADMIN_SETUP_PASSWORD}';
 		\$CONF['smtp_server'] = '${POSTFIXADMIN_SMTP_SERVER}';
 		\$CONF['smtp_port'] = '${POSTFIXADMIN_SMTP_PORT}';
+		\$CONF['admin_email'] = '${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}';
 		\$CONF['encrypt'] = '${POSTFIXADMIN_ENCRYPT}';
+		\$CONF['default_aliases'] = array (
+    		'abuse' => '${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}',
+    		'hostmaster' => '${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}',
+    		'postmaster' => '${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}',
+    		'webmaster' => '${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}');
+		\$CONF['show_footer_text'] = 'YES';
+		\$CONF['footer_text'] = 'Return to home';
+		\$CONF['footer_link'] = '/main.php';
 		\$CONF['configured'] = true;
 		?>" | tee config.local.php
 	else
-		echo "WARNING: $PWD/config.local.php already exists."
-		echo "Postfixadmin related environment variables have been ignored."
+		echo >&2 "INFO: $PWD/config.local.php already exists."
+		echo >&2 "Postfixadmin related environment variables have been keep."
+		echo >&2 "OTP SETUP PASSWORD will be updated."
+
+		# update the setup password
+		sed -i s/"^.*'setup_password'.*"/"                \$CONF['setup_password'] = '${POSTFIXADMIN_SETUP_PASSWORD}';"/ config.local.php
 	fi
 
 	if [ -f public/upgrade.php ]; then

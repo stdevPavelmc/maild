@@ -1,0 +1,358 @@
+---
+image: docker:23
+
+variables:
+  # To use DIND
+  DOCKER_DRIVER: overlay2
+  DOCKER_HOST: tcp://docker:2375
+  DOCKER_TLS_CERTDIR: ""
+
+  # Deploy env vars
+  CERT_PATH: "/cert"
+
+  # this vars needs to get loaded from the env
+  # DOCKER_SERVER
+
+  # local images
+  IMG_DB: "$CI_REGISTRY_IMAGE/db"
+  IMG_MTA: "$CI_REGISTRY_IMAGE/mta"
+  IMG_MDA: "$CI_REGISTRY_IMAGE/mda"
+  IMG_MUA: "$CI_REGISTRY_IMAGE/mua"
+  IMG_ADMIN: "$CI_REGISTRY_IMAGE/admin"
+  IMG_CLAMAV: "$CI_REGISTRY_IMAGE/clamav"
+  IMG_AMAVIS: "$CI_REGISTRY_IMAGE/amavis"
+  IMG_CRON: "$CI_REGISTRY_IMAGE/cron"
+
+  # default TAG is dev
+  TAG: dev
+
+services:
+  - name: docker:23-dind
+
+before_script:
+  - docker info
+
+stages:
+  - build
+  - release
+  - deploy
+  - cleanup
+
+# Before script template
+.before_script_template: &before_script
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - echo "Registry Image:" $CI_REGISTRY_IMAGE
+    # env vars
+    - cat env.sample > .env
+    - echo "MAIL_ADMIN_PASSWORD=$MAIL_ADMIN_PASSWORD" >> .env
+    - echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env
+    - echo "POSTFIXADMIN_SETUP_PASSWORD='$POSTFIXADMIN_SETUP_PASSWORD'" >> .env
+
+## Rules
+.rule_db:
+  rules:
+    - changes:
+        - db/**/*
+        - vars/db.env
+
+.rule_admin:
+  rules:
+    - changes:
+        - admin/**/*
+        - vars/admin.env
+
+.rule_mta:
+  rules:
+    - changes:
+        - mta/**/*
+        - vars/mta.env
+
+.rule_mda:
+  rules:
+    - changes:
+        - mda/**/*
+        - vars/mda.env
+
+.rule_amavis:
+  rules:
+    - changes:
+        - amavis/**/*
+        - vars/amavis.env
+
+.rule_clamav:
+  rules:
+    - changes:
+        - clamav/**/*
+        - vars/clamav.env
+
+.rule_mua:
+  rules:
+    - changes:
+        - mua/**/*
+        - vars/mua.env
+
+.rule_cron:
+  rules:
+    - changes:
+        - cron/**/*
+
+## Build
+
+# admin db
+build_db:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build db --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_db, rules]
+
+# admin
+build_admin:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build admin --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_admin, rules]
+
+# mta
+build_mta:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build mta --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mta, rules]
+
+# mda
+build_mda:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build mda --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mda, rules]
+
+# amavis
+build_amavis:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build amavis --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_amavis, rules]
+
+# clamav
+build_clamav:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build clamav --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_clamav, rules]
+
+# mua
+build_mua:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build mua --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mua, rules]
+
+# cron
+build_cron:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build cron --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_cron, rules]
+
+## Release
+
+# Release db
+release_db:
+  stage: release
+  <<: *before_script
+  script:
+    - echo build_debug $JOB_STATUS["build_debug"]
+    - echo build_db $JOB_STATUS["build_db"]
+    - docker compose pull db
+    - docker tag ${IMG_DB}:${TAG} ${IMG_DB}:latest
+    - export TAG=latest
+    - docker compose push db
+  needs:
+    - build_db
+  tags:
+    - mails
+  rules:
+    !reference [.rule_db, rules]
+
+# Release admin
+release_admin:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull admin
+    - docker tag ${IMG_ADMIN}:${TAG} ${IMG_ADMIN}:latest
+    - export TAG=latest
+    - docker compose push admin
+  needs:
+    - build_admin
+  tags:
+    - mails
+  rules:
+    !reference [.rule_admin, rules]
+
+# Release mta
+release_mta:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull mta
+    - docker tag ${IMG_MTA}:${TAG} ${IMG_MTA}:latest
+    - export TAG=latest
+    - docker compose push mta
+  needs:
+    - build_mta
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mta, rules]
+
+# Release mda
+release_mda:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull mda
+    - docker tag ${IMG_MDA}:${TAG} ${IMG_MDA}:latest
+    - export TAG=latest
+    - docker compose push mda
+  needs:
+    - build_mda
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mda, rules]
+
+# Release amavis
+release_amavis:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull amavis
+    - docker tag ${IMG_AMAVIS}:${TAG} ${IMG_AMAVIS}:latest
+    - export TAG=latest
+    - docker compose push amavis
+  needs:
+    - build_amavis
+  tags:
+    - mails
+  rules:
+    !reference [.rule_amavis, rules]
+
+# Release clamav
+release_clamav:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull clamav
+    - docker tag ${IMG_CLAMAV}:${TAG} ${IMG_CLAMAV}:latest
+    - export TAG=latest
+    - docker compose push clamav
+  needs:
+    - build_clamav
+  tags:
+    - mails
+  rules:
+    !reference [.rule_clamav, rules]
+
+# Release mua
+release_mua:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull mua
+    - docker tag ${IMG_MUA}:${TAG} ${IMG_MUA}:latest
+    - export TAG=latest
+    - docker compose push mua
+  needs:
+    - build_mua
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mua, rules]
+
+# Release cron
+release_cron:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull cron
+    - docker tag ${IMG_CRON}:${TAG} ${IMG_CRON}:latest
+    - export TAG=latest
+    - docker compose push cron
+  needs:
+    - build_cron
+  tags:
+    - mails
+  rules:
+    !reference [.rule_cron, rules]
+
+# Deploy
+deploy:
+  stage: deploy
+  <<: *before_script
+  script:
+    - export TAG=latest
+    - DOCKER_HOST=$DOCKER_SERVER DOCKER_TLS_VERIFY="true" DOCKER_CERT_PATH=$CERT_PATH docker compose pull
+    - DOCKER_HOST=$DOCKER_SERVER DOCKER_TLS_VERIFY="true" DOCKER_CERT_PATH=$CERT_PATH docker compose up -d
+  only:
+    - main
+  needs:
+    - job: release_mta
+      optional: true
+    - job: release_mda
+      optional: true
+    - job: release_admin
+      optional: true
+    - job: release_db
+      optional: true
+    - job: release_amavis
+      optional: true
+    - job: release_clamav
+      optional: true
+    - job: release_mua
+      optional: true
+    - job: release_cron
+      optional: true
+  tags:
+    - mails

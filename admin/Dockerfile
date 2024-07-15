@@ -1,7 +1,8 @@
-FROM php:8.1-apache
+FROM php:8.3-apache
 
 LABEL maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin)"
-LABEL modified="Pavel Milanes <pavelmc@gmail.com>, to read the database values from a common posttgres variables"
+LABEL modified="Pavel Milanes <pavelmc@gmail.com>"
+LABEL modified_reason="To read the database values from a common postgres variables"
 
 # docker-entrypoint.sh dependencies
 RUN set -eux; \
@@ -53,9 +54,9 @@ RUN set -ex; \
 ARG POSTFIXADMIN_VERSION=3.3.13
 ARG POSTFIXADMIN_SHA512=bf7daaa089ee3adc4b557f1a7d0509d78979ef688fb725bab795f5c9d81e8774296245fde0cb184db51e9185cad381682c3ecc0bfadf852388b499a0a95cca64
 
-ENV POSTFIXADMIN_VERSION $POSTFIXADMIN_VERSION
-ENV POSTFIXADMIN_SHA512 $POSTFIXADMIN_SHA512
-ENV APACHE_DOCUMENT_ROOT /var/www/html/public
+ENV POSTFIXADMIN_VERSION=$POSTFIXADMIN_VERSION
+ENV POSTFIXADMIN_SHA512=$POSTFIXADMIN_SHA512
+ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 
 RUN set -eu; sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf; \
     sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
@@ -80,5 +81,9 @@ RUN if [ "$DEBUG" ]; then \
     apt-get update && apt-get install -y nano ; \
     fi
 
+HEALTHCHECK --interval=1m --timeout=3s --start-period=30s --retries=2 \
+    CMD curl -f http://localhost/ || exit 1
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
+
 CMD ["apache2-foreground"]

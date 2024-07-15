@@ -1,14 +1,16 @@
 FROM ubuntu:jammy
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-ENV REFRESHED_AT 2023-04-23
-ENV DEBIAN_FRONTEND noninteractive
+
+ENV REFRESHED_AT=2023-04-23
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \
     apt-get install -y \
         postfix \
         postfix-pcre \
         postfix-pgsql \
+        postfix-policyd-spf-python  \
         net-tools \
         netcat \
         postgresql-client \
@@ -44,3 +46,4 @@ ENTRYPOINT ["/docker-entrypoint.sh"]
 EXPOSE 25 465 587
 
 CMD ["postfix"]
+
