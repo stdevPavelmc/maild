@@ -2,4 +2,7 @@ ldata/*
 *.log
 .env
 test.sh
-snappymail-2.36*
+snappymail-*
+mua/snappymail-*
+postfixadmin-*
+admin/postfixadmin-*
