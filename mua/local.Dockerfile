@@ -2,7 +2,7 @@ FROM php:8.3-apache
 
 LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
 LABEL image.name="MailD Mail User Agent, aka: Webmail"
-LABEL org.opencontainers.image.description="MailD Mail User Agent, aka: Webmail
+LABEL org.opencontainers.image.description="MailD Mail User Agent, aka: Webmail"
 LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
 LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
