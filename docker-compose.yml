@@ -12,8 +12,55 @@ volumes:
 
 
 services:
+  cron:
+    image: pavelmc/maild_cron:latest
+    build: ./cron/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-cron
+    hostname: cron
+    restart: always
+    env_file:
+      - vars/db.env
+      - vars/amavis.env
+      - .env
+    volumes:
+      - /var/log:/var/log
+      - vmail:/home/vmail
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+
+  clamav:
+    image: pavelmc/maild_clamav:latest
+    build: ./clamav/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-clamav
+    hostname: clamav
+    restart: always
+    # healthcheck:  # buiilt in the image
+    #   test: [ "CMD", "./check.sh" ]
+    #   interval: 60s
+    #   retries: 3
+    #   start_period: 120s
+    env_file:
+      - vars/clamav.env
+    # ports:
+    #   - "3310"
+    volumes:
+      - clamav:/var/lib/clamav
+      - amavis:/var/lib/amavis
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+
   db:
-    image: db:latest
+    image: pavelmc/maild_db:latest
     build: ./db/
     container_name: maild-db
     hostname: db
@@ -28,13 +75,13 @@ services:
       - maild
 
   admin:
-    image: admin:latest
+    image: pavelmc/maild_admin:latest
     build: ./admin/
     container_name: maild-admin
     hostname: admin
     restart: always
-    # ports:
-    #   - "8080:80"
+    ports:
+      - "8080:80"
     environment:
       POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
@@ -50,20 +97,32 @@ services:
       options:
         syslog-address: "unixgram:///dev/log"
 
-  mua:
-    image: mua:latest
-    build: ./mua/
-    container_name: maild-mua
-    hostname: mua
+  amavis:
+    image: pavelmc/maild_amavis:latest
+    build: ./amavis/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-amavis
+    hostname: amavis
     restart: always
-    ports:
-      - "80:80"
+    # healthcheck: # buiilt in the image
+    #     test: ["CMD", "/check.sh"]
+    #     interval: 60s
+    #     retries: 3
+    #     start_period: 120s
     env_file:
+      - vars/amavis.env
       - vars/db.env
-      - vars/mua.env
       - .env
+    # ports:
+    #   - "10024:10024"
+    volumes:
+      - amavis:/var/lib/amavis
+      - spamassassin:/var/lib/spamassassin
+      - spool:/var/spool/
     depends_on:
-      - mda
+      - db
+      # - mta
+      - cron
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -72,7 +131,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mda:
-    image: mda:latest
+    image: pavelmc/maild_mda:latest
     build: ./mda/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-mda
@@ -104,7 +163,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mta:
-    image: mta:latest
+    image: pavelmc/maild_mta:latest
     build: ./mta/
     container_name: maild-mta
     domainname: ${DEFAULT_DOMAIN}
@@ -137,79 +196,20 @@ services:
       options:
         syslog-address: "unixgram:///dev/log"
 
-  clamav:
-    image: clamav:latest
-    build: ./clamav/
-    domainname: ${DEFAULT_DOMAIN}
-    container_name: maild-clamav
-    hostname: clamav
+  mua:
+    image: pavelmc/maild_mua:latest
+    build: ./mua/
+    container_name: maild-mua
+    hostname: mua
     restart: always
-    # healthcheck:  # buiilt in the image
-    #   test: [ "CMD", "./check.sh" ]
-    #   interval: 60s
-    #   retries: 3
-    #   start_period: 120s
-    env_file:
-      - vars/clamav.env
-    # ports:
-    #   - "3310"
-    volumes:
-      - clamav:/var/lib/clamav
-      - amavis:/var/lib/amavis
-    networks:
-      - maild
-    logging: # See https://docs.docker.com/config/containers/logging/syslog/
-      driver: syslog
-      options:
-        syslog-address: "unixgram:///dev/log"
-
-  amavis:
-    image: amavis:latest
-    build: ./amavis/
-    domainname: ${DEFAULT_DOMAIN}
-    container_name: maild-amavis
-    hostname: amavis
-    restart: always
-    # healthcheck: # buiilt in the image
-    #     test: ["CMD", "/check.sh"]
-    #     interval: 60s
-    #     retries: 3
-    #     start_period: 120s
-    env_file:
-      - vars/amavis.env
-      - vars/db.env
-      - .env
-    # ports:
-    #   - "10024:10024"
-    volumes:
-      - amavis:/var/lib/amavis
-      - spamassassin:/var/lib/spamassassin
-      - spool:/var/spool/
-    depends_on:
-      - db
-    networks:
-      - maild
-    logging: # See https://docs.docker.com/config/containers/logging/syslog/
-      driver: syslog
-      options:
-        syslog-address: "unixgram:///dev/log"
-
-  cron:
-    image: cron:latest
-    build: ./cron/
-    domainname: ${DEFAULT_DOMAIN}
-    container_name: maild-cron
-    hostname: cron
-    restart: always
+    ports:
+      - "80:80"
     env_file:
       - vars/db.env
-      - vars/amavis.env
+      - vars/mua.env
       - .env
-    volumes:
-      - /var/log:/var/log
-      - vmail:/home/vmail
     depends_on:
-      - db
+      - mda
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/

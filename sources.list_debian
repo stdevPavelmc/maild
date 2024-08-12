@@ -2,16 +2,20 @@
 # by default on debian/ubuntu the ip 172.17.0.1 is "localhost" from the
 # docker containers
 #
-# if on the net, adjust it as needed. 
+# if on the net, adjust it as needed.
 
 Types: deb
-URIs: http://172.17.0.1:8081/debian
+URIs: http://172.17.0.1:8000/deb.debian.org/debian
 Suites: bookworm bookworm-updates
 Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Architectures: amd64
+# Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Trusted: yes
 
 Types: deb
-URIs: http://172.17.0.1:8081/debian-security
+URIs: http://172.17.0.1:8000/deb.debian.org/debian-security
 Suites: bookworm-security
 Components: main
-Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Architectures: amd64
+# Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+Trusted: yes

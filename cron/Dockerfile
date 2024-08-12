@@ -1,6 +1,9 @@
 FROM ubuntu:jammy
 
+LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
+LABEL image.name="MailD Cron daemon: programmed tasks"
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
+LABEL last_modified="2024-08-11"
 
 #repoubuntu
 

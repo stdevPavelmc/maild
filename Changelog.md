@@ -18,9 +18,15 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2024-07-13 1.0.0-rc1
+## 2024-08-11 1.0.0-rc2
+
+- Changed: Added the logic to save internet setting local repos and local source files.
+- Added: Improved the documentation, review and one more time ran a local build & install to test.
+
+## 2024-07-14 1.0.0-rc1
 
 - Added: setrepos.sh script to allow to use local/net OS repos in dev mode
+- Changed: Upgraded snappy mail to version 2.36.4 from 2.35.3
 
 ## 2024-07-13 1.0.0-rc
 

@@ -1,10 +1,12 @@
 FROM ubuntu:jammy
 
+LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
+LABEL image.name="MailD filtering and safeguarding, aka: Amavis-NG"
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
+LABEL last_modified="2024-08-11"
 
 #repoubuntu
 
-ENV REFRESHED_AT=2023-04-23
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \

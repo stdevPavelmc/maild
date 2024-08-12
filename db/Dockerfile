@@ -1,6 +1,9 @@
 FROM postgres:16-bookworm
 
+LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
+LABEL image.name="MailD Database, aka: Postgres"
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
+LABEL last_modified="2024-08-11"
 
 #repodebian
 

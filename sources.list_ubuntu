@@ -4,6 +4,8 @@
 #
 # if on the net, adjust it as needed. 
 
-deb [trusted=yes] http://172.17.0.1:8081/ubuntu/ jammy main universe multiverse restricted
-deb [trusted=yes] http://172.17.0.1:8081/ubuntu/ jammy-updates main universe multiverse restricted
-deb [trusted=yes] http://172.17.0.1:8081/ubuntu/ jammy-security universe multiverse restricted
+deb [trusted=yes arch=amd64] http://172.17.0.1:8000/archive.ubuntu.com/ubuntu jammy main universe multiverse restricted
+deb [trusted=yes arch=amd64] http://172.17.0.1:8000/archive.ubuntu.com/ubuntu jammy-updates main universe multiverse restricted
+deb [trusted=yes arch=amd64] http://172.17.0.1:8000/archive.ubuntu.com/ubuntu jammy-security universe multiverse restricted
+
+# deb [trusted=yes arch=amd64] http://172.17.0.1:8000/archive.ubuntu.com/ubuntu jammy-backports main universe multiverse restricted

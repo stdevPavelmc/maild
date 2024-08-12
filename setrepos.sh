@@ -20,8 +20,8 @@ declare -a DEBIAN_DOCKERDIRS=("admin" "db" "mua")
 declare -a LOC_INT=("admin" "mua")
 UBUNTU_SOURCES="sources.list_ubuntu"
 DEBIAN_SOURCES="sources.list_debian"
-SNAPPY_VERSION=2.36.4
-POSTFIXADMIN_VERSION=3.3.13
+SNAPPY_VERSION=$(grep "ARG SNAPPY_VERSION" mua/Dockerfile | cut -d "=" -f2)
+POSTFIXADMIN_VERSION=$(grep "ARG POSTFIXADMIN_VERSION" admin/internet.Dockerfile | cut -d "=" -f2)
 
 # Check if any parameter is passed
 if [ -z "$1" ]; then
