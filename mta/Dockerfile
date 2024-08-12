@@ -2,6 +2,9 @@ FROM ubuntu:jammy
 
 LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
 LABEL image.name="MailD Mail Transport Agent, aka: Postfix"
+LABEL org.opencontainers.image.description="MailD Mail Transport Agent, aka: Postfix"
+LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
+LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 LABEL last_modified="2024-08-11"
 

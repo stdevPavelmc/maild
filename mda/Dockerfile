@@ -2,12 +2,14 @@ FROM ubuntu:jammy
 
 LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
 LABEL image.name="MailD Mail Delivery Agent, aka: Dovecot"
+LABEL org.opencontainers.image.description="MailD Mail Delivery Agent, aka: Dovecot"
+LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
+LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 LABEL last_modified="2024-08-11"
 
 #repoubuntu
 
-ENV REFRESHED_AT=2024-07-15
 ENV DEBIAN_FRONTEND=noninteractive
 
 # DEBUG tools only on debug build
