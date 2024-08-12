@@ -65,11 +65,13 @@ ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
 RUN set -eu; sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf; \
     sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
+RUN mkdir -p /usr/src/postfixadmin
+
+COPY postfixadmin-${POSTFIXADMIN_VERSION}.tar.gz /usr/src/postfixadmin/postfixadmin.tar.gz
+
 RUN set -eu; \
-    curl -fsSL -o postfixadmin.tar.gz "https://github.com/postfixadmin/postfixadmin/archive/postfixadmin-${POSTFIXADMIN_VERSION}.tar.gz"; \
+    cd /usr/src/postfixadmin; \
     echo "$POSTFIXADMIN_SHA512 *postfixadmin.tar.gz" | sha512sum -c -; \
-    # upstream tarball include ./postfixadmin-postfixadmin-${POSTFIXADMIN_VERSION}/
-    mkdir /usr/src/postfixadmin; \
     tar -xf postfixadmin.tar.gz -C /usr/src/postfixadmin --strip-components=1; \
     rm postfixadmin.tar.gz; \
     # Does not exist in tarball but is required

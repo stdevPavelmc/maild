@@ -25,9 +25,10 @@ RUN apt-get update && \
 
 RUN docker-php-ext-install pdo pdo_pgsql && \
     docker-php-source delete
-    
+
+COPY snappymail-${SNAPPY_VERSION}.tar.gz /var/www/html/
+
 RUN cd /var/www/html/ && \
-    wget https://github.com/the-djmaze/snappymail/releases/download/v${SNAPPY_VERSION}/snappymail-${SNAPPY_VERSION}.tar.gz && \
     tar xvzf snappymail-${SNAPPY_VERSION}.tar.gz && \
     chown -R www-data:www-data /var/www/html/ && \
     rm snappymail-${SNAPPY_VERSION}.tar.gz
@@ -44,4 +45,3 @@ HEALTHCHECK --interval=1m --timeout=3s --start-period=30s --retries=2 \
     CMD curl -f http://localhost/ || exit 1
 
 # CMD ["apache2-foreground"]
-
