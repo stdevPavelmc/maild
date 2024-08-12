@@ -52,8 +52,8 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "Labels: ${{ steps.meta.outputs.labels }}"
+          echo "Tags: ${{ steps.meta.outputs.tags }}"
+          echo "Images: ${{ steps.meta.outputs.images }}"
