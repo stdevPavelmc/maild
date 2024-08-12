@@ -39,5 +39,5 @@ jobs:
 
     - name: Build and push Docker images
       run: |
-        docker compose -f compose0-online.yml build
+        docker compose -f compose-online.yml build
         docker compose -f compose-online.yml push
