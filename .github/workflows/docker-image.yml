@@ -53,5 +53,5 @@ jobs:
       run: |
         docker compose -f compose-dockerhub.yml build
         docker compose -f compose-dockerhub.yml push
-        # docker compose -f compose-github.yml build
-        # docker compose -f compose-github.yml push
+        docker compose -f compose-github.yml build
+        docker compose -f compose-github.yml push
