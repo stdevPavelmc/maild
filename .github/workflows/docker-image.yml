@@ -36,7 +36,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
-            type=sha            
+            type=sha
       
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -51,11 +51,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: build for the docker version
-        if: github.event_name != 'pull_request'
-        run: |
-          docker compose -f compose-online.yml build
-      
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
