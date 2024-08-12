@@ -13,7 +13,7 @@ volumes:
 
 services:
   db:
-    image: ghcr.io/stdevpavelmc/maild/maild-db:latest
+    image: ghcr.io/stdevpavelmc/maild-db:latest
     build: ./db/
     container_name: maild-db
     hostname: db
@@ -28,7 +28,7 @@ services:
       - maild
 
   admin:
-    image: ghcr.io/stdevpavelmc/maild/maild-admin:latest
+    image: ghcr.io/stdevpavelmc/maild-admin:latest
     build: ./admin/
     container_name: maild-admin
     hostname: admin
@@ -51,7 +51,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mua:
-    image: ghcr.io/stdevpavelmc/maild/maild-mua:latest
+    image: ghcr.io/stdevpavelmc/maild-mua:latest
     build: ./mua/
     container_name: maild-mua
     hostname: mua
@@ -72,7 +72,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mda:
-    image: ghcr.io/stdevpavelmc/maild/maild-mda:latest
+    image: ghcr.io/stdevpavelmc/maild-mda:latest
     build: ./mda/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-mda
@@ -104,7 +104,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   mta:
-    image: ghcr.io/stdevpavelmc/maild/maild-mta:latest
+    image: ghcr.io/stdevpavelmc/maild-mta:latest
     build: ./mta/
     container_name: maild-mta
     domainname: ${DEFAULT_DOMAIN}
@@ -139,7 +139,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   clamav:
-    image: ghcr.io/stdevpavelmc/maild/maild-clamav:latest
+    image: ghcr.io/stdevpavelmc/maild-clamav:latest
     build: ./clamav/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-clamav
@@ -165,7 +165,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   amavis:
-    image: ghcr.io/stdevpavelmc/maild/maild-amavis:latest
+    image: ghcr.io/stdevpavelmc/maild-amavis:latest
     build: ./amavis/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-amavis
@@ -196,7 +196,7 @@ services:
         syslog-address: "unixgram:///dev/log"
 
   cron:
-    image: ghcr.io/stdevpavelmc/maild/maild-cron:latest
+    image: ghcr.io/stdevpavelmc/maild-cron:latest
     build: ./cron/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-cron
