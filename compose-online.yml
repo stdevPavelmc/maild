@@ -13,7 +13,7 @@ volumes:
 
 services:
   db:
-    image: pavelmc/maild-pg:latest
+    image: pavelmc/maild-db:latest
     build: ./db/
     container_name: maild-db
     hostname: db
