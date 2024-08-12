@@ -41,13 +41,20 @@ This said, the webmail will listen on port 80 and the web admin interface will l
 
 ## Install it from internet
 
+You have two options:
+
+- Dockerhub repository [compose-dockerhub.yml], this is the default pick, but it's blocked on some countries (Cuba, cough!)
+- Github docker repository [compose-github.yml], this is the recommended if you are in Cuba 😉
+
+Pick the one you like and use the file, for the propose of this tutorial I will pich the Github one, as it's the least commonly used one; but both work the same.
+
 1. Copy the `env.sample` file to `.env` file and tweak/change/update the configs to your needs.
 2. Review the `vars/` dirs to check if you need to tweak any service variable.
 3. Install it like this:
 
 ```sh
-you@yourpc:~/$ docker compose -f compose-online.yml pull
-you@yourpc:~/$ docker compose -f compose-online.yml up
+you@yourpc:~/$ docker compose -f compose-github.yml pull
+you@yourpc:~/$ docker compose -f compose-github.yml up
 ```
 
 4. Now Go to the [Server Setup](#server-setup) section and do the config, and came back when done.
