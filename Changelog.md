@@ -18,6 +18,10 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-01-19 1.1.0
+
+- Added: Some upgrades, and bug fixes just stabilize the actual code from updated versions on OS and software
+
 ## 2024-08-11 1.0.0
 
 - Added: Github docker repository support, to avoid setting a vpn/proxy from Cuba

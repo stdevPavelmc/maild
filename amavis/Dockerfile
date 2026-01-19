@@ -8,8 +8,6 @@ LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 LABEL last_modified="2024-08-11"
 
-#repoubuntu
-
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && \

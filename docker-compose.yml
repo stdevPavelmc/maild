@@ -1,6 +1,6 @@
 networks:
   maild:
-    # external: true
+    external: true
 
 volumes:
   vmail: # mail storage
@@ -80,10 +80,11 @@ services:
     container_name: maild-admin
     hostname: admin
     restart: always
-    ports:
-      - "8080:80"
+    # ports:
+    #   - "8080:80"
     environment:
       POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTFIXADMIN_SETUP_PASSWORD: ${POSTFIXADMIN_SETUP_PASSWORD}
     env_file:
       - vars/db.env
       - vars/admin.env
@@ -104,25 +105,14 @@ services:
     container_name: maild-amavis
     hostname: amavis
     restart: always
-    # healthcheck: # buiilt in the image
-    #     test: ["CMD", "/check.sh"]
-    #     interval: 60s
-    #     retries: 3
-    #     start_period: 120s
-    env_file:
-      - vars/amavis.env
-      - vars/db.env
-      - .env
     # ports:
-    #   - "10024:10024"
-    volumes:
-      - amavis:/var/lib/amavis
-      - spamassassin:/var/lib/spamassassin
-      - spool:/var/spool/
+    #   - "8060:80"
+    env_file:
+      - vars/db.env
+      - vars/mua.env
+      - .env
     depends_on:
-      - db
-      # - mta
-      - cron
+      - mda
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -153,7 +143,7 @@ services:
       - db
     volumes:
       - vmail:/home/vmail
-      - /etc/letsencrypt:/certs
+      - /certs:/certs
       - spool:/var/spool/
     networks:
       - maild
@@ -171,6 +161,7 @@ services:
     restart: always
     environment:
       MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      DEBUG: 'true'
     env_file:
       - vars/mta.env
       - vars/ssl.env
@@ -182,7 +173,7 @@ services:
       - "587:587"
     volumes:
       - vmail:/home/vmail
-      - /etc/letsencrypt:/certs
+      - /certs:/certs
       - spool:/var/spool/
     depends_on:
       - db
@@ -202,14 +193,15 @@ services:
     container_name: maild-mua
     hostname: mua
     restart: always
-    ports:
-      - "80:80"
     env_file:
       - vars/db.env
-      - vars/mua.env
+      - vars/amavis.env
       - .env
+    volumes:
+      - /var/log:/var/log
+      - vmail:/home/vmail
     depends_on:
-      - mda
+      - db
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/

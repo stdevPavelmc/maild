@@ -2,7 +2,7 @@
 set -e
 
 # This script is part of MailD
-# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
 ### create the tmp files
 MAIN=/tmp/main.cf

@@ -2,29 +2,8 @@
 set -m -o pipefail
 
 # This script is part of MailD
-# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
-# preconditions on start: IP of some of the hosts
-CLAMAVIP=`host ${CLAMAV} | awk '/has address/ { print $4 }'`
-MTAIP=`host ${MTA} | awk '/has address/ { print $4 }'`
-CRONIP=`host ${CRON} | awk '/has address/ { print $4 }'`
-
-# check if  any of the IPs are empty
-if [ -z "${CLAMAVIP}" ] ; then
-    echo "====== !!!!!!!!!!!!!!!!!! ======="
-    echo "CLAMAV IP is empty: die"
-    exit 1
-fi
-if [ -z "${MTAIP}" ] ; then
-    echo "====== !!!!!!!!!!!!!!!!!! ======="
-    echo "MTA IP is empty: die"
-    exit 1
-fi
-if [ -z "${CRONIP}" ] ; then
-    echo "====== !!!!!!!!!!!!!!!!!! ======="
-    echo "CRON IP is empty: die"
-    exit 1
-fi
 
 # copy or overwrite the config files from the default ones
 cd /etc/amavis
@@ -38,9 +17,29 @@ echo "POSTGRES_DB=${POSTGRES_DB}" >> "${CFILE}"
 echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
 echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
 echo "MTA=${MTA}" >> "${CFILE}"
+MTAIP=`host ${MTA} | awk '/has address/ { print $4 }'`
 echo "MTAIP=${MTAIP}" >> "${CFILE}"
+CLAMAVIP=`host ${CLAMAV} | awk '/has address/ { print $4 }'`
 echo "CLAMAVIP=${CLAMAVIP}" >> "${CFILE}"
+CRONIP=`host ${CRON} | awk '/has address/ { print $4 }'`
 echo "CRONIP=${CRONIP}" >> "${CFILE}"
+
+# check if  any of the IPs are empty
+if [ -z "${CLAMAVIP}" ] ; then
+    echo "====== !!!!!!!!!!!!!!!!!! ======="
+    echo "CLAMAV IP is empty"
+    exit 1
+fi
+if [ -z "${MTAIP}" ] ; then
+    echo "====== !!!!!!!!!!!!!!!!!! ======="
+    echo "MTA IP is empty"
+    exit 1
+fi
+if [ -z "${CRONIP}" ] ; then
+    echo "====== !!!!!!!!!!!!!!!!!! ======="
+    echo "CRON IP is empty"
+    exit 1
+fi
 
 # IP data for the checks
 echo $CLAMAVIP > /tmp/CLAMAVIP
@@ -119,7 +118,7 @@ function get_domains() {
     # validate
     R=$?
     if [ ! $R -eq 0 ] ; then
-        echo "Error, could not connect to database" >&2
+        echo "Error, could not connect to database"
         exit 1
     fi
 
@@ -133,8 +132,8 @@ function get_domains() {
     #  domain  
     #----------
     # ALL
-    # sample1.com.tld
-    # exercises.tld
+    # sample1.com.jm
+    # exercises.jm
     #(2 rows)
 
     # match any domain like string on the results
@@ -159,9 +158,11 @@ if [ "${DKIM_SIGNING}" ] ; then
     DKIM_DOMAINS=$(get_domains)
     FILESIGN=/etc/amavis/conf.d/22-dkim_signing
 
-    # debug dkim_domians
-    echo "DKIM_DOMAINS: ${DKIM_DOMAINS}"
-    echo "FILESIGN: ${FILESIGN}"
+    # debug dkim_domians if debugging
+    if [ "${AMAVIS_DEBUG}" ] ; then
+        echo "DKIM_DOMAINS: ${DKIM_DOMAINS}"
+        echo "FILESIGN: ${FILESIGN}"
+    fi
 
     # setup only if there are domains to process
     if [[ "${DKIM_DOMAINS}" ]] ; then

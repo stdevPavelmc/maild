@@ -8,7 +8,10 @@
 
 # Expresion				Action  No  Reason
 /^.* [W|w]hore .*/		REJECT (#1) no insults please
-/^.*I am a hаckеr who has аccess to your.*/ REJECT (#2) Seriuosly? Blackmailing in 202x?
-/^.*Transfer .* to my bitcoin wallet.*/     REJECT (#2) Seriuosly? Blackmailing in 202x?
-/^.*my perverted friend.*/                  REJECT (#2) Seriuosly? Blackmailing in 202x?
-/^.*videos of you jerking off.*/            REJECT (#2) Seriuosly? Blackmailing in 202x?
+/^.*safaqat\.store\/.*/                     REJECT (#1) Move on, there is no fish here...
+/^.* [W|w]hore .*/		                    REJECT (#2) no insults please
+/^.*I am a hac ker.*/                       REJECT (#3) Seriuosly? Blackmailing in 202x?
+/^.*Transfer .* to my bitcoin wallet.*/     REJECT (#4) Seriuosly? Blackmailing in 202x?
+/^.*my perverted friend.*/                  REJECT (#5) Seriuosly? Blackmailing in 202x?
+/^.*videos of you jerking off.*/            REJECT (#6) Seriuosly? Blackmailing in 202x?
+#/^.*[еоарсіѕунмкхɑϲոԁԍԝƙκẏẇѵνᴡᴢТ].*/        REJECT (#7) Only english characters please

@@ -27,9 +27,7 @@ RUN apt-get update && \
         dovecot-pgsql \
         dovecot-sieve \
         dovecot-lmtpd \
-        dovecot-managesieved && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+        dovecot-managesieved
 
 RUN mkdir /home/vmail && \
     chown -R 5000:5000 /home/vmail && \
@@ -42,6 +40,12 @@ ADD dovecot/ /etc/dovecot
 
 ADD docker-entrypoint.sh configure.sh check.sh /
 RUN chmod +x /*.sh
+
+# DEBUG tools only on debug build
+ARG DEBUG
+RUN if [ "$DEBUG" ]; then \
+    apt-get update && apt-get install -y nano net-tools; \
+    fi
 
 VOLUME ["/certs", "/home/vmail"]
 

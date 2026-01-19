@@ -5,7 +5,7 @@
 # if on the net, adjust it as needed.
 
 Types: deb
-URIs: http://172.17.0.1:8000/deb.debian.org/debian
+URIs: https://deb.debian.org/debian
 Suites: bookworm bookworm-updates
 Components: main
 Architectures: amd64
@@ -13,7 +13,7 @@ Architectures: amd64
 Trusted: yes
 
 Types: deb
-URIs: http://172.17.0.1:8000/deb.debian.org/debian-security
+URIs: https://deb.debian.org/debian-security
 Suites: bookworm-security
 Components: main
 Architectures: amd64

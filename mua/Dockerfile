@@ -1,4 +1,4 @@
-FROM php:8.3-apache
+FROM php:8.3-apache-bookworm
 
 LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
 LABEL image.name="MailD Mail User Agent, aka: Webmail"
@@ -6,13 +6,9 @@ LABEL org.opencontainers.image.description="MailD Mail User Agent, aka: Webmail"
 LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
 LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2024-08-11"
+LABEL last_modified="2026-01-19"
 
-#repodebian
-
-# WARNING: You must update the domain.json template!!!
-# latest supported was 2.35.3
-ARG SNAPPY_VERSION=2.36.4
+ARG SNAPPY_VERSION=2.35.3
 
 # install base tools
 RUN apt-get update && \

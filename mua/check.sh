@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # This script is part of MailD
-# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
 # check amavis still working
 curl --silent --head --fail http://localhost || exit 1

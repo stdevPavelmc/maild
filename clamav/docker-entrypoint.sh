@@ -2,7 +2,7 @@
 set -m
 
 # This script is part of MailD
-# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
 if [ ! -f /etc/clamav/configured ] ; then
     # debug
@@ -36,10 +36,11 @@ chmod -R 0755 /var/lib/clamav/
 
 DB_DIR=$(sed -n 's/^DatabaseDirectory\s\(.*\)\s*$/\1/p' /etc/clamav/freshclam.conf )
 DB_DIR=${DB_DIR:-'/var/lib/clamav'}
-MAIN_FILE="$DB_DIR/main.cvd"
+MAIN_FILE_CVD="$DB_DIR/main.cvd"
+MAIN_FILE_CLD="$DB_DIR/main.cld"
 
-if [ -f "$MAIN_FILE" ] ; then
-    # there is a main.cvd file, start it normally
+if [ -f "$MAIN_FILE_CVD" ] || [ -f "$MAIN_FILE_CLD" ] ; then
+    # there is a main.cvd or main.cld file, start it normally
     clamd --foreground &
     # now start the updater
     freshclam -d &
@@ -47,7 +48,7 @@ else
     # no updates, start the updater and waith to start the daemon
     freshclam -d &
 
-    until [ -e ${MAIN_FILE} ] ; do
+    until [ -e "$MAIN_FILE_CVD" ] || [ -e "$MAIN_FILE_CLD" ] ; do
         echo -e "waiting for clam to update..."
         sleep 3
     done

@@ -14,8 +14,8 @@
 # where debian is bookworm/12 & ubuntu is Jammy/22.04
 # So set there your local repos and you are done
 
-# Docker dirs as an array to be iterared
-declare -a UBUNTU_DOCKERDIRS=("amavis" "clamav" "cron" "mda" "mta" )
+# Docker dirs as an array to be iterated
+declare -a UBUNTU_DOCKERDIRS=("amavis" "clamav" "cron" "mda" "mta" "spamd")
 declare -a DEBIAN_DOCKERDIRS=("admin" "db" "mua")
 declare -a LOC_INT=("admin" "mua")
 UBUNTU_SOURCES="sources.list_ubuntu"
@@ -55,7 +55,7 @@ if [ -z "$1" ]; then
         SET=$(cat ${DIR}/Dockerfile | grep "sources.list")
         if [ -z "${SET}" ] ; then
             # Add the COPY statement
-            sed '/^#repoubuntu$/a\COPY ./sources.list /etc/apt/sources.list' -i ${DIR}/Dockerfile
+            sed '/^#repoubuntu$/a\COPY ./sources.list /etc/apt/sources.list.d/ubuntu.sources' -i ${DIR}/Dockerfile
         fi
 
         echo "Setup ${DIR} for local repos"

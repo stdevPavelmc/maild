@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # This script is part of MailD
-# Copyright 2020-2024 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
 # is postfix still working
 case "$(printf "HELO healthcheck\nQUIT\n\n" | nc 127.0.0.1 25 -w1 | head -n1)" in
