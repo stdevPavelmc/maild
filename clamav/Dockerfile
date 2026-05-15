@@ -17,7 +17,7 @@ RUN apt-get update && \
         clamav-daemon \
         clamav-freshclam \
         libclamunrar9 \
-        netcat \
+        netcat-traditional \
         ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*

@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y \
         sed \
-        netcat \
+        netcat-traditional \
         dovecot-pop3d \
         dovecot-imapd \
         dovecot-pgsql \

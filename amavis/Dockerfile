@@ -19,7 +19,7 @@ RUN apt-get update && \
         cabextract \
         spamassassin \
         gpg \
-        netcat \
+        netcat-traditional \
         bind9-host \
         postgresql-client && \
     apt-get clean && \

@@ -19,7 +19,7 @@ RUN apt-get update && \
         postfix-pgsql \
         postfix-policyd-spf-python  \
         net-tools \
-        netcat \
+        netcat-traditional \
         postgresql-client \
         bind9-host && \
     apt-get clean && \
@@ -38,7 +38,7 @@ RUN chmod +x /*.sh
 # DEBUG tools only on debug build
 ARG DEBUG
 RUN if [ "$DEBUG" ]; then \
-    apt-get update && apt-get install -y nano netcat-openbsd ; \
+    apt-get update && apt-get install -y nano netcat-traditional-openbsd ; \
     fi
 
 # Set the HEALTHCHECK command
