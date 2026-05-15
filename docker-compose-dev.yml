@@ -1,0 +1,192 @@
+
+# Local Development Docker Compose Configuration
+# Usage: docker-compose -f docker-compose-dev.yml up
+#
+# Key differences from production:
+# - Uses env.sample instead of .env
+# - Fixed image names (pavelmc/maild-*:develop)
+# - Local bind mount volumes (./ldata/*)
+# - JSON logging instead of syslog
+# - More ports exposed for debugging
+# - No Traefik labels
+# - Local network (not external)
+
+networks:
+  maild-dev:
+    driver: bridge
+
+services:
+  db:
+    image: pavelmc/maild-db:develop
+    build: ./db/
+    container_name: maild-dev-db
+    hostname: db
+    restart: unless-stopped
+    env_file:
+      - vars/db.env
+      - vars/mua.env
+      - env.sample
+    volumes:
+      - ./ldata/db:/var/lib/postgresql/data
+    networks:
+      - maild-dev
+    ports:
+      - "5432:5432"  # Exposed for local debugging
+
+  admin:
+    image: pavelmc/maild-admin:develop
+    build: ./admin/
+    container_name: maild-dev-admin
+    hostname: admin
+    restart: unless-stopped
+    ports:
+      - "8080:80"  # Exposed for local access
+    environment:
+      POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTFIXADMIN_SETUP_PASSWORD: ${POSTFIXADMIN_SETUP_PASSWORD}
+    env_file:
+      - vars/db.env
+      - vars/admin.env
+      - env.sample
+    depends_on:
+      - db
+    networks:
+      - maild-dev
+
+  mua:
+    image: pavelmc/maild-mua:develop
+    build: ./mua/
+    container_name: maild-dev-mua
+    hostname: mua
+    restart: unless-stopped
+    ports:
+      - "8060:80"  # Exposed for local access
+    env_file:
+      - vars/db.env
+      - vars/mua.env
+      - env.sample
+    volumes:
+      - ./ldata/mua_web:/var/www/html
+    depends_on:
+      - mda
+    networks:
+      - maild-dev
+
+  mda:
+    image: pavelmc/maild-mda:develop
+    build: ./mda/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-mda
+    hostname: mda
+    restart: unless-stopped
+    env_file:
+      - vars/db.env
+      - vars/mda.env
+      - vars/ssl.env
+      - env.sample
+    ports:
+      - "110:110"    # POP3 - exposed for debugging
+      - "143:143"    # IMAP - exposed for debugging
+      - "993:993"    # IMAPS
+      - "995:995"    # POP3S
+      - "4190:4190"  # ManageSieve - exposed for debugging
+      - "12345:12345" # SASL - exposed for debugging
+    depends_on:
+      - db
+    volumes:
+      - ./ldata/vmail:/home/vmail
+      - ./ldata/certs:/certs
+      - ./ldata/spool:/var/spool/
+    networks:
+      - maild-dev
+
+  mta:
+    image: pavelmc/maild-mta:develop
+    build: ./mta/
+    container_name: maild-dev-mta
+    domainname: ${DEFAULT_DOMAIN}
+    hostname: mta
+    restart: unless-stopped
+    environment:
+      MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      DEBUG: 'true'
+    env_file:
+      - vars/mta.env
+      - vars/ssl.env
+      - vars/db.env
+      - env.sample
+    ports:
+      - "25:25"      # SMTP
+      - "465:465"    # SMTPS
+      - "587:587"    # Submission
+    volumes:
+      - ./ldata/vmail:/home/vmail
+      - ./ldata/certs:/certs
+      - ./ldata/spool:/var/spool/
+    depends_on:
+      - db
+      - mda
+      - amavis
+      - clamav
+    networks:
+      - maild-dev
+
+  clamav:
+    image: pavelmc/maild-clamav:develop
+    build: ./clamav/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-clamav
+    hostname: clamav
+    restart: unless-stopped
+    env_file:
+      - vars/clamav.env
+      - env.sample
+    ports:
+      - "3310:3310"  # ClamAV - exposed for debugging
+    volumes:
+      - ./ldata/clamav:/var/lib/clamav
+      - ./ldata/amavis:/var/lib/amavis
+    networks:
+      - maild-dev
+
+  amavis:
+    image: pavelmc/maild-amavis:develop
+    build: ./amavis/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-amavis
+    hostname: amavis
+    restart: unless-stopped
+    env_file:
+      - vars/amavis.env
+      - vars/db.env
+      - env.sample
+    ports:
+      - "10024:10024"  # Amavis content filter - exposed for debugging
+    volumes:
+      - ./ldata/amavis:/var/lib/amavis
+      - ./ldata/spamassassin:/var/lib/spamassassin
+      - ./ldata/spool:/var/spool/
+    depends_on:
+      - db
+    networks:
+      - maild-dev
+
+  cron:
+    image: pavelmc/maild-cron:develop
+    build: ./cron/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-cron
+    hostname: cron
+    restart: unless-stopped
+    env_file:
+      - vars/db.env
+      - vars/amavis.env
+      - env.sample
+    volumes:
+      - ./ldata/logs:/var/log
+      - ./ldata/vmail:/home/vmail
+      - ./ldata/backups:/backups
+    depends_on:
+      - db
+    networks:
+      - maild-dev

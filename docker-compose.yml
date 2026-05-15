@@ -1,3 +1,5 @@
+version: "3.7"
+
 networks:
   maild:
     external: true
@@ -5,60 +7,15 @@ networks:
 volumes:
   vmail: # mail storage
   spool: # temp mail storage
-  clamav: # AV storage 
+  clamav: # AV storage
   amavis: # filtering storage
-  spamassassin: # spam data 
+  spamassassin: # spam data
   db: # database storage
+  mua_web: # mua web data
+  db_backups: # database backups (15 days retention)
 
 
 services:
-  cron:
-    image: pavelmc/maild_cron:latest
-    build: ./cron/
-    domainname: ${DEFAULT_DOMAIN}
-    container_name: maild-cron
-    hostname: cron
-    restart: always
-    env_file:
-      - vars/db.env
-      - vars/amavis.env
-      - .env
-    volumes:
-      - /var/log:/var/log
-      - vmail:/home/vmail
-    networks:
-      - maild
-    logging: # See https://docs.docker.com/config/containers/logging/syslog/
-      driver: syslog
-      options:
-        syslog-address: "unixgram:///dev/log"
-
-  clamav:
-    image: pavelmc/maild_clamav:latest
-    build: ./clamav/
-    domainname: ${DEFAULT_DOMAIN}
-    container_name: maild-clamav
-    hostname: clamav
-    restart: always
-    # healthcheck:  # buiilt in the image
-    #   test: [ "CMD", "./check.sh" ]
-    #   interval: 60s
-    #   retries: 3
-    #   start_period: 120s
-    env_file:
-      - vars/clamav.env
-    # ports:
-    #   - "3310"
-    volumes:
-      - clamav:/var/lib/clamav
-      - amavis:/var/lib/amavis
-    networks:
-      - maild
-    logging: # See https://docs.docker.com/config/containers/logging/syslog/
-      driver: syslog
-      options:
-        syslog-address: "unixgram:///dev/log"
-
   db:
     image: pavelmc/maild_db:latest
     build: ./db/
@@ -98,12 +55,11 @@ services:
       options:
         syslog-address: "unixgram:///dev/log"
 
-  amavis:
-    image: pavelmc/maild_amavis:latest
-    build: ./amavis/
-    domainname: ${DEFAULT_DOMAIN}
-    container_name: maild-amavis
-    hostname: amavis
+  mua:
+    image: pavelmc/maild_mua:latest
+    build: ./mua/
+    container_name: maild-mua
+    hostname: mua
     restart: always
     # ports:
     #   - "8060:80"
@@ -111,6 +67,8 @@ services:
       - vars/db.env
       - vars/mua.env
       - .env
+    volumes:
+      - mua_web:/var/www/html
     depends_on:
       - mda
     networks:
@@ -187,11 +145,69 @@ services:
       options:
         syslog-address: "unixgram:///dev/log"
 
-  mua:
-    image: pavelmc/maild_mua:latest
-    build: ./mua/
-    container_name: maild-mua
-    hostname: mua
+  clamav:
+    image: pavelmc/maild_clamav:latest
+    build: ./clamav/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-clamav
+    hostname: clamav
+    restart: always
+    # healthcheck:  # buiilt in the image
+    #   test: [ "CMD", "./check.sh" ]
+    #   interval: 60s
+    #   retries: 3
+    #   start_period: 120s
+    env_file:
+      - vars/clamav.env
+    # ports:
+    #   - "3310"
+    volumes:
+      - clamav:/var/lib/clamav
+      - amavis:/var/lib/amavis
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+
+  amavis:
+    image: pavelmc/maild_amavis:latest
+    build: ./amavis/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-amavis
+    hostname: amavis
+    restart: always
+    # healthcheck: # buiilt in the image
+    #     test: ["CMD", "/check.sh"]
+    #     interval: 60s
+    #     retries: 3
+    #     start_period: 120s
+    env_file:
+      - vars/amavis.env
+      - vars/db.env
+      - .env
+    # ports:
+    #   - "10024:10024"
+    volumes:
+      - amavis:/var/lib/amavis
+      - spamassassin:/var/lib/spamassassin
+      - spool:/var/spool/
+    depends_on:
+      - db
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+
+  cron:
+    image: pavelmc/maild_cron:latest
+    build: ./cron/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-cron
+    hostname: cron
     restart: always
     env_file:
       - vars/db.env
@@ -200,6 +216,7 @@ services:
     volumes:
       - /var/log:/var/log
       - vmail:/home/vmail
+      - db_backups:/backups
     depends_on:
       - db
     networks:

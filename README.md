@@ -28,7 +28,7 @@ To create a realy dynamic setup we split the mail server in services:
 
 Follow the links for each service to get details for each docker image.
 
-Warning!: Under no circumstance change the name of the hostnames, it will break the setup.
+Warning!: Under no cirscuntance change the name of the hostnames, it will break the setup.
 
 ## Setup instructions
 

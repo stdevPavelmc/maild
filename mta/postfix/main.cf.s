@@ -214,7 +214,7 @@ smtpd_reject_unlisted_recipient = yes
 #smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 
 # compat level 
-compatibility_level = 2
+compatibility_level = 3
 
 # bounce templates
 #bounce_template_file = /etc/postfix/bounce.es.cf

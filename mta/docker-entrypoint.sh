@@ -17,7 +17,7 @@ if [ -z "${RELAY}" ] ; then
     RELAY=""
 fi
 if [ -z "${MAX_MESSAGESIZE}" ] ; then
-    MAX_MESSAGESIZE=2264924
+    MAX_MESSAGESIZE=24914165 # 20MB by default, can be set to 0 for unlimited
 fi
 if [ -z "${ALWAYS_BCC}" ] ; then
     ALWAYS_BCC=
@@ -255,6 +255,14 @@ else
     echo "SSL certs in place, skipping generation"
 fi
 
+# Remove references for manual files for set-perms to make it happy
+cat /etc/postfix/postfix-files | sed "s|^.*directory/man.*$||g" | uniq > /tmp/1
+cat /tmp/1 > /etc/postfix/postfix-files
+for f in /etc/postfix/postfix-files.d/* ; do
+    sed "s|^.*directory/man.*$||g" -i $f
+done
+
+# let's start...
 if [ "$1" = 'postfix' ]; then
     if [ ! -f /certs/mail.crt -o ! -f /certs/mail.key -o ! -f /certs/RSA2048.pem ] ; then
         echo "Ooops! There is some SSL files missing"
@@ -264,6 +272,7 @@ if [ "$1" = 'postfix' ]; then
 
     # configure instance (populate etc)
     postconf compatibility_level=3.6
+    postfix set-permissions
     /usr/lib/postfix/configure-instance.sh
 
     # check postfix is happy (also will fix some things)

@@ -4,7 +4,6 @@ set -m -o pipefail
 # This script is part of MailD
 # Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
-
 # copy or overwrite the config files from the default ones
 cd /etc/amavis
 rm -rdf conf.d
@@ -108,7 +107,7 @@ function get_domains() {
     # query to get the domains
     QUERY="SELECT domain FROM domain;"
 
-    # craft the auth credentials & secure it
+    # craaft the auth credentials & secure it
     echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
     chmod 0600 ~/.pgpass &1>2
 

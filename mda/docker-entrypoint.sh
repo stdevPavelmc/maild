@@ -1,4 +1,8 @@
 #!/bin/sh
+
+# This script is part of MailD
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
+
 set -e
 
 if [ ! -f /etc/dovecot/configured ]; then
@@ -102,7 +106,8 @@ if [ "$1" = 'dovecot' ]; then
         echo "We need a valid 'mail.crt' & 'mail.key' files in the /certs volume!"
         exit 1
     fi
-
+    
+    # start dovecot in foreground 
     exec /usr/sbin/dovecot -F < /dev/null
 fi
 

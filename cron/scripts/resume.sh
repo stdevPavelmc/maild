@@ -2,14 +2,18 @@
 
 # This script is part of MailD
 # Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-#
+
 # Goals:
 #   - Create a resume of yesterday mail services
 #     Yesterday is defined as today -1 day
 #   - Send it to the mail admin
 
 # loading vars
-DAY=$(date -d "1 day ago" +" %b %d ")
+if [ "$1" = "today" ]; then
+    DAY=$(date +" %b %d ")
+else
+    DAY=$(date -d "1 day ago" +" %b %d ")
+fi
 # we redirect logs to syslogg and it goes to /var/log/syslog
 FILES="/var/log/syslog.1 /var/log/syslog"
 TMP=$(mktemp)
@@ -24,8 +28,9 @@ echo "MailD: Sending the mail traffic summary for ($DAY) to $TO"
 
 # parse files
 cat ${FILES} | grep ${MTA} | grep "${DAY}" | \
-    grep -v localhost | cut -d ":" -f 4- | \
-    sed s/"^ "//g > ${TMP}
+    grep -v localhost | grep -v '127.0.0.1' | \
+    sed -E 's/.* ([A-Z][a-z]{2} [0-9]{1,2} [0-9]{2}:[0-9]{2}:[0-9]{2}.*)/\1/' \
+    > ${TMP}
 
 # ejecutando
 /usr/sbin/pflogsumm -i --iso-date-time --problems-first $TMP > ${RESUME}
@@ -41,4 +46,4 @@ swaks \
     --body @${RESUME} > /dev/null
 
 # cleaning
-rm $TMP $RESUME 
+rm $TMP $RESUME

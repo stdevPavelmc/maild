@@ -10,13 +10,9 @@ LABEL last_modified="2024-08-11"
 
 #repoubuntu
 
+LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
+ENV REFRESHED_AT=2023-04-23
 ENV DEBIAN_FRONTEND=noninteractive
-
-# DEBUG tools only on debug build
-ARG DEBUG
-RUN if [ "$DEBUG" ]; then \
-    apt-get update && apt-get install -y nano net-tools; \
-    fi
 
 RUN apt-get update && \
     apt-get install -y \
@@ -27,7 +23,8 @@ RUN apt-get update && \
         dovecot-pgsql \
         dovecot-sieve \
         dovecot-lmtpd \
-        dovecot-managesieved
+        dovecot-managesieved \
+        python3
 
 RUN mkdir /home/vmail && \
     chown -R 5000:5000 /home/vmail && \
@@ -40,6 +37,13 @@ ADD dovecot/ /etc/dovecot
 
 ADD docker-entrypoint.sh configure.sh check.sh /
 RUN chmod +x /*.sh
+
+# sendmail wrapper to log LMTP deliveries from sieve
+COPY sendmail.py /usr/sbin/sendmail
+RUN chmod +x /usr/sbin/sendmail
+# log for the sendmail utility
+RUN touch /var/log/sendmail-lmtp.log
+RUN chmod 0666 /var/log/sendmail-lmtp.log
 
 # DEBUG tools only on debug build
 ARG DEBUG

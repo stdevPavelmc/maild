@@ -1,4 +1,4 @@
-FROM php:8.3-apache-bookworm
+FROM php:8.0-apache
 
 LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
 LABEL image.name="MailD Mail User Agent, aka: Webmail"
@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 LABEL last_modified="2026-01-19"
 
-ARG SNAPPY_VERSION=2.35.3
+ARG SNAPPY_VERSION 2.38.2
 
 # install base tools
 RUN apt-get update && \
@@ -16,6 +16,7 @@ RUN apt-get update && \
         postgresql-client \
         curl \
         wget \
+        crudini \
         bind9-host  \
         libfreetype6-dev \
         libjpeg62-turbo-dev \
@@ -38,6 +39,8 @@ COPY docker-entrypoint.sh check.sh /
 RUN chmod +x /*.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
+
+VOLUME ["/var/www/html/"]
 
 HEALTHCHECK --interval=1m --timeout=3s --start-period=30s --retries=2 \
     CMD curl -f http://localhost/ || exit 1

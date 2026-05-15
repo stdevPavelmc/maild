@@ -1,7 +1,7 @@
-FROM php:8.3-apache-bookworm
+FROM php:8.1-apache-bookworm
 
-LABEL original_maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin) PorfixAdmin project"
-LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
+LABEL maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin)"
+LABEL modified="Pavel Milanes <pavelmc@gmail.com>, to read the database values from a common posttgres variables"
 LABEL image.name="MailD Mail Administrator UI, aka: Web Administration"
 LABEL org.opencontainers.image.description="MailD Mail Administrator UI, aka: Web Administration"
 LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
@@ -61,9 +61,9 @@ RUN set -ex; \
 ARG POSTFIXADMIN_VERSION=3.3.13
 ARG POSTFIXADMIN_SHA512=bf7daaa089ee3adc4b557f1a7d0509d78979ef688fb725bab795f5c9d81e8774296245fde0cb184db51e9185cad381682c3ecc0bfadf852388b499a0a95cca64
 
-ENV POSTFIXADMIN_VERSION=$POSTFIXADMIN_VERSION
-ENV POSTFIXADMIN_SHA512=$POSTFIXADMIN_SHA512
-ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+ENV POSTFIXADMIN_VERSION $POSTFIXADMIN_VERSION
+ENV POSTFIXADMIN_SHA512 $POSTFIXADMIN_SHA512
+ENV APACHE_DOCUMENT_ROOT /var/www/html/public
 
 RUN set -eu; sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf; \
     sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf

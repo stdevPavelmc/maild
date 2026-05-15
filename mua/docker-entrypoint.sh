@@ -1,9 +1,9 @@
 #!/bin/bash
 set -m -o pipefail
-
 # This script is part of MailD
 # Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 
+# Author: Pavel Milane <pavelmc@gmail.com>
 # Goal: Configure an instance of snappy mail from the default config file.
 # But with one trick, We must start the apache service first
 
@@ -36,7 +36,7 @@ echo "|| Initial default admin passsword: $(cat ${PASS})"
 echo "======================================================================"
 
 # List of environment variables to check
-env_vars=(BANNER_TITLE CTDB MTA MDA POSTGRES_HOST POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD)
+env_vars=(BANNER_TITLE POSTGRES_EXTRA_DB MTA MDA POSTGRES_HOST POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD)
 
 # Loop over the environment variables
 for var in "${env_vars[@]}"; do
@@ -67,11 +67,15 @@ if [ "${MUA_DEBUG}" ] ; then
 fi
 
 # switcheroo voodo magic
-sed s/"^title = .*$"/"title = ${BANNER_TITLE}"/ -i ${CONFIG}
-sed s/"^type = .*$"/"type = \"pgsql\""/ -i ${CONFIG}
-sed s/"^pdo_user = .*$"/"pdo_user = ${POSTGRES_USER}"/ -i ${CONFIG}
-sed s/"^pdo_password = .*$"/"pdo_password = ${POSTGRES_PASSWORD}"/ -i ${CONFIG}
-sed s/"^pdo_dsn = .*$"/"pdo_dsn = \"host=${POSTGRES_HOST};port=5432;dbname=${CTDB}\""/ -i ${CONFIG}
+# Webmail visuals
+crudini --set --inplace ${CONFIG} webmail title "${BANNER_TITLE}"
+crudini --set --inplace ${CONFIG} webmail loading_description "Chagod Mail Services"
+# contacts DB
+crudini --set --inplace ${CONFIG} contacts enabled On
+crudini --set --inplace ${CONFIG} contacts type pgsql
+crudini --set --inplace ${CONFIG} contacts pdo_dsn "host=${POSTGRES_HOST};port=5432;dbname=${POSTGRES_EXTRA_DB}"
+crudini --set --inplace ${CONFIG} contacts pdo_user ${POSTGRES_USER}
+crudini --set --inplace ${CONFIG} contacts pdo_password "${POSTGRES_PASSWORD}"
 
 # Debug
 if [ "${MUA_DEBUG}" ] ; then
