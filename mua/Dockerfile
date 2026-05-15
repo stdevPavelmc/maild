@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 LABEL last_modified="2026-01-19"
 
-ARG SNAPPY_VERSION 2.38.2
+ARG SNAPPY_VERSION=2.38.2
 
 # install base tools
 RUN apt-get update && \
