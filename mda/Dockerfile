@@ -1,4 +1,4 @@
-FROM ubuntu:jammy
+FROM ubuntu:resolute
 
 LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
 LABEL image.name="MailD Mail Delivery Agent, aka: Dovecot"

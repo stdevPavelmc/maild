@@ -4,7 +4,7 @@
 #
 # Key differences from production:
 # - Uses env.sample instead of .env
-# - Fixed image names (pavelmc/maild-*:develop)
+# - Fixed image names (pavelmc/maild_*:develop)
 # - Local bind mount volumes (./ldata/*)
 # - JSON logging instead of syslog
 # - More ports exposed for debugging
@@ -17,7 +17,7 @@ networks:
 
 services:
   db:
-    image: pavelmc/maild-db:develop
+    image: pavelmc/maild_db:develop
     build: ./db/
     container_name: maild-dev-db
     hostname: db
@@ -34,7 +34,7 @@ services:
       - "5432:5432"  # Exposed for local debugging
 
   admin:
-    image: pavelmc/maild-admin:develop
+    image: pavelmc/maild_admin:develop
     build: ./admin/
     container_name: maild-dev-admin
     hostname: admin
@@ -54,7 +54,7 @@ services:
       - maild-dev
 
   mua:
-    image: pavelmc/maild-mua:develop
+    image: pavelmc/maild_mua:develop
     build: ./mua/
     container_name: maild-dev-mua
     hostname: mua
@@ -73,7 +73,7 @@ services:
       - maild-dev
 
   mda:
-    image: pavelmc/maild-mda:develop
+    image: pavelmc/maild_mda:develop
     build: ./mda/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-dev-mda
@@ -101,7 +101,7 @@ services:
       - maild-dev
 
   mta:
-    image: pavelmc/maild-mta:develop
+    image: pavelmc/maild_mta:develop
     build: ./mta/
     container_name: maild-dev-mta
     domainname: ${DEFAULT_DOMAIN}
@@ -132,7 +132,7 @@ services:
       - maild-dev
 
   clamav:
-    image: pavelmc/maild-clamav:develop
+    image: pavelmc/maild_clamav:develop
     build: ./clamav/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-dev-clamav
@@ -150,7 +150,7 @@ services:
       - maild-dev
 
   amavis:
-    image: pavelmc/maild-amavis:develop
+    image: pavelmc/maild_amavis:develop
     build: ./amavis/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-dev-amavis
@@ -172,7 +172,7 @@ services:
       - maild-dev
 
   cron:
-    image: pavelmc/maild-cron:develop
+    image: pavelmc/maild_cron:develop
     build: ./cron/
     domainname: ${DEFAULT_DOMAIN}
     container_name: maild-dev-cron
