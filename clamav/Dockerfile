@@ -16,7 +16,9 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
         clamav-daemon \
         clamav-freshclam \
-        libclamunrar9 \
+        p7zip-full \
+        unrar-free \
+        cabextract \
         netcat-traditional \
         ca-certificates && \
     apt-get clean && \
