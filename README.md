@@ -13,9 +13,22 @@ TL;DR:
 
 1. `cp env.sample .env` and set `DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `MAIL_ADMIN_PASSWORD`
    and `POSTGRES_PASSWORD`.
-2. `docker compose -f compose-github.yml up -d` (or `compose-dockerhub.yml` / `compose-gitlab.yml`).
+2. Pick the compose file for your case and start the stack:
+
+   - **Docker Hub — preferred, general use (from the internet):**
+     `docker compose -f docker-compose.yml up -d`
+   - **GitHub `ghcr.io` — restricted countries (e.g. Cuba) / Docker Hub blocked:**
+     `docker compose -f compose-github.yml up -d`
+   - **GitLab (own registry, with the shipped `.gitlab-ci.yml`):**
+     `docker compose -f compose-gitlab.yml up -d`
+
 3. Wait for `seed: catalogue provisioned: ...` in `docker compose logs -f admin`, then log in
    to PostfixAdmin as `MAIL_ADMIN_USER@DEFAULT_DOMAIN` and create your users.
+
+The webmail (`webmail.<DEFAULT_DOMAIN>`) and admin (`mailadmin.<DEFAULT_DOMAIN>`) UIs are
+**not** published directly on production: front them with a reverse proxy / ingress
+controller that terminates TLS (Traefik, Nginx, …) on the external `maild` network. The
+stack ships **no** TLS for the web UIs.
 
 Prefer the classic manual setup (OTP + `/setup.php`)? Set `AUTO_PROVISION=no` in `.env`.
 

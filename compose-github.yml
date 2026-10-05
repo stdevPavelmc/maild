@@ -1,15 +1,20 @@
+# GitHub Container Registry (ghcr.io) — use in restricted countries / when Docker Hub is blocked.
+#
+# STRICT copy of docker-compose.yml: the ONLY difference is the image: lines (ghcr.io).
+
 networks:
   maild:
-    # external: true
+    external: true
 
 volumes:
-  vmail: # mail storage
-  spool: # temp mail storage
-  clamav: # AV storage 
-  amavis: # filtering storage
-  spamassassin: # spam data 
-  db: # database storage
-
+  vmail:        # mail storage
+  spool:        # temp mail storage
+  clamav:       # AV storage
+  amavis:       # filtering storage
+  spamassassin: # spam data
+  db:           # database storage
+  mua_web:      # mua web data
+  db_backups:   # database backups
 
 services:
   db:
@@ -18,6 +23,8 @@ services:
     container_name: maild-db
     hostname: db
     restart: always
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
       - vars/db.env
       - vars/mua.env
@@ -33,10 +40,10 @@ services:
     container_name: maild-admin
     hostname: admin
     restart: always
-    ports:
-      - "8080:80"
+    # No published port: the UI is exposed through the ingress proxy (Traefik labels below).
     environment:
       POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTFIXADMIN_SETUP_PASSWORD: ${POSTFIXADMIN_SETUP_PASSWORD}
     env_file:
       - vars/db.env
       - vars/admin.env
@@ -49,6 +56,17 @@ services:
       driver: syslog
       options:
         syslog-address: "unixgram:///dev/log"
+    labels:
+      # Ingress (Traefik) — http://mailadmin.${DEFAULT_DOMAIN}
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailadmin.rule=Host(`mailadmin.${DEFAULT_DOMAIN}`)"
+      - "traefik.http.routers.mailadmin.entrypoints=websecure"
+      - "traefik.http.routers.mailadmin.tls=true"
+      # custom service (non default port)
+      - "traefik.http.routers.mailadmin.service=mailadmin_custom_port"
+      - "traefik.http.services.mailadmin_custom_port.loadbalancer.server.port=80"
+      # optional: pin the network Traefik must use when the container joins several
+      #- "traefik.docker.network=maild"
 
   mua:
     image: ghcr.io/stdevpavelmc/maild-mua:latest
@@ -56,12 +74,15 @@ services:
     container_name: maild-mua
     hostname: mua
     restart: always
-    # ports:
-    #   - "8060:80"
+    environment:
+      # production parity: SnappyMail's entrypoint writes the contacts DSN with this password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
       - vars/db.env
       - vars/mua.env
       - .env
+    volumes:
+      - mua_web:/var/www/html/data
     depends_on:
       - mda
     networks:
@@ -70,6 +91,16 @@ services:
       driver: syslog
       options:
         syslog-address: "unixgram:///dev/log"
+    labels:
+      # Ingress (Traefik) — https://webmail.${DEFAULT_DOMAIN}
+      - "traefik.enable=true"
+      - "traefik.http.routers.webmail.rule=Host(`webmail.${DEFAULT_DOMAIN}`)"
+      - "traefik.http.routers.webmail.entrypoints=websecure"
+      - "traefik.http.routers.webmail.tls=true"
+      # custom service (non default port)
+      - "traefik.http.routers.webmail.service=webmail_custom_port"
+      - "traefik.http.services.webmail_custom_port.loadbalancer.server.port=80"
+      #- "traefik.docker.network=maild"
 
   mda:
     image: ghcr.io/stdevpavelmc/maild-mda:latest
@@ -78,18 +109,18 @@ services:
     container_name: maild-mda
     hostname: mda
     restart: always
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN}
+      DEFAULT_MAILBOX_SIZE: ${DEFAULT_MAILBOX_SIZE}
     env_file:
       - vars/db.env
       - vars/mda.env
       - vars/ssl.env
       - .env
     ports:
-      # - "110:110"
-      # - "143:143"
-      - "993:993"
-      - "995:995"
-      # - "4190"
-      # - "12345"
+      - "993:993"     # IMAPS
+      - "995:995"     # POP3S
     depends_on:
       - db
     volumes:
@@ -113,15 +144,16 @@ services:
     environment:
       MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
       DEBUG: 'true'
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
       - vars/mta.env
       - vars/ssl.env
       - vars/db.env
       - .env
     ports:
-      - "25:25"
-      - "465:465"
-      - "587:587"
+      - "25:25"    # SMTP
+      - "465:465"  # SMTPS
+      - "587:587"  # Submission
     volumes:
       - vmail:/home/vmail
       - /certs:/certs
@@ -145,15 +177,8 @@ services:
     container_name: maild-clamav
     hostname: clamav
     restart: always
-    # healthcheck:  # buiilt in the image
-    #   test: [ "CMD", "./check.sh" ]
-    #   interval: 60s
-    #   retries: 3
-    #   start_period: 120s
     env_file:
       - vars/clamav.env
-    # ports:
-    #   - "3310"
     volumes:
       - clamav:/var/lib/clamav
       - amavis:/var/lib/amavis
@@ -171,17 +196,12 @@ services:
     container_name: maild-amavis
     hostname: amavis
     restart: always
-    # healthcheck: # buiilt in the image
-    #     test: ["CMD", "/check.sh"]
-    #     interval: 60s
-    #     retries: 3
-    #     start_period: 120s
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
       - vars/amavis.env
       - vars/db.env
       - .env
-    # ports:
-    #   - "10024:10024"
     volumes:
       - amavis:/var/lib/amavis
       - spamassassin:/var/lib/spamassassin
@@ -202,6 +222,8 @@ services:
     container_name: maild-cron
     hostname: cron
     restart: always
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     env_file:
       - vars/db.env
       - vars/amavis.env
@@ -209,6 +231,7 @@ services:
     volumes:
       - /var/log:/var/log
       - vmail:/home/vmail
+      - db_backups:/backups
     depends_on:
       - db
     networks:

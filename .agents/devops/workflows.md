@@ -85,6 +85,10 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 - `.pre-commit` hook stamps `org.opencontainers.image.created` on modified Dockerfiles and
   copyright years on modified executables — install it:
   `cp .pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit`.
+- **Compose chain:** mirror perdurable changes `docker-compose-dev.yml` →
+  `docker-compose.yml`, then regenerate the strict copies `compose-github.yml` /
+  `compose-gitlab.yml` (only the `image:` lines differ) — see `AGENTS.md → Core principles`
+  and `.agents/services/configuration.md`.
 - Feature branches; commit only when explicitly asked, never commit secrets; clear commit
   messages naming the touched service(s).
 - Update the matching `.agents/` doc and `Changelog.md` in the same change.

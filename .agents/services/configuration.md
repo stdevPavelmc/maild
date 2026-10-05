@@ -25,6 +25,35 @@ Two distinct mechanisms — do not mix them up:
 container; production loads `.env` instead. `DEFAULT_DOMAIN` / `MAIL_ADMIN_USER` must stay
 in sync between `env.dev` and `env.sample` (containers read their own copy from env.sample).
 
+## Compose files & the chain rule
+
+Production and its variants are kept in lock-step. The dependency chain is:
+
+```
+docker-compose-dev.yml   (dev source; dozzle lives only here)
+        │  mirror perdurable changes up
+        ▼
+docker-compose.yml       (production source of truth, derived from -dev)
+        │  strict copy: only the image: lines change
+        ├──▶ compose-github.yml   image: ghcr.io/stdevpavelmc/maild-<svc>:latest
+        └──▶ compose-gitlab.yml   image: ${IMG_<SVC>}:${TAG}  (see .gitlab-ci.yml)
+```
+
+- `docker-compose-dev.yml` → binds `./ldata/*`, `env.sample`, tag `develop`, JSON logs, dozzle.
+- `docker-compose.yml` → named volumes, `.env`, tag `latest`, syslog, image
+  `pavelmc/maild-<svc>:latest`, external `maild` network, **Traefik labels** on `admin`
+  (`mailadmin.${DEFAULT_DOMAIN}`) and `mua` (`webmail.${DEFAULT_DOMAIN}`).
+- `compose-github.yml` / `compose-gitlab.yml` are **strict copies** — regenerate them from
+  `docker-compose.yml` whenever it changes (only the `image:` lines differ).
+  `compose-dockerhub.yml` was removed: `docker-compose.yml` *is* the Docker Hub file.
+
+Images are always named `maild-<svc>:<tag>`. `.gitlab-ci.yml` sets
+`COMPOSE_FILE=compose-gitlab.yml` and the `IMG_*` vars to `$CI_REGISTRY_IMAGE/maild-<svc>`.
+
+Production exposes **no** TLS for the web UIs: the operator must run an ingress controller
+(Traefik, Nginx, …) that terminates TLS and joins the external `maild` network; the Traefik
+labels above are only the routing hints.
+
 ## vars/ anatomy
 
 Each `vars/<service>.env` has two sections, separated by the

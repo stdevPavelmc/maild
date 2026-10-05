@@ -19,6 +19,23 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## 2026-10-04 1.3.0-rc
+- Changed: **compose file refactor.** `docker-compose.yml` is now the single production source
+  of truth (derived from `docker-compose-dev.yml`); `compose-github.yml` and `compose-gitlab.yml`
+  are strict copies that differ only in the `image:` lines. All images use the
+  `maild-<svc>:<tag>` naming. `compose-dockerhub.yml` was **removed** (`docker-compose.yml`
+  is the Docker Hub file). See `AGENTS.md` → Core principles for the sync rule.
+- Added: Traefik labels on every production compose file exposing `webmail.<DEFAULT_DOMAIN>`
+  (`mua`) and `mailadmin.<DEFAULT_DOMAIN>` (`admin`); the web UIs are no longer published
+  directly — an external ingress that terminates TLS is **required** (Traefik, Nginx, …; not
+  provided).
+- Changed: the mta/mda ports are published on every compose file; `dozzle` is dev-only.
+- Fixed: `.github/workflows/docker-image.yml` no longer references the removed
+  `compose-dockerhub.yml` nor the non-existent `setrepos.sh`; `.gitlab-ci.yml` now sets
+  `COMPOSE_FILE=compose-gitlab.yml` and `IMG_*` to `$CI_REGISTRY_IMAGE/maild-<svc>`.
+- Changed: `README.md` / `INSTALL.md` document the three deployment cases (Docker Hub
+  preferred, GitHub for restricted countries, GitLab) and the required ingress.
+
+
 
 - Added: **zero-touch first-boot provisioning**. A fresh deploy now comes up ready to use:
   on the first boot `db` creates the catalogue plus the `maild_provision` sentinel table (a

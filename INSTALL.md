@@ -39,18 +39,19 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 
 2. Review `vars/` if you need to tweak a service.
 
-3. Pick the compose file and start the stack:
+3. Pick the compose file for your case and start the stack (the `maild` network is external,
+   create it once with `docker network create maild`):
 
    ```sh
-   # Internet / Docker Hub (default):
-   docker compose -f compose-dockerhub.yml pull
-   docker compose -f compose-dockerhub.yml up -d
+   # Internet / Docker Hub — preferred, general use:
+   docker compose -f docker-compose.yml pull
+   docker compose -f docker-compose.yml up -d
 
-   # GitHub images (recommended where Docker Hub is blocked):
+   # GitHub images — restricted countries (e.g. Cuba) / Docker Hub blocked:
    docker compose -f compose-github.yml pull
    docker compose -f compose-github.yml up -d
 
-   # GitLab registry / Traefik (see compose-gitlab.yml):
+   # GitLab registry — for GitLab users, paired with the shipped .gitlab-ci.yml:
    docker compose -f compose-gitlab.yml pull
    docker compose -f compose-gitlab.yml up -d
    ```
@@ -58,7 +59,7 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 4. Watch the first boot provision itself:
 
    ```sh
-   docker compose -f compose-github.yml logs -f admin
+   docker compose -f docker-compose.yml logs -f admin
    ```
 
    When you see `seed: catalogue provisioned: domain=... admin=...` the server is ready.
@@ -155,9 +156,13 @@ defaults), `PROVISION_WAIT_TIMEOUT`, `PROVISION_FORCE` (re-write the admin passw
 
 ## HTTPS & web UIs
 
-MailD does **not** terminate TLS for the web UIs in the stock `compose-*.yml`; front them
-with a reverse proxy (Traefik or Nginx) — `compose-gitlab.yml` ships a Traefik example. The
-webmail listens on port 80 and the admin UI on 8080 inside the stack.
+MailD does **not** terminate TLS for the web UIs; every production compose file ships
+Traefik labels that route `webmail.<DEFAULT_DOMAIN>` (webmail) and
+`mailadmin.<DEFAULT_DOMAIN>` (admin). You **must** front the stack with a reverse proxy /
+ingress controller that terminates TLS (Traefik, Nginx, …) — it is **not** provided. Attach
+the ingress to the external `maild` network (create it once with
+`docker network create maild`) so it can reach the `admin` and `mua` containers, both
+listening on port 80 inside the stack.
 
 The host must carry the same name as the mail server (see Requirements) for Let's Encrypt,
 and the certs must live in the standard `/etc/letsencrypt` location.
@@ -204,6 +209,7 @@ If you set `AUTO_PROVISION=no` you get the original hand-driven flow. After the 
 ## Bonus: GitLab & Traefik
 
 There is a sample `.gitlab-ci.yml` and `env.sample_gitlab` in the repo; the GitLab flow uses
-`compose-gitlab.yml` (rename it to `docker-compose.yml` if you wish) with Traefik labels
-already in place. On a slow/restricted link pre-download build sources and use the `local`
-Dockerfile variants.
+`compose-gitlab.yml` (the pipeline sets `COMPOSE_FILE=compose-gitlab.yml` and the `IMG_*`
+image variables). Every production compose file already carries the Traefik labels, so any
+of them can sit behind a Traefik ingress. On a slow/restricted link pre-download build
+sources and use the `local` Dockerfile variants.

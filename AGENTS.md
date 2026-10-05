@@ -35,6 +35,20 @@ for maintenance jobs.
   writes the `maild_provision` row; `amavis`/`mua`/`mta` wait on it before their config
   stage (no manual `setup.php`, no stack restart). Keep the seeder idempotent and
   non-destructive, and keep `AUTO_PROVISION=no` working as the manual fallback.
+- **Compose file chain.** `docker-compose-dev.yml` is the development source of truth;
+  every *perdurable* change must be mirrored into `docker-compose.yml` (the **production
+  source of truth**, derived from `-dev`). `compose-github.yml` and `compose-gitlab.yml` are
+  strict copies of `docker-compose.yml` and must be **chain-updated in the same commit** —
+  only the `image:` lines differ (GitLab uses `${IMG_<SVC>}:${TAG}`, wired by
+  `.gitlab-ci.yml`). `compose-dockerhub.yml` no longer exists: `docker-compose.yml` *is* the
+  Docker Hub file. Images are always named `maild-<svc>:<tag>`; `dozzle` is dev-only.
+- **Production HTTP is proxied.** `admin` (`mailadmin.${DEFAULT_DOMAIN}`) and `mua`
+  (`webmail.${DEFAULT_DOMAIN}`) carry Traefik labels on every production compose file, and
+  the stack terminates **no** TLS for them. The operator must supply an ingress controller
+  that terminates TLS (Traefik, Nginx, …) and joins the external `maild` network.
+- **MTA & MDA ports** all MTA ports [25, 465, 587] are exposed to the production
+  dockerfiles; in the case of the MDA only the 993 & 995 ports are exposed, no
+  text-plain access ports on the MDA are exposed on the production dockerfiles
 - Local work **always** uses `docker-compose-dev.yml`; never run the production
   `docker-compose.yml` locally.
 - Every compose command that creates containers **must** pass `--env-file env.dev`
