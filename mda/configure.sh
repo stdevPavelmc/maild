@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 # config file
 CFILE=/etc/dovecot/config.local
 

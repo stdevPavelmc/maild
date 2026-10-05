@@ -1,15 +1,7 @@
-FROM ubuntu:resolute
+FROM ubuntu:jammy
 
-LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
-LABEL image.name="MailD Mail Transport Agent, aka: Postfix"
-LABEL org.opencontainers.image.description="MailD Mail Transport Agent, aka: Postfix"
-LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
-LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2024-08-11"
-
-#repoubuntu
-
+ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && \
@@ -19,7 +11,7 @@ RUN apt-get update && \
         postfix-pgsql \
         postfix-policyd-spf-python  \
         net-tools \
-        netcat-traditional \
+        netcat \
         postgresql-client \
         bind9-host && \
     apt-get clean && \
@@ -38,7 +30,7 @@ RUN chmod +x /*.sh
 # DEBUG tools only on debug build
 ARG DEBUG
 RUN if [ "$DEBUG" ]; then \
-    apt-get update && apt-get install -y nano netcat-traditional-openbsd ; \
+    apt-get update && apt-get install -y nano netcat-openbsd ; \
     fi
 
 # Set the HEALTHCHECK command
@@ -54,3 +46,12 @@ EXPOSE 25 465 587
 
 CMD ["postfix"]
 
+
+# OCI labels (kept last; the pre-commit hook rewrites the created date)
+LABEL org.opencontainers.image.title="MailD MTA (Postfix)" \
+      org.opencontainers.image.description="MailD Mail Transport Agent: SMTP in/out, submission and content-filter relay hooks" \
+      org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
+      org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.created="2026-10-04"

@@ -22,8 +22,17 @@ from datetime import datetime
 # Configuration
 LMTP_SOCKET = '/var/run/dovecot/lmtp'
 LOG_FILE = '/var/log/sendmail-lmtp.log'
-SYSADMIN_EMAIL = 'sysadmin@chagod.software'
 ERROR_SUBJECT = 'Sieve - lmtp delivery error'
+
+def _get_sysadmin_email():
+    """Build SYSADMIN_EMAIL from environment variables."""
+    mail_admin_user = os.environ.get('MAIL_ADMIN_USER', 'postmaster')
+    default_domain = os.environ.get('DEFAULT_DOMAIN', '')
+    if default_domain:
+        return f'{mail_admin_user}@{default_domain}'
+    return f'postmaster@localhost'
+
+SYSADMIN_EMAIL = _get_sysadmin_email()
 
 # Setup logging
 logging.basicConfig(

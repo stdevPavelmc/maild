@@ -4,14 +4,20 @@ This project is inspired on [MailAD-Docker](https://github.com/stdevPavelmc/mail
 
 This is the docker version with a DB as a backend instead of a domain controler LDAP we have a [telegram group](https://t.me/MailAD_dev) to discuss the development, feel free to join.
 
-## How to test it?
+## Getting started
 
-Just setup a valid docker & docker-compose env, clone this repository, move to it's root folder and do this:
+The stack **provisions itself on the first boot** — no `/setup.php`, no manual domain
+creation, no down/up cycle. Full, automated walk-through: **[INSTALL.md](./INSTALL.md)**.
 
-1 - Edit the .env fiile with your domain and passwords for the services.
-2 - Review the vars folder for details on each service. 
-3 - once you are done, run `docker-compose up` to deploy the services.
-4 - Done! just kidding, yo need to finish the setup of the server, got o the Setup Instructions below.
+TL;DR:
+
+1. `cp env.sample .env` and set `DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `MAIL_ADMIN_PASSWORD`
+   and `POSTGRES_PASSWORD`.
+2. `docker compose -f compose-github.yml up -d` (or `compose-dockerhub.yml` / `compose-gitlab.yml`).
+3. Wait for `seed: catalogue provisioned: ...` in `docker compose logs -f admin`, then log in
+   to PostfixAdmin as `MAIL_ADMIN_USER@DEFAULT_DOMAIN` and create your users.
+
+Prefer the classic manual setup (OTP + `/setup.php`)? Set `AUTO_PROVISION=no` in `.env`.
 
 ## Services
 
@@ -30,35 +36,91 @@ Follow the links for each service to get details for each docker image.
 
 Warning!: Under no cirscuntance change the name of the hostnames, it will break the setup.
 
-## Setup instructions
+## SpamAssassin: rule updates, learning & maintenance
 
-After starting the success `docker coompose up` you need o initiate the DB config; if you ended with the admin container mapped to (for example) https://mails.domain.com you need to point your browser to: https://mails.domain.com/setup.php, to do the one time setup.
+The anti-spam stack (amavis container, SpamAssassin inside) has an automatic
+lifecycle, no manual work is needed:
 
-You need to find the setup password in the container maild-admin logs; this password is a one time password and will change with EVERY reboot of that container. It will look like this on the logs:
+- **Rule updates**: the amavis container runs `sa-update` daily (~02:50 with
+  jitter) from the `updates.spamassassin.org` channel and reloads amavisd after
+  installing new rules. Logs go to the container's syslog output.
+- **Shared config**: `/etc/spamassassin` is a shared docker volume (`saconf`)
+  mounted on the amavis, cron and mda containers; it's seeded with the distro
+  files on the first boot. The MailD tuning lives in `/etc/spamassassin/maild.cf`,
+  regenerated at every container start; tune it via env vars on `vars/amavis.env`.
+  You can also drop extra `.cf` files there and every container will pick them up
+  (no rebuild needed, only an amavis reload/restart).
+- **Bayes database**: stored on the shared `spamassassin` volume
+  (`/var/lib/spamassassin/bayes`) and fed from three sources:
+    1. **Instant learning** (mda): moving a message into the `Junk` folder learns
+       it as spam and moving one out of it learns it as ham (false positive
+       correction). Done via Dovecot's imapsieve plugin + pipe helpers.
+    2. **Daily batch** (cron, 03:30): all the remaining messages on the users'
+       Junk folders are learned as spam, plus a small random sample of each
+       user's INBOX as ham (never learning spam-flagged messages).
+    3. **Autolearn** during normal scans, with the thresholds on `vars/amavis.env`.
+- **Junk purge** (cron, 03:00): messages older than `JUNK_RETENTION_DAYS` (7 by
+  default) are deleted from every user's Junk folder, keeping the mailboxes small.
+- **Weekly health report**: on Sundays the daily stats mail includes the Bayes
+  counters (spam/ham/tokens), the spam/ham balance and the freshness of the
+  rules channel, so a stalled update or a poisoned database is easy to spot.
+
+Useful env vars (see `vars/amavis.env`): `JUNK_RETENTION_DAYS`,
+`SA_HAM_SAMPLE_PER_USER`, `SA_HAM_SAMPLE_MAX`, `SA_AUTOLEARN_NONSPAM`,
+`SA_AUTOLEARN_SPAM`, `SA_BAYES_PATH`, `SA_UPDATE_HOUR`, `SA_UPDATE_MINUTE`.
+
+## Mailbox quota: daily fill report
+
+The mda container mails the mail admin (`MAIL_ADMIN_USER@DEFAULT_DOMAIN`) a daily
+report of the mailboxes that are close to filling up, so a full mailbox is spotted
+before its owner starts losing mail:
+
+- **When**: on the first tick past `QUOTA_REPORT_HOUR`:`QUOTA_REPORT_MINUTE`
+  (00:01 by default) that has no report yet that day. A container started later in
+  the day fires it on the first tick after the start. Both are read in container
+  local time and the containers run UTC (no `TZ` is set in the stack), so that is
+  UTC, the same convention the jobs in the cron container's `crontab` follow.
+- **What**: only the mailboxes over `QUOTA_REPORT_THRESHOLD` (80% by default),
+  grouped per domain and in 5% slots, worst first: critical (over
+  `QUOTA_REPORT_CRITICAL`, 99% by default), then over 95%, 90%, 85% and 80%.
+  Mailboxes under the threshold are not listed at all, and the ones without a
+  quota limit (unlimited) are never reported, only counted in the summary.
+- **Figures**: taken from dovecot itself (`doveadm quota get -A`), so they are
+  exactly what the quota plugin enforces, and only active mailboxes are seen.
+- **Delivery**: through dovecot's own LDA, the same path the per-user quota
+  warnings use. A failed delivery is retried up to `QUOTA_REPORT_MAX_ATTEMPTS`
+  times (5 by default) and then given up until tomorrow, so a broken delivery
+  can't turn into a mail storm.
+
+This complements the per-user quota warnings (`quota_warning` at 80%/95% in
+`mda/dovecot/conf.d/90-quota.conf`): those tell *each user* about their own
+mailbox when it crosses a limit, this one gives the *admin* the whole picture
+every day, including the mailboxes that crossed a limit while nobody was looking.
+
+It runs from `/scripts/quota_report.sh` inside the mda container, as a background
+loop started by the entrypoint, so it never blocks dovecot and its output goes to
+the container log. Handy commands:
 
 ```sh
-[...]
-#################### !!! #############################
-OTP SETUP PASSWORD: NzBmYzAxOTQ1YzlkYzlkMzlmZWI2ZDUy
-#################### !!! #############################
-[...]
+# render the report on screen without mailing it
+docker compose exec mda /scripts/quota_report.sh --now --dry-run
+
+# mail it right away
+docker compose exec mda /scripts/quota_report.sh --now
 ```
 
-Once you have entered the setup password it will make some checks and then you need to create a superadmin account, using the setup password in the first field.
+Useful env vars: `QUOTA_REPORT_HOUR`, `QUOTA_REPORT_MINUTE`,
+`QUOTA_REPORT_THRESHOLD`, `QUOTA_REPORT_CRITICAL`, `QUOTA_REPORT_ONLY_WHEN_WARN`,
+`QUOTA_REPORT_MAX_PER_SLOT`, `QUOTA_REPORT_MAX_ATTEMPTS`.
 
-![Setup_first](./imgs/setup_first_screen.png)
+Note: a mailbox created with a quota of 0 in PostfixAdmin has *no* limit (dovecot
+reports `-` for it), so it counts as unlimited and is never reported. Give such
+mailboxes a real quota for them to show up in the report.
 
-Use the setup password to create a superadmin account, it must be a valid email address of the default domain, please be careful and observed the warnings in red; take into account that this is not an email mailbox, you will need to create the mailbox if needed later in the setup process.
+## Installation & server setup
 
-I repeat: this admin account is NOT a mailbox, and will have a different password if you create a mailbox with that name.
-
-## Domain setup
-
-After ending the setup, go to the login page https://mails.domain.com for example, and create a new domain:
-
-- Add the superadmin mailbox if needed [the superadmin account is the one you created in the setup phase]
-- Review the email aliases (postmaster/abuse/hostmaster)
-- Start to add users to the domain
+The installation, the first-boot provisioning, the first login, DKIM and the manual fallback
+(`AUTO_PROVISION=no`) are all documented in **[INSTALL.md](./INSTALL.md)**.
 
 # Contributing.
 

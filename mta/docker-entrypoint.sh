@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 ### create the tmp files
 MAIN=/tmp/main.cf
 MASTER=/tmp/master.cf
@@ -17,7 +14,7 @@ if [ -z "${RELAY}" ] ; then
     RELAY=""
 fi
 if [ -z "${MAX_MESSAGESIZE}" ] ; then
-    MAX_MESSAGESIZE=24914165 # 20MB by default, can be set to 0 for unlimited
+    MAX_MESSAGESIZE=2264924
 fi
 if [ -z "${ALWAYS_BCC}" ] ; then
     ALWAYS_BCC=
@@ -157,6 +154,29 @@ echo "spamasassin:       root" >> $ALIASES
 echo "root:     $SYSADMINS" >> $ALIASES
 # apply changes
 /usr/bin/newaliases
+
+# --- first-boot provisioning gate ------------------------------------------
+# The virtual_aliases are built from the domain list (POSTMASTER_ABUSE_SETUP), so wait
+# (bounded) for the admin container to finish provisioning the catalogue before we read it:
+# a fresh deploy then comes up with the aliases in place and no manual restart. Opt out with
+# AUTO_PROVISION=no.
+if [ "${AUTO_PROVISION:-yes}" != "no" ] ; then
+    echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
+    chmod 0600 ~/.pgpass
+    T=0
+    while : ; do
+        if [ "$(psql -tAq -w -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                -c "SELECT 1 FROM maild_provision WHERE id=1 AND version >= ${PROVISION_VERSION:-1}" 2>/dev/null)" = "1" ] ; then
+            echo "mta: catalogue is provisioned, configuring"
+            break
+        fi
+        if [ "$T" -ge "${PROVISION_WAIT_TIMEOUT:-180}" ] ; then
+            echo "mta: WARNING - catalogue not provisioned after ${T}s, continuing"
+            break
+        fi
+        sleep 3 ; T=$((T+3))
+    done
+fi
 
 # handle abuse and postmaster locally [not by default]
 VALIASEFILE="/etc/postfix/aliases/virtual_aliases"

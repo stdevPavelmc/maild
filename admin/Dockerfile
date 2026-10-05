@@ -1,21 +1,11 @@
 FROM php:8.1-apache-bookworm
 
-LABEL maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin)"
-LABEL modified="Pavel Milanes <pavelmc@gmail.com>, to read the database values from a common posttgres variables"
-LABEL image.name="MailD Mail Administrator UI, aka: Web Administration"
-LABEL org.opencontainers.image.description="MailD Mail Administrator UI, aka: Web Administration"
-LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
-LABEL org.opencontainers.image.licenses=GPL-3.0
-LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2026-01-12"
-
-#repodebian
-
 # docker-entrypoint.sh dependencies
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
     gosu \
+    postgresql-client \
     ; \
     rm -rf /var/lib/apt/lists/*
 
@@ -79,8 +69,9 @@ RUN set -eu; \
     mkdir -p /usr/src/postfixadmin/templates_c; \
     chown -R www-data:www-data /usr/src/postfixadmin
 
-COPY docker-entrypoint.sh /
-RUN chmod +x /docker-entrypoint.sh
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY seed.sh /seed.sh
+RUN chmod +x /docker-entrypoint.sh /seed.sh
 
 # DEBUG tools only on debug build
 ARG DEBUG
@@ -94,3 +85,13 @@ HEALTHCHECK --interval=1m --timeout=3s --start-period=30s --retries=2 \
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
 CMD ["apache2-foreground"]
+
+# OCI labels (kept last; the pre-commit hook rewrites the created date)
+LABEL org.opencontainers.image.title="MailD Admin UI (PostfixAdmin)" \
+      org.opencontainers.image.description="MailD web administration interface for domains, mailboxes and aliases (PostfixAdmin)" \
+      org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
+      org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      cu.maild.original-maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin), PostfixAdmin project" \
+      org.opencontainers.image.created="2026-10-04"

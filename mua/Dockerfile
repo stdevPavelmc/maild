@@ -1,13 +1,6 @@
-FROM php:8.0-apache
+FROM php:8.3-apache
 
-LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
-LABEL image.name="MailD Mail User Agent, aka: Webmail"
-LABEL org.opencontainers.image.description="MailD Mail User Agent, aka: Webmail"
-LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
-LABEL org.opencontainers.image.licenses=GPL-3.0
-LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2026-01-19"
-
+# if updated you must review domain.json against the new version !!!
 ARG SNAPPY_VERSION=2.38.2
 
 # install base tools
@@ -40,10 +33,17 @@ RUN chmod +x /*.sh
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
-VOLUME ["/var/www/html/"]
-
 HEALTHCHECK --interval=1m --timeout=3s --start-period=30s --retries=2 \
     CMD curl -f http://localhost/ || exit 1
 
 # CMD ["apache2-foreground"]
 
+
+# OCI labels (kept last; the pre-commit hook rewrites the created date)
+LABEL org.opencontainers.image.title="MailD Webmail (SnappyMail)" \
+      org.opencontainers.image.description="MailD webmail client (SnappyMail), CI build with upstream download" \
+      org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
+      org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.created="2026-10-04"

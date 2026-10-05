@@ -18,7 +18,7 @@ VMAILSTORAGE=/home/vmail
 
 # Setup the postgres elements, craaft the auth credentials & secure it
 echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
-chmod 0600 ~/.pgpass &1>2
+chmod 0600 ~/.pgpass 2>/dev/null
 
 # check if a mailbox is valid, it will return:
 #
@@ -106,7 +106,7 @@ function register() {
     # check to see to what list it's sended
     if [ ${days} -gt 273 ] ; then
         # older than 75 % of a year
-        if [ ${days} -gt 365 -a ] ; then
+        if [ ${days} -gt 365 ] ; then
             # delete!
             if [ "${3}" == "no" ] ; then
                 # safe to erase

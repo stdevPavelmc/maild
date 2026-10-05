@@ -12,4 +12,10 @@
 10 1 * * * root /scripts/resume.sh >/proc/1/fd/1 2>/proc/1/fd/2
 00 8 * * * root /scripts/backup_db.sh >/proc/1/fd/1 2>/proc/1/fd/2
 
+# empty the Junk folders of messages older than JUNK_RETENTION_DAYS
+00 03 * * * root /scripts/purge_junk.sh >/proc/1/fd/1 2>/proc/1/fd/2
+
+# feed the SA bayes db from the user's Junk folders + random INBOX samples
+30 03 * * * root /scripts/learn_from_folders.sh >/proc/1/fd/1 2>/proc/1/fd/2
+
 # An empty line is required at the end of this file for a valid cron file.

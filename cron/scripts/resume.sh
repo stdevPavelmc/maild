@@ -2,7 +2,7 @@
 
 # This script is part of MailD
 # Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
+#
 # Goals:
 #   - Create a resume of yesterday mail services
 #     Yesterday is defined as today -1 day
@@ -34,6 +34,32 @@ cat ${FILES} | grep ${MTA} | grep "${DAY}" | \
 
 # ejecutando
 /usr/sbin/pflogsumm -i --iso-date-time --problems-first $TMP > ${RESUME}
+
+# weekly SpamAssassin / Bayes health stats, appended to the resume on Sundays
+if [ "$(date +%u)" == "7" ] ; then
+    MAGIC=$(HOME=/tmp sa-learn --dump magic 2>/dev/null)
+    NSPAM=$(echo "${MAGIC}" | awk '/non-token data: nspam/   { v=0; for (i=1; i<=4; i++) if ($i+0 > v) v=$i+0; print v }')
+    NHAM=$(echo "${MAGIC}"  | awk '/non-token data: nham/    { v=0; for (i=1; i<=4; i++) if ($i+0 > v) v=$i+0; print v }')
+    NTOK=$(echo "${MAGIC}"  | awk '/non-token data: ntokens/ { v=0; for (i=1; i<=4; i++) if ($i+0 > v) v=$i+0; print v }')
+    BAL=$(awk -v s=${NSPAM:-0} -v h=${NHAM:-0} 'BEGIN { if (s>0 && h>0) printf "%.2f", s/h; else print "n/a" }')
+
+    echo "" >> ${RESUME}
+    echo "=== SpamAssassin / Bayes weekly health ==================================" >> ${RESUME}
+    echo "Bayes learned so far: ${NSPAM:-0} spam / ${NHAM:-0} ham messages (${NTOK:-0} tokens)" >> ${RESUME}
+    echo "Spam/Ham balance (spam/ham): ${BAL}" >> ${RESUME}
+
+    # freshness of the rules channel, sa-update must run daily on amavis
+    UPDIR=$(ls -td /var/lib/spamassassin/*/updates_spamassassin_org 2>/dev/null | head -n1)
+    if [ -n "${UPDIR}" ] ; then
+        AGE=$(( ( $(date +%s) - $(stat -c %Y "${UPDIR}") ) / 86400 ))
+        echo "SA rules channel: last update ${AGE} day(s) ago" >> ${RESUME}
+        if [ ${AGE} -gt 7 ] ; then
+            echo "WARNING: the rule updates seem stalled, review the amavis container logs!" >> ${RESUME}
+        fi
+    else
+        echo "WARNING: no sa-update ruleset found on /var/lib/spamassassin!" >> ${RESUME}
+    fi
+fi
 
 # email
 swaks \

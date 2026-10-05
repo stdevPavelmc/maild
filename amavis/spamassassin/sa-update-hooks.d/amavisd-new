@@ -1,0 +1,31 @@
+#!/bin/sh
+
+#This scripts restarts amavisd-new after spamassassin
+#rules got updated
+
+NAME=amavisd-new
+AMAVISPID=/var/run/amavis/amavisd.pid
+INIT=/etc/init.d/amavis 
+
+# stolen from dhcpd3 initscript 
+# single arg is -v for messages, -q for none
+check_status()
+{
+    if [ ! -r "$AMAVISPID" ]; then
+        test "$1" != -v || echo "$NAME is not running."
+        return 3
+    fi
+    if read pid < "$AMAVISPID" && ps -p "$pid" > /dev/null 2>&1; then
+        test "$1" != -v || echo "$NAME is running."
+        return 0
+    else
+        test "$1" != -v || echo "$NAME is not running but $AMAVISPID exists."
+        return 1
+    fi
+}
+
+#exit if amavis is not running
+check_status || exit 
+
+$INIT restart > /dev/null
+

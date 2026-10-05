@@ -1,18 +1,17 @@
 #!/bin/sh
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
-# is postfix still working
-case "$(printf "HELO healthcheck\nQUIT\n\n" | nc 127.0.0.1 25 -w1 | head -n1)" in
-	"220 "*" ESMTP"*)
-		echo "postfix ready"
-		;;
-	*)
-		echo "postfix is not responding"
-		exit 1
-		;;
-esac
+# Is postfix running?
+# Probe the master pidfile + a signal-0 test instead of `postfix status`: the latter routes
+# "the Postfix mail system is running: PID: N" through postlog -> maillog_file (=/dev/stdout),
+# which appended a line to the container log on every healthcheck tick (once a minute). The
+# pidfile check is silent and equivalent.
+QUEUE_DIR="$(postconf -h queue_directory 2>/dev/null)"
+PIDFILE="${QUEUE_DIR:-/var/spool/postfix}/pid/master.pid"
+if [ ! -s "$PIDFILE" ] || ! kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null ; then
+	echo "postfix is not responding"
+	exit 1
+fi
+echo "postfix ready"
 
 # if AMAVISIP still has the same IP, if not reboot
 AMAVISIP=`host ${AMAVIS} | awk '/has address/ { print $4 }'`

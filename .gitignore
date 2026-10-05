@@ -1,8 +1,10 @@
 ldata/*
 *.log
 .env
-test.sh
 snappymail-*
 mua/snappymail-*
 postfixadmin-*
 admin/postfixadmin-*
+test.creds
+*.log
+.local/

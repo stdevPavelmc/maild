@@ -1,9 +1,6 @@
 #!/bin/bash
 set -m
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 if [ ! -f /etc/clamav/configured ] ; then
     # debug
     if [ "${CLAMAV_DEBUG}" ]; then
