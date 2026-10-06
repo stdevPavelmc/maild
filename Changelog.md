@@ -18,6 +18,16 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-06 1.3.1-rc
+- Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
+  three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
+  images, start the dev stack, bootstrap the fixtures and run the full `test.sh` suite — this
+  also runs on pull requests. (2) On a push, retag and push the images to Docker Hub and
+  ghcr.io (`:develop` on `develop`, `:latest` on `main`). (3) On a push to `main`, tag the
+  `:latest` images with the `VERSION` file value (e.g. `1.3.0-rc`) and push them to both
+  registries. Documented in `.agents/devops/workflows.md`.
+
+
 ## 2026-10-04 1.3.0-rc
 - Changed: **compose file refactor.** `docker-compose.yml` is now the single production source
   of truth (derived from `docker-compose-dev.yml`); `compose-github.yml` and `compose-gitlab.yml`

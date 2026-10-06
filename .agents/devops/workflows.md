@@ -78,6 +78,30 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 - Exit code 0 only when every executed check passed. Run the full suite before merging
   changes to mta/mda/amavis/cron/config generation.
 
+## GitHub Actions CI
+
+`.github/workflows/docker-image.yml` runs on `develop`/`main` (push + pull request). It is a
+**single job with three ordered, gated phases** — a step only runs when every previous step
+succeeded, which is how "phase 2 only if phase 1 passed" is enforced:
+
+1. **Validate, build and test** — runs on *every* event, including pull requests:
+   validate all four compose files (`docker compose config -q`), build the `:develop` images,
+   run `./bootstrap-dev.sh` (brings the stack up, waits for db/schema/HTTP/ClamAV readiness,
+   provisions the fixtures and writes `test.creds`) and then run `./test.sh`.
+   `config` also resolves every `env_file:`, and the production files list the git-ignored
+   `.env`, so the job first materialises a throwaway `.env` from `env.sample`;
+   `compose-gitlab.yml` is validated with placeholder `IMG_*`/`TAG`.
+2. **Push images** — `push` events only, only if phase 1 passed: retag the local `:develop`
+   images for `pavelmc/maild-<svc>` (Docker Hub) and `ghcr.io/stdevpavelmc/maild-<svc>` and
+   push them as `:develop` on `develop` or `:latest` on `main`.
+3. **Version tag** — `push` to `main` only, only if phases 1-2 passed: tag the `:latest`
+   images with the `VERSION` file value (e.g. `1.3.0-rc`) and push them to both registries.
+
+PRs never log into a registry nor push. Secrets: `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`
+(Docker Hub) and the automatic `GITHUB_TOKEN` (ghcr.io). The images are built once and only
+retagged, so all three phases must stay in the **same job** — separate jobs run on different
+runners and could not see the locally built images.
+
 ## Code & git guidelines
 
 - Shell scripts (bash) for configuration/automation; templates use `_${VAR}_`.
