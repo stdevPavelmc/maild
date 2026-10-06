@@ -88,6 +88,9 @@ succeeded, which is how "phase 2 only if phase 1 passed" is enforced:
    validate all four compose files (`docker compose config -q`), build the `:develop` images,
    run `./bootstrap-dev.sh` (brings the stack up, waits for db/schema/HTTP/ClamAV readiness,
    provisions the fixtures and writes `test.creds`) and then run `./test.sh`.
+   The job installs `swaks` + `libnet-ssleay-perl` first: `test.sh`'s no-root fallback
+   unpacks only the swaks script and cannot do TLS, which fails every 465/587 and
+   authenticated check.
    `config` also resolves every `env_file:`, and the production files list the git-ignored
    `.env`, so the job first materialises a throwaway `.env` from `env.sample`;
    `compose-gitlab.yml` is validated with placeholder `IMG_*`/`TAG`.

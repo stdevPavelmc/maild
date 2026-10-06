@@ -46,7 +46,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Free disk space
         # The 8 image builds (ClamAV, SnappyMail, PostfixAdmin, ...) plus the ~230 MB
@@ -109,6 +109,16 @@ jobs:
         # DEFAULT_DOMAIN + example.net fixtures and writes test.creds. Splitting the "up"
         # out of it would duplicate the fragile bind-mount/ownership logic.
         run: ./bootstrap-dev.sh
+
+      - name: Install test dependencies (swaks with TLS support)
+        # test.sh needs swaks with real TLS (ports 465/587 + auth checks). Its no-root
+        # fallback unpacks only the swaks script from the .deb and pulls in NO Perl
+        # modules, so swaks dies with "TLS not available: requires Net::SSLeay"
+        # (rc=10, every TLS/authenticated check fails). Install the package properly:
+        # `swaks` only *Recommends* libnet-ssleay-perl, so request it explicitly.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y swaks libnet-ssleay-perl
 
       - name: Run the acceptance test suite
         run: |

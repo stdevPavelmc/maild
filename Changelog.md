@@ -26,6 +26,9 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   ghcr.io (`:develop` on `develop`, `:latest` on `main`). (3) On a push to `main`, tag the
   `:latest` images with the `VERSION` file value (e.g. `1.3.0-rc`) and push them to both
   registries. Documented in `.agents/devops/workflows.md`.
+- Fixed: the Actions job installs `swaks` + `libnet-ssleay-perl` before running the suite
+  (`test.sh`'s no-root swaks fallback ships no Perl TLS module, so every port 465/587 and
+  authenticated check failed with `rc=10`); bumped `actions/checkout` to `v5`.
 
 
 ## 2026-10-04 1.3.0-rc
