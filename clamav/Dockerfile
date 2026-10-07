@@ -1,16 +1,8 @@
 FROM ubuntu:jammy
 
-LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
-LABEL image.name="MailD AV solution, aka: ClamAV"
-LABEL org.opencontainers.image.description="MailD AV solution, aka: ClamAV"
-LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
-LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2024-08-11"
-
-#repoubuntu
-
-ENV DEBIAN_FRONTEND=noninteractive
+ENV REFRESHED_AT 2023-04-23
+ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
@@ -51,3 +43,12 @@ HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
 
 CMD ["/docker-entrypoint.sh"]
 
+
+# OCI labels (kept last; the pre-commit hook rewrites the created date)
+LABEL org.opencontainers.image.title="MailD antivirus (ClamAV)" \
+      org.opencontainers.image.description="MailD ClamAV antivirus scanning engine for the content filter" \
+      org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
+      org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.created="2026-10-04"

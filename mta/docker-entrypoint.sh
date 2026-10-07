@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 ### create the tmp files
 MAIN=/tmp/main.cf
 MASTER=/tmp/master.cf
@@ -158,6 +155,29 @@ echo "root:     $SYSADMINS" >> $ALIASES
 # apply changes
 /usr/bin/newaliases
 
+# --- first-boot provisioning gate ------------------------------------------
+# The virtual_aliases are built from the domain list (POSTMASTER_ABUSE_SETUP), so wait
+# (bounded) for the admin container to finish provisioning the catalogue before we read it:
+# a fresh deploy then comes up with the aliases in place and no manual restart. Opt out with
+# AUTO_PROVISION=no.
+if [ "${AUTO_PROVISION:-yes}" != "no" ] ; then
+    echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
+    chmod 0600 ~/.pgpass
+    T=0
+    while : ; do
+        if [ "$(psql -tAq -w -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+                -c "SELECT 1 FROM maild_provision WHERE id=1 AND version >= ${PROVISION_VERSION:-1}" 2>/dev/null)" = "1" ] ; then
+            echo "mta: catalogue is provisioned, configuring"
+            break
+        fi
+        if [ "$T" -ge "${PROVISION_WAIT_TIMEOUT:-180}" ] ; then
+            echo "mta: WARNING - catalogue not provisioned after ${T}s, continuing"
+            break
+        fi
+        sleep 3 ; T=$((T+3))
+    done
+fi
+
 # handle abuse and postmaster locally [not by default]
 VALIASEFILE="/etc/postfix/aliases/virtual_aliases"
 if [ "$POSTMASTER_ABUSE_SETUP" ] ; then
@@ -255,6 +275,14 @@ else
     echo "SSL certs in place, skipping generation"
 fi
 
+# Remove references for manual files for set-perms to make it happy
+cat /etc/postfix/postfix-files | sed "s|^.*directory/man.*$||g" | uniq > /tmp/1
+cat /tmp/1 > /etc/postfix/postfix-files
+for f in /etc/postfix/postfix-files.d/* ; do
+    sed "s|^.*directory/man.*$||g" -i $f
+done
+
+# let's start...
 if [ "$1" = 'postfix' ]; then
     if [ ! -f /certs/mail.crt -o ! -f /certs/mail.key -o ! -f /certs/RSA2048.pem ] ; then
         echo "Ooops! There is some SSL files missing"
@@ -264,6 +292,7 @@ if [ "$1" = 'postfix' ]; then
 
     # configure instance (populate etc)
     postconf compatibility_level=3.6
+    postfix set-permissions
     /usr/lib/postfix/configure-instance.sh
 
     # check postfix is happy (also will fix some things)

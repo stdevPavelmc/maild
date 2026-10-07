@@ -1,11 +1,24 @@
 #!/bin/sh
 set -e
 
+# SpamAssassin shared config: seed the shared volume is a tash of amavis 
+# Wait for amavis to populate the shared volume on the first boot of the container
+while [ ! -f /etc/spamassassin/init.pre ]; do
+    echo "==> Waiting for Spamassassin to be populated from amavis container"
+    sleep 3
+done
+
+# shared bayes folder: usable by amavis (scans), root (cron) and the
+# vmail user (this container, imapsieve learning)
+mkdir -p /var/lib/spamassassin/bayes
+chmod 0777 /var/lib/spamassassin/bayes
+
 if [ ! -f /etc/dovecot/configured ]; then
     # create the local config file
     CFILE=/etc/dovecot/config.local
     # Domain
-    echo "DEFAULT_DOMAIN=${DEFAULT_DOMAIN}" > "${CFILE}"
+    echo "MAIL_ADMIN_USER"=${MAIL_ADMIN_USER} > "${CFILE}"
+    echo "DEFAULT_DOMAIN=${DEFAULT_DOMAIN}" >> "${CFILE}"
     echo "COUNTRY=${COUNTRY}" >> ${CFILE}
     echo "STATE=${STATE}" >> ${CFILE}
     echo "CITY=${CITY}" >> ${CFILE}
@@ -43,6 +56,9 @@ if [ ! -f /etc/dovecot/configured ]; then
     # compile it
     sievec /var/lib/dovecot/sieve/default.sieve
     echo "Sieve compilation done"
+
+    # NOTE: the imapsieve learning scripts are compiled lazily by dovecot
+    # on their first use, no need to sieve them here
 
     # Run the configuration
     echo "Config starting"
@@ -102,7 +118,17 @@ if [ "$1" = 'dovecot' ]; then
         echo "We need a valid 'mail.crt' & 'mail.key' files in the /certs volume!"
         exit 1
     fi
+    
+    # daily mailbox quota report: a background loop that mails the admin the
+    # mailboxes over QUOTA_REPORT_THRESHOLD (80% by default) on the first tick
+    # past QUOTA_REPORT_HOUR:QUOTA_REPORT_MINUTE (00:01 by default) with no
+    # report yet today. It never blocks dovecot and logs to the container log.
+    # Force one right away with:
+    #   docker compose exec mda /scripts/quota_report.sh --now
+    /scripts/quota_report.sh --loop >/proc/1/fd/1 2>/proc/1/fd/2 &
+    echo "Quota report loop started (daily past ${QUOTA_REPORT_HOUR:-0}:${QUOTA_REPORT_MINUTE:-1})"
 
+    # start dovecot in foreground 
     exec /usr/sbin/dovecot -F < /dev/null
 fi
 

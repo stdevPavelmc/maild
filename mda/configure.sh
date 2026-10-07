@@ -1,9 +1,6 @@
 #!/bin/bash
 set -e
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 # config file
 CFILE=/etc/dovecot/config.local
 
@@ -13,7 +10,6 @@ if [ ! -f "${CFILE}" ] ; then
     exit 1
 fi
 
-# load config vars
 . ${CFILE}
 
 # # get the vars from the file
@@ -41,5 +37,3 @@ if [ ! -f /certs/mail.crt -a ! -f /certs/mail.key ] ; then
         -keyout /certs/mail.key
     chmod +r /certs/mail.key
 fi
-
-echo "Configuration success!"

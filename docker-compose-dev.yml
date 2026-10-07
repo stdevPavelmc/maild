@@ -1,0 +1,242 @@
+# Local Development Docker Compose Configuration
+# Usage: docker-compose -f docker-compose-dev.yml up
+#
+# Key differences from production:
+# - Uses env.sample instead of .env
+# - Fixed image names (pavelmc/maild-*:develop)
+# - Local bind mount volumes (./ldata/*)
+# - JSON logging instead of syslog
+# - More ports exposed for debugging
+# - No Traefik labels
+# - Local network (not external)
+
+networks:
+  maild-dev:
+    driver: bridge
+
+services:
+  db:
+    image: pavelmc/maild-db:develop
+    build: ./db/
+    container_name: maild-dev-db
+    hostname: db
+    restart: unless-stopped
+    environment:
+      # compose does not interpolate env_file contents and vars/db.env keeps the
+      # password out of the repository (it lives in the git-ignored .env), so the same
+      # explicit pass-through production uses is required here too - without it a fresh dev
+      # volume refuses to initialise ("superuser password is not specified").
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    env_file:
+      - vars/db.env
+      - vars/mua.env
+      - env.sample
+    volumes:
+      - ./ldata/db:/var/lib/postgresql/data
+    networks:
+      - maild-dev
+    ports:
+      - "5432:5432"  # Exposed for local debugging
+
+  admin:
+    image: pavelmc/maild-admin:develop
+    build: ./admin/
+    container_name: maild-dev-admin
+    hostname: admin
+    restart: unless-stopped
+    ports:
+      # NOTE: Apache in this image listens on 80 (the production compose documents the
+      # same intent as "8080:80"). Publishing 8080:8080 left the admin UI unreachable from the
+      # host even though the container reported healthy - found by bootstrap-dev.sh.
+      - "8080:80"  # Exposed for local access
+    environment:
+      POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTFIXADMIN_SETUP_PASSWORD: ${POSTFIXADMIN_SETUP_PASSWORD}
+    env_file:
+      - vars/db.env
+      - vars/admin.env
+      - env.sample
+    depends_on:
+      - db
+    networks:
+      - maild-dev
+
+  mua:
+    image: pavelmc/maild-mua:develop
+    build: ./mua/
+    container_name: maild-dev-mua
+    hostname: mua
+    restart: unless-stopped
+    environment:
+      # production parity: SnappyMail's entrypoint writes the contacts DSN with this password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "8081:80"  # Exposed for local access
+    env_file:
+      - vars/db.env
+      - vars/mua.env
+      - env.sample
+    volumes:
+      # NOTE: SnappyMail is baked into the image at /var/www/html; mounting a host directory
+      # OVER that path hides the application on a fresh volume (Apache answers 403 and the
+      # entrypoint waits forever for admin_password.txt) and would also pin the app to whatever
+      # version the volume was first seeded with. Only the writable `data/` directory is
+      # persisted, and bootstrap-dev.sh hands it to www-data so SnappyMail can initialise.
+      - ./ldata/mua_web:/var/www/html/data
+    depends_on:
+      - mda
+    networks:
+      - maild-dev
+
+  mda:
+    image: pavelmc/maild-mda:develop
+    build: ./mda/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-mda
+    hostname: mda
+    restart: unless-stopped
+    environment:
+      # compose does not interpolate env_file contents: production passes this explicitly
+      # and the dev stack needs it too, or Dovecot cannot reach the SQL catalogue
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN}
+      DEFAULT_MAILBOX_SIZE: ${DEFAULT_MAILBOX_SIZE}
+    env_file:
+      - vars/db.env
+      - vars/mda.env
+      - vars/ssl.env
+      - env.sample
+    ports:
+      - "110:110"    # POP3 - exposed for debugging
+      - "143:143"    # IMAP - exposed for debugging
+      - "993:993"    # IMAPS
+      - "995:995"    # POP3S
+      - "4190:4190"  # ManageSieve - exposed for debugging
+      - "12345:12345" # SASL - exposed for debugging
+    depends_on:
+      - db
+    volumes:
+      - ./ldata/vmail:/home/vmail
+      - ./ldata/certs:/certs
+      - ./ldata/spool:/var/spool/
+    networks:
+      - maild-dev
+
+  mta:
+    image: pavelmc/maild-mta:develop
+    build: ./mta/
+    container_name: maild-dev-mta
+    domainname: ${DEFAULT_DOMAIN}
+    hostname: mta
+    restart: unless-stopped
+    environment:
+      MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      DEBUG: 'true'
+      # production parity: see the note on the db/mda services
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    env_file:
+      - vars/mta.env
+      - vars/ssl.env
+      - vars/db.env
+      - env.sample
+    ports:
+      - "25:25"      # SMTP
+      - "465:465"    # SMTPS
+      - "587:587"    # Submission
+    volumes:
+      - ./ldata/vmail:/home/vmail
+      - ./ldata/certs:/certs
+      - ./ldata/spool:/var/spool/
+    depends_on:
+      - db
+      - mda
+      - amavis
+      - clamav
+    networks:
+      - maild-dev
+
+  clamav:
+    image: pavelmc/maild-clamav:develop
+    build: ./clamav/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-clamav
+    hostname: clamav
+    restart: unless-stopped
+    env_file:
+      - vars/clamav.env
+      - env.sample
+    ports:
+      - "3310:3310"  # ClamAV - exposed for debugging
+    volumes:
+      - ./ldata/clamav:/var/lib/clamav
+      - ./ldata/amavis:/var/lib/amavis
+    networks:
+      - maild-dev
+
+  amavis:
+    image: pavelmc/maild-amavis:develop
+    build: ./amavis/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-amavis
+    hostname: amavis
+    restart: unless-stopped
+    environment:
+      # production parity: the entrypoint queries the catalogue for the domain list
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # dev only: ClamAV needs a first virus-DB download that can take many minutes on a fresh
+      # volume, and amavis would then defer mail. Set AV_ENABLED=yes in .env (or the shell) to
+      # exercise the AV path locally; the delivery path under test is Postfix -> amavis -> LMTP.
+      AV_ENABLED: ${AV_ENABLED:-no}
+      SPAM_FILTER_ENABLED: ${SPAM_FILTER_ENABLED:-no}
+    env_file:
+      - vars/amavis.env
+      - vars/db.env
+      - env.sample
+    ports:
+      - "10024:10024"  # Amavis content filter - exposed for debugging
+    volumes:
+      - ./ldata/amavis:/var/lib/amavis
+      - ./ldata/spamassassin:/var/lib/spamassassin
+      - ./ldata/spool:/var/spool/
+    depends_on:
+      - db
+    networks:
+      - maild-dev
+
+  cron:
+    image: pavelmc/maild-cron:develop
+    build: ./cron/
+    domainname: ${DEFAULT_DOMAIN}
+    container_name: maild-dev-cron
+    hostname: cron
+    restart: unless-stopped
+    environment:
+      # production parity: the cron scripts talk to the catalogue with psql
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    env_file:
+      - vars/db.env
+      - vars/amavis.env
+      - env.sample
+    volumes:
+      - ./ldata/logs:/var/log
+      - ./ldata/vmail:/home/vmail
+      # parity with production (`/var/backups/maild:/backups`): without it /scripts/backup_db.sh
+      # writes into the container's writable layer and the daily dump vanishes on every recreate.
+      - ./ldata/backups:/backups
+    depends_on:
+      - db
+    networks:
+      - maild-dev
+
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: maild-dev-dozzle
+    hostname: dozzle
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    networks:
+      - maild-dev
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./ldata/dozzle:/data

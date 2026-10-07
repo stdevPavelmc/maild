@@ -2,7 +2,12 @@
 
 PERCENT=$1
 USER=$2
-cat << EOF | /usr/lib/dovecot/dovecot-lda -d $USER -o "plugin/quota=maildir:User quota:noenforcing"
+# The quota-warning service runs this as a dovecot `script`: there is no stdout there,
+# so the LDA inherits log_path/info_log_path=/dev/stdout and dies with
+# "Can't open log file /dev/stdout: No such device or address" (which silently broke
+# every quota warning). Point the LDA at a real file of its own.
+QW_LOG=/var/log/dovecot-quota-warning.log
+cat << EOF | /usr/lib/dovecot/dovecot-lda -d $USER -o "plugin/quota=maildir:User quota:noenforcing" -o "log_path=$QW_LOG" -o "info_log_path=$QW_LOG" -o "debug_log_path=$QW_LOG"
 From: postmaster@_DEFAULT_DOMAIN_
 Subject: =?UTF-8?Q?IMPORTANTE=3a_Advertencia_de_buz=c3=b3n_de_correos_al_llenarse!?=
 MIME-Version: 1.0
