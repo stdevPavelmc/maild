@@ -1,4 +1,4 @@
-FROM ubuntu:jammy
+FROM ubuntu:resolute
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 ENV REFRESHED_AT 2023-04-23
@@ -8,11 +8,16 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
         clamav-daemon \
         clamav-freshclam \
-        libclamunrar9 \
-        netcat \
+        libclamunrar12 \
+        netcat-openbsd \
         ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# No uid/gid pinning here on purpose: the distro-allocated clamav ids win (jammy: 101:102,
+# resolute: 100:101). The dev testbed follows whatever this image uses (bootstrap-dev.sh owns
+# ldata/clamav with those ids) and the production named volume is pre-populated from the image,
+# so it inherits them too. See .agents/devops/base-os-upgrade.md guardrail 8.
 
 # permission juggling
 RUN mkdir -p /var/run/clamav && \
@@ -51,4 +56,4 @@ LABEL org.opencontainers.image.title="MailD antivirus (ClamAV)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-04"
+      org.opencontainers.image.created="2026-10-15"

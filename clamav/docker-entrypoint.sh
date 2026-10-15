@@ -31,6 +31,17 @@ fi
 chown clamav:clamav /var/lib/clamav
 chmod -R 0755 /var/lib/clamav/
 
+# This is the one thing that breaks silently when the distro reallocates the clamav
+# uid/gid (jammy 101:102 -> resolute 100:101, see base-os-upgrade.md guardrail 8): a
+# bind-mounted volume still owned by the old ids is unreadable for the uid below, and
+# clamd then dies on its signature database with permission errors. Say it out loud.
+if [ ! -w /var/lib/clamav ] ; then
+    echo "ERROR: /var/lib/clamav is not writable by $(id -un) ($(id -u):$(id -g)); owned by $(stat -c '%u:%g' /var/lib/clamav 2>/dev/null || echo '?')."
+    echo "       dev:  re-run ./bootstrap-dev.sh (it re-owns ldata/clamav to the ids this image uses)"
+    echo "       prod: docker compose run --rm --no-deps --user root --entrypoint chown clamav -R clamav:clamav /var/lib/clamav"
+    exit 1
+fi
+
 DB_DIR=$(sed -n 's/^DatabaseDirectory\s\(.*\)\s*$/\1/p' /etc/clamav/freshclam.conf )
 DB_DIR=${DB_DIR:-'/var/lib/clamav'}
 MAIN_FILE_CVD="$DB_DIR/main.cvd"

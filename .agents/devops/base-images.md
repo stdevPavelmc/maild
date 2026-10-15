@@ -18,7 +18,11 @@ Confirm the intended direction with the maintainer before "fixing" either side:
 | db | `postgres:18-bookworm` | `postgres:15-bookworm` |
 | admin | `php:8.3-apache-bookworm` | `php:8.1-apache-bookworm` |
 | mua | `php:8.3-apache` | `php:8.0-apache` (the kept `mua/internet.Dockerfile` / `mua/local.Dockerfile` variants already use 8.3) |
-| mta, mda, amavis, clamav, cron | `ubuntu:resolute` | `ubuntu:jammy` |
+| mta, mda, amavis, cron | `ubuntu:resolute` | `ubuntu:jammy` |
+
+`clamav` already moved to `ubuntu:resolute` on 2026-10-15 (LTS rollover **1/5**; procedure and
+the two package traps it uncovered: `.agents/devops/base-os-upgrade.md`). The four remaining
+Ubuntu services still pin `ubuntu:jammy`.
 
 Note: changing the db major version on an existing `ldata/db` directory is not a rebuild —
 PostgreSQL data dirs are major-incompatible; dump/restore or `pg_upgrade` first.
