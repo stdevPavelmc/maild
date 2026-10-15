@@ -48,6 +48,19 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   upstream rule/plugin updates (`v400`–`v402.pre`, `HashBL` on by default, welcomelist/blocklist
   naming); MailD's only edit there (the `TextCat` plugin) was re-applied. Recorded in
   `.agents/devops/base-os-upgrade.md`.
+- Fixed: **content filtering would have failed on every message after the `amavis` base move.**
+  The `clamav` container does not receive the message — it is handed *file paths*: clamd
+  `CONTSCAN`s the files amavisd drops in its TEMPBASE, which both containers see through the
+  **shared** `/var/lib/amavis` mount. Those temp dirs/files are `0750`/`0640` owned by `amavis`,
+  and on jammy that worked only because the distro happened to hand uid **101** to *both*
+  `amavis` (101:101) and `clamav` (101:102). resolute gives amavis `994:994` and keeps clamav at
+  `100:101`, so clamd answered "File path check failure: Permission denied" and amavisd logged
+  `AV: ALL VIRUS SCANNERS FAILED` for every message: mail was quarantined/dropped and spam
+  scoring never ran (the EICAR and GTUBE acceptance checks are what caught it). The `clamav`
+  image now puts its user in the amavis group (`ARG AMAVIS_GID=994` — supplementary-group
+  membership lives in the image's own `/etc/group` and cannot follow another image's dynamic
+  allocation), and its entrypoint asserts read access to `/var/lib/amavis/tmp` at start so a
+  future id drift fails loudly instead of silently disabling the AV path.
 - Changed: **`clamav` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the first
   service of the LTS rollover (**1/5** — `mta`, `mda`, `amavis`, `cron` still on jammy). The
   templates are the resolute `clamav-daemon`/`clamav-freshclam` generated configs with MailD's

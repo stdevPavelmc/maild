@@ -30,10 +30,19 @@ COPY docker-entrypoint.sh check.sh /
 RUN chown -R clamav:clamav /etc/clamav
 RUN chmod +x /*.sh 
 
-# addd amavis compatibility
-RUN groupadd -g 114 amavis && \
-    useradd -r -u 114 -g amavis -d /var/lib/amavis -s /usr/sbin/nologin amavis && \
-    usermod -a -G clamav amavis
+# amavis compatibility: clamd is asked to CONTSCAN the message files amavisd writes into its
+# TEMPBASE, which both containers see through the *shared* /var/lib/amavis mount (dev: bind
+# ./ldata/amavis, prod: the `amavis` named volume). Those per-message dirs/files are 0750/0640
+# owned by amavis, so clamd has to be a **member of the amavis group**. On jammy this worked by
+# accident — the distro handed uid 101 to both services; resolute gives amavis 994:994 and
+# clamav 100:101, and clamd then fails every scan with "File path check failure: Permission
+# denied" (see .agents/devops/base-os-upgrade.md). The gid has to be spelled out here:
+# supplementary-group membership lives in this image's /etc/group and cannot follow another
+# image's dynamic allocation. docker-entrypoint.sh asserts the access at start and fails loudly
+# if the two ever drift apart again.
+ARG AMAVIS_GID=994
+RUN groupadd -g ${AMAVIS_GID} amavis && \
+    usermod -a -G amavis clamav
 
 VOLUME ["/var/lib/clamav"]
 VOLUME ["/var/lib/amavis"]

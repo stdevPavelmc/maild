@@ -202,6 +202,20 @@ git add -A && git commit -m "<svc>: pristine <tpl> templates from ubuntu:<new>"
 > healthcheck and every content-filter check fail). Measure it in the §3.2
 > throwaway container (`id clamav`) and land the image **and** the
 > `bootstrap-dev.sh` change together, in the same commit.
+>
+> **…except when two containers share a filesystem.** The `clamav` container mounts
+> the amavis volume: clamd is asked to `CONTSCAN` the files amavisd wrote into its
+> TEMPBASE, so clamd's *user* must be in the amavis *group* (those temp dirs/files
+> are `0750`/`0640`). On jammy this worked by accident — the distro handed uid 101
+> to both services; resolute gives amavis `994:994` and clamav `100:101`, so AV
+> failed on every message (`AV: ALL VIRUS SCANNERS FAILED`, "File path check
+> failure: Permission denied") while every container still reported *healthy*. A
+> group shared across two images **must** be pinned somewhere: `clamav/Dockerfile`
+> carries `ARG AMAVIS_GID=994` (supplementary-group membership lives in the image's
+> own `/etc/group`, it cannot follow the other image's dynamic allocation) and the
+> entrypoint asserts access to `/var/lib/amavis/tmp` at start. Before calling a step
+> done, walk every *shared* mount in that service's compose entry for this trap —
+> and remember the acceptance suite is what catches it (EICAR/GTUBE checks).
 
 ### 3.3 Port the MailD customizations (the core of the job)
 

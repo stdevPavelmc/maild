@@ -42,6 +42,20 @@ if [ ! -w /var/lib/clamav ] ; then
     exit 1
 fi
 
+# The other silent breaker is the *shared* TEMPBASE: clamd scans, by path, the message files
+# amavisd leaves in /var/lib/amavis/tmp, so this container must be able to traverse and read it
+# — which is why the amavis group is added in the Dockerfile (amavis allocates its gid
+# dynamically: 994 on resolute). Get it wrong and every message fails with "AV: ALL VIRUS
+# SCANNERS FAILED" while all containers still report healthy. Say it out loud instead.
+if [ -d /var/lib/amavis/tmp ] && [ ! -x /var/lib/amavis/tmp ] ; then
+    echo "ERROR: /var/lib/amavis/tmp is not readable by $(id -un) ($(id -u):$(id -g); groups: $(id -G)); owned by $(stat -c '%u:%g' /var/lib/amavis/tmp 2>/dev/null || echo '?')."
+    echo "       clamd must reach amavisd's TEMPBASE through the shared /var/lib/amavis mount"
+    echo "       (group $(stat -c '%g' /var/lib/amavis/tmp 2>/dev/null || echo '?') — see AMAVIS_GID in clamav/Dockerfile)."
+    echo "       dev:  re-run ./bootstrap-dev.sh (it re-owns ldata/amavis to the amavis image's ids)"
+    echo "       prod: re-own the amavis volume to the ids the amavis image runs as"
+    exit 1
+fi
+
 DB_DIR=$(sed -n 's/^DatabaseDirectory\s\(.*\)\s*$/\1/p' /etc/clamav/freshclam.conf )
 DB_DIR=${DB_DIR:-'/var/lib/clamav'}
 MAIN_FILE_CVD="$DB_DIR/main.cvd"

@@ -24,6 +24,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Runs clamd; signatures download on first boot (~230 MB) into `ldata/clamav`. On a
   restricted network set `ALTERNATE_MIRROR` in `vars/clamav.env`.
 - Port 3310 published for debugging (`nc -z localhost 3310` to probe).
+- Also mounts `/var/lib/amavis`: clamd is asked (by amavis, over TCP 3310) to `CONTSCAN` the
+  message files amavisd wrote into its TEMPBASE, so clamd needs read access to that shared
+  mount — its user is a member of the **amavis group** (`ARG AMAVIS_GID` in `clamav/Dockerfile`,
+  `994` on resolute). The entrypoint fails loudly if that access is missing.
 - env_file: `vars/clamav.env`, `env.sample`.
 
 ## amavis — content filter
