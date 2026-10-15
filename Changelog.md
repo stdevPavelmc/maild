@@ -43,7 +43,6 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   (`test.sh`'s no-root swaks fallback ships no Perl TLS module, so every port 465/587 and
   authenticated check failed with `rc=10`); bumped `actions/checkout` to `v5`.
 
-
 ## 2026-10-04 1.3.0-rc
 - Changed: **compose file refactor.** `docker-compose.yml` is now the single production source
   of truth (derived from `docker-compose-dev.yml`); `compose-github.yml` and `compose-gitlab.yml`
@@ -60,9 +59,6 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `COMPOSE_FILE=compose-gitlab.yml` and `IMG_*` to `$CI_REGISTRY_IMAGE/maild-<svc>`.
 - Changed: `README.md` / `INSTALL.md` document the three deployment cases (Docker Hub
   preferred, GitHub for restricted countries, GitLab) and the required ingress.
-
-
-
 - Added: **zero-touch first-boot provisioning**. A fresh deploy now comes up ready to use:
   on the first boot `db` creates the catalogue plus the `maild_provision` sentinel table (a
   migration), then `admin` seeds `DEFAULT_DOMAIN`, the PostfixAdmin superadmin
