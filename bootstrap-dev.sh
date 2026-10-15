@@ -271,12 +271,12 @@ bind_prep() { # <image> <host dir> <sh snippet run inside /target>
 		warn "could not prepare $2 with $1: $3"
 }
 # image names match docker-compose-dev.yml (this script is hard-wired to the dev stack);
-# amavis is uid 101 (amavis), clamav is uid 100 / gid 101 (clamav — what resolute allocates).
-# amavis: the whole image content matters — beside tmp/ it needs $db_home (amavisd-new dies
+# amavis is uid 994 (amavis — what resolute allocates), clamav is uid 100 / gid 101.
+# amavis: the whole image content matters — beside tmp/ it needs $db_home (amavisd dies
 # with "Please create an empty directory /var/lib/amavis/db") and virusmails; cp -n never
 # overwrites what the services already created, so a re-run is a no-op.
 bind_prep "pavelmc/maild-amavis:develop" "ldata/amavis" \
-	"cp -a -n /var/lib/amavis/. /target/ && chown -R 101:101 /target"
+	"cp -a -n /var/lib/amavis/. /target/ && chown -R 994:994 /target"
 # clamav: the clamav image itself runs as uid 100 and cannot chown, so use a root image
 # (the amavis one) as the vehicle.
 bind_prep "pavelmc/maild-amavis:develop" "ldata/clamav" \
