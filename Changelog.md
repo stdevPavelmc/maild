@@ -27,9 +27,13 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `FIPSCryptoHashLimits`, `Enable*Command`, `JsonStore*`) come along. Both images ship
   ClamAV 1.5.4, so there is no engine jump. Two resolute package changes: `libclamunrar9` →
   `libclamunrar12` (multiverse) and `netcat` → `netcat-openbsd` (the former virtual package no
-  longer resolves). The Dockerfile also pins the `clamav` uid/gid back to `101:102`, because
-  resolute allocates `100:101` and the testbed owns the signature volume as `101:102`.
-  Recorded in `.agents/devops/base-os-upgrade.md` for the remaining services.
+  longer resolves). resolute also allocates the `clamav` uid/gid differently (`100:101` where
+  jammy used `101:102`): the new ids win, so there is **no pin in the image** and the dev
+  testbed was moved to match (`bootstrap-dev.sh` owns `ldata/clamav` as `100:101`). An existing
+  deployment keeps its `clamav` volume owned by the old ids, so re-own it once — name-based, so
+  it resolves to whatever the image runs as:
+  `docker compose run --rm --no-deps --user root --entrypoint chown clamav -R clamav:clamav /var/lib/clamav`
+  (dev: just re-run `./bootstrap-dev.sh`). Recorded in `.agents/devops/base-os-upgrade.md`.
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
   images, start the dev stack, bootstrap the fixtures and run the full `test.sh` suite — this

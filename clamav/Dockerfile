@@ -14,12 +14,10 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-# The packages allocate the clamav user/group ids dynamically: jammy landed on 101:102,
-# resolute on 100:101. MailD pins them back to 101:102, because the dev volume is owned
-# as 101:102 (bootstrap-dev.sh) and clamd runs as that uid below -- a drifted id would
-# leave the signature database unreadable.
-RUN groupmod -g 102 clamav && \
-    usermod -u 101 -g 102 clamav
+# No uid/gid pinning here on purpose: the distro-allocated clamav ids win (jammy: 101:102,
+# resolute: 100:101). The dev testbed follows whatever this image uses (bootstrap-dev.sh owns
+# ldata/clamav with those ids) and the production named volume is pre-populated from the image,
+# so it inherits them too. See .agents/devops/base-os-upgrade.md guardrail 8.
 
 # permission juggling
 RUN mkdir -p /var/run/clamav && \

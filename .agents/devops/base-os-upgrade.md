@@ -170,14 +170,19 @@ git add -A && git commit -m "<svc>: pristine <tpl> templates from ubuntu:<new>"
 > `main universe restricted multiverse`, so it resolves). `clamav` is fixed;
 > `mta`, `mda` and `amavis` still install `netcat` and will hit the same wall.
 
-> **Dynamic service uid/gid drift.** Debian/Ubuntu allocate `clamav` (and the
-> other service users) dynamically from the 100–999 range: jammy landed on
-> `101:102`, resolute on `100:101`. The dev testbed owns `ldata/clamav` as
-> `101:102` (`bootstrap-dev.sh`) and each image runs `USER <svc>`, so a landed
-> service **must pin the ids in its Dockerfile** (`groupmod`/`usermod`) whenever
-> they drift — otherwise clamd cannot read its signature database and the
-> healthcheck plus every content-filter check fails. Check with `id clamav` in a
-> throwaway container built from the target base, before porting.
+> **Dynamic service uid/gid drift — the new ids win (guardrail 8).** Debian/Ubuntu
+> allocate `clamav` (and the other service users) dynamically from the 100–999
+> range, so they move with the base: jammy gave `101:102`, resolute `100:101`.
+> **Never pin them in the Dockerfile** — drop any pin you find and adapt the local
+> environment to what the image actually runs as. Each image ends with `USER
+> <svc>`: the dev bench owns its bind mounts (`bootstrap-dev.sh`: `ldata/clamav`
+> → `100:101`), while production named volumes are pre-populated from the image
+> and inherit the ids automatically — an *existing* prod volume keeps the old
+> owner and needs a one-off `chown` (remedy in `Changelog.md`). Get it wrong and
+> the service cannot read its own data (clamd dies on its signature database, the
+> healthcheck and every content-filter check fail). Measure it in the §3.2
+> throwaway container (`id clamav`) and land the image **and** the
+> `bootstrap-dev.sh` change together, in the same commit.
 
 ### 3.3 Port the MailD customizations (the core of the job)
 
@@ -254,7 +259,9 @@ bash`, `env | sort`, `doveadm` / `postconf` / `amavisd-new test-config`
 (see `.agents/devops/workflows.md → Debugging`). Typical traps: ClamAV
 first signature download (~230 MB, amavis defers mail until clamd
 answers); `mta` pointing at a dead `mda` IP; `cron`/`mda` waiting on a
-missing `init.pre` because `amavis` did not seed the volume.
+missing `init.pre` because `amavis` did not seed the volume; a bind mount
+whose owner no longer matches the image's service uid/gid (guardrail 8 —
+compare `id <svc>` in the image with `ls -ldn ldata/<svc>`).
 
 ## 4. SpamAssassin shared-volume contract (amavis → cron, mda)
 
