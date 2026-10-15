@@ -18,7 +18,7 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2026-10-06 1.3.1-rc
+## 2026-10-15 1.4.0-rc
 - Changed: **`clamav` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the first
   service of the LTS rollover (**1/5** — `mta`, `mda`, `amavis`, `cron` still on jammy). The
   templates are the resolute `clamav-daemon`/`clamav-freshclam` generated configs with MailD's
@@ -34,6 +34,8 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   it resolves to whatever the image runs as:
   `docker compose run --rm --no-deps --user root --entrypoint chown clamav -R clamav:clamav /var/lib/clamav`
   (dev: just re-run `./bootstrap-dev.sh`). Recorded in `.agents/devops/base-os-upgrade.md`.
+
+## 2026-10-06 1.3.1-rc
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
   images, start the dev stack, bootstrap the fixtures and run the full `test.sh` suite — this
