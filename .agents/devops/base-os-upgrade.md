@@ -36,6 +36,14 @@ Env chain (`env.dev`/`.env` → compose → `vars/*.env` → `_<VAR>_` templates
 6. **Doc rule:** every landed service updates, in the same commit,
    `.agents/devops/base-images.md`, `Changelog.md`, and this file if the
    procedure itself changed.
+7. **Caveats pass:** you may find a package renames, a service rename or some
+   OS changes that may impact other services/images at build/config time, use
+   a temporal caveats.md file to pass info during the upgrade progress to
+   next interations, never adds the caveats.md to the git tree.
+8. **Conflicts? new version wins:** if you find a uig:gid change, a service
+   rename, any needed breaking change that raise a conflict with the actual
+   status: new implementations always wins: adapt the actual code to the new
+   ways, names, uid:gid, etc.
 
 ## 1. Service order — dependency-aware, not alphabetical
 
@@ -73,12 +81,29 @@ side-by-side reference for `diff -r <tpl>-<old> <tpl>`.
 
 ### 3.0 Prep — baselines before touching anything
 
+Must work on a featue branch, never work over main or develop, checkout a feature branch over a
+clean develop branch
+
 ```bash
-git status --short   # must be clean
+git checkout develop
+git status --short # must be clean
 git checkout -b upgrade/<svc>-<new-codename>
-grep -H '^FROM' <svc>/Dockerfile
+```
+
+Make you have a clean baseline with passing tests
+
+```bash
+docker compose --env-file env.dev -f docker-compose-dev.yml build
+docker compose --env-file env.dev -f docker-compose-dev.yml up -d
 docker compose --env-file env.dev -f docker-compose-dev.yml exec <svc> dpkg -l | grep -E 'postfix|dovecot|amavis|clamav|spamassassin|postgresql-client' || true
 # mta: postconf -n | mda: doveconf -n | amavis: /usr/sbin/amavisd-new test-config
+```
+
+Ran the provision and the test bed and make sure it pass
+
+```bash
+./bootstrap-dev.sh
+./test.sh
 ```
 
 Record old codename, old `FROM`, and package versions for the §7 doc updates.
