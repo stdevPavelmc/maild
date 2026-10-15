@@ -19,6 +19,35 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## 2026-10-15 1.4.0-rc
+- Changed: **`amavis` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the second
+  service of the LTS rollover (**2/5** — `mta`, `mda`, `cron` still on jammy). The templates are
+  the resolute `amavisd-new` 2.13.0 / `spamassassin` 4.0.2 files with MailD's long-standing edits
+  re-applied verbatim — those edits are *not* distro defaults: the pristine `conf.d` trees are
+  byte-identical between jammy and resolute **except `21-ubuntu_defaults`**, so everything the
+  port had to keep (`$inet_socket_bind = ''`, `hostname -d`, the full `$banned_filename_re`, the
+  ClamAV-only `@av_scanners`, the commented `$unix_socketname`, the `_MTA_`/`_MTAIP_`/
+  `_CRONIP_`/`_CLAMAVIP_` placeholders and the `50-user` policy bank) came from MailD's own
+  files, not from the distro. Four resolute package changes: `netcat` → `netcat-openbsd` (the
+  former is now an unresolvable virtual package), `p7zip-full` → `7zip` (Provides p7zip-full,
+  same `/usr/bin/7z`) and — the one that matters — the daemon is now **`/usr/sbin/amavisd`**:
+  `amavisd-new` 2.13 dropped the `/usr/sbin/amavisd-new` name, so the entrypoint's `genrsa`,
+  `showkeys`, `test-config` and foreground calls were updated. resolute also allocates the
+  `amavis` uid/gid differently (`994:994` where jammy used `101:101`): the new ids win, so
+  there is **no pin in the image** and the dev testbed was moved to match (`bootstrap-dev.sh`
+  owns `ldata/amavis` as `994:994`). An existing deployment keeps its `amavis` volume owned by
+  the old ids, so re-own it once — name-based, so it resolves to whatever the image runs as:
+  `docker compose run --rm --no-deps --user root --entrypoint chown amavis -R amavis:amavis /var/lib/amavis`
+  (dev: just re-run `./bootstrap-dev.sh`). Two `21-ubuntu_defaults` flips that would have changed
+  how MailD handles mail are pinned back in `50-user` (which loads last): spam is still
+  **delivered** so it reaches the user's Junk folder — resolute sets
+  `$final_spam_destiny = D_DISCARD` — and the `postmaster` virus/spam notifications stay on
+  (resolute sets `$virus_admin`/`$spam_admin = undef`). The third, `20-debian_defaults` no longer
+  being the file that sets `$inet_socket_bind = ''`, is already covered because MailD's own copy
+  of that file carries the line — without it amavisd falls back to its built-in loopback default
+  (`Amavis/Conf.pm`) and the `mta → amavis:10024` hop breaks. SpamAssassin 4.0 brings the
+  upstream rule/plugin updates (`v400`–`v402.pre`, `HashBL` on by default, welcomelist/blocklist
+  naming); MailD's only edit there (the `TextCat` plugin) was re-applied. Recorded in
+  `.agents/devops/base-os-upgrade.md`.
 - Changed: **`clamav` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the first
   service of the LTS rollover (**1/5** — `mta`, `mda`, `amavis`, `cron` still on jammy). The
   templates are the resolute `clamav-daemon`/`clamav-freshclam` generated configs with MailD's

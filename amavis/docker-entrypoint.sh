@@ -1,6 +1,10 @@
 #!/bin/bash
 set -m -o pipefail
 
+# NOTE: on the resolute (26.04) base the daemon is /usr/sbin/amavisd: the amavisd-new 2.13
+# package dropped the /usr/sbin/amavisd-new name jammy shipped. See
+# .agents/devops/base-os-upgrade.md.
+
 # copy or overwrite the config files from the default ones
 cd /etc/amavis
 rm -rdf conf.d
@@ -252,7 +256,7 @@ if [ "${DKIM_SIGNING}" ] ; then
                     echo "DKIM key not present for domain ${DOMAIN} ...generating!!!"
 
                     # generate the key and the selector and set correct perms
-                    /usr/sbin/amavisd-new genrsa ${KEY} 1024
+                    /usr/sbin/amavisd genrsa ${KEY} 1024
                     chmod 640 ${KEY}
                     chown root:amavis ${KEY}
                 fi
@@ -283,7 +287,7 @@ if [ "${DKIM_SIGNING}" ] ; then
                 # show it to the user
                 echo " "
                 echo "=|| DKIM / DNS config for ${DOMAIN} ||="
-                amavisd-new showkeys ${DOMAIN} | tee /var/lib/amavis/dkim/${DOMAIN}.${SELECTOR}.txt
+                amavisd showkeys ${DOMAIN} | tee /var/lib/amavis/dkim/${DOMAIN}.${SELECTOR}.txt
             done
         else
             echo "No domains to process, DKIM signing disabled" 
@@ -323,7 +327,7 @@ find /etc/amavis/ -type d -exec chmod 0755 {} \;
 # testing amavis config
 echo "Testing amavis"
 rm /var/run/amavis/amavisd.pid 2> /dev/null
-/usr/sbin/amavisd-new test-config
+/usr/sbin/amavisd test-config
 
 # results
 R=$?
@@ -334,7 +338,7 @@ fi
 
 # test amavis config
 rm /var/run/amavis/amavisd.pid 2> /dev/null
-/usr/sbin/amavisd-new -i docker test-config
+/usr/sbin/amavisd -i docker test-config
 if [ $? -ne 0 ] ; then
     echo "Amavis config testing failed"
     exit 1
@@ -347,7 +351,7 @@ echo "Starting amavis"
 # + amavisd reload after new rules are installed)
 /sa-update-loop.sh &
 
-/usr/sbin/amavisd-new -u amavis -g amavis -i docker foreground
+/usr/sbin/amavisd -u amavis -g amavis -i docker foreground
 if [ $? -ne 0 ] ; then
     echo "Error, could not start amavis !!!"
     exit 1

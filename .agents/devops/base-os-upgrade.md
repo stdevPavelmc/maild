@@ -96,7 +96,7 @@ Make you have a clean baseline with passing tests
 docker compose --env-file env.dev -f docker-compose-dev.yml build
 docker compose --env-file env.dev -f docker-compose-dev.yml up -d
 docker compose --env-file env.dev -f docker-compose-dev.yml exec <svc> dpkg -l | grep -E 'postfix|dovecot|amavis|clamav|spamassassin|postgresql-client' || true
-# mta: postconf -n | mda: doveconf -n | amavis: /usr/sbin/amavisd-new test-config
+# mta: postconf -n | mda: doveconf -n | amavis: /usr/sbin/amavisd test-config
 ```
 
 Ran the provision and the test bed and make sure it pass
@@ -129,7 +129,7 @@ docker run --rm -it --name tpl-<svc>-<new> ubuntu:<new-codename> bash
 apt-get update && apt-get install -y <packages from Dockerfile>
 # mta: postfix postfix-pcre postfix-pgsql postfix-policyd-spf-python
 # mda: dovecot-pop3d dovecot-imapd dovecot-pgsql dovecot-sieve dovecot-lmtpd dovecot-managesieved spamassassin python3
-# amavis: amavisd-new p7zip-full unrar-free cabextract spamassassin gpg
+# amavis: amavisd-new 7zip unrar-free cabextract spamassassin gpg netcat-openbsd bind9-host postgresql-client
 # clamav: clamav-daemon clamav-freshclam libclamunrar12
 # cron: swaks pflogsumm bind9-host spamassassin cron ca-certificates (+ PGDG postgresql-client-<MAJOR>, see box)
 ```
@@ -161,14 +161,33 @@ git add -A && git commit -m "<svc>: pristine <tpl> templates from ubuntu:<new>"
 > pair at runtime, and an older client once wrote a ~20-byte empty dump it
 > reported as SUCCESS. Verify with `pg_dump --version` in the built image.
 
-> **Package-name traps on `resolute` (measured on the `clamav` step; they apply to
-> every service).** `netcat` is a *virtual* package with two providers
-> (`netcat-openbsd` in `main`, `netcat-traditional` in `universe`) and apt refuses
-> to choose: `E: Package 'netcat' has no installation candidate`. Install
-> `netcat-openbsd` explicitly. `libclamunrar9` no longer exists either — `clamav`
-> takes `libclamunrar12` (multiverse; the base image enables
-> `main universe restricted multiverse`, so it resolves). `clamav` is fixed;
-> `mta`, `mda` and `amavis` still install `netcat` and will hit the same wall.
+> **Package-name traps on `resolute` (measured on the `clamav` and `amavis`
+> steps; they apply to every service).** `netcat` is a *virtual* package with two
+> providers (`netcat-openbsd` in `main`, `netcat-traditional` in `universe`) and
+> apt refuses to choose: `E: Package 'netcat' has no installation candidate`.
+> Install `netcat-openbsd` explicitly. `libclamunrar9` no longer exists either —
+> `clamav` takes `libclamunrar12` (multiverse; the base image enables
+> `main universe restricted multiverse`, so it resolves). `p7zip-full` is gone
+> too: `7zip` provides it (`Provides: p7zip, p7zip-full`) and still ships
+> `/usr/bin/7z`, `/usr/bin/7za`, `/usr/bin/7zr` and `/usr/bin/p7zip`.
+> `clamav` and `amavis` are fixed; `mta` and `mda` still install `netcat` and will
+> hit the same wall.
+>
+> **Renamed binaries/daemons.** `amavisd-new` 2.13 installs **`/usr/sbin/amavisd`**
+> and *no longer* ships the `/usr/sbin/amavisd-new` name jammy had (the man page is
+> still `amavisd-new.8`). Everything that spawns the daemon must follow
+> (`amavis/docker-entrypoint.sh`: `genrsa`, `showkeys`, `test-config`,
+> `foreground`). `$pid_file`/`$lock_file` are still under `/var/run/amavis/`, so
+> `sa-update-loop.sh`'s HUP-reload keeps working. Grep each service's entrypoint
+> for the daemon name before bumping it.
+>
+> **Dropped `listen`-style directives — the silent killer (guardrail 8).** On
+> `clamav` the resolute `clamd.conf` dropped `TCPSocket 3310`; on `amavis`
+> `20-debian_defaults` is *not* where `$inet_socket_bind = ''` comes from (it is
+> MailD's own edit) and the package default is **loopback only**
+> (`Amavis/Conf.pm`: `$inet_socket_bind = '127.0.0.1'`). Take the pristine file
+> and the `mta → amavis:10024` hop dies with a connection refused that only shows
+> up when mail is sent. Diff for the socket/bind/listen lines explicitly.
 
 > **Dynamic service uid/gid drift — the new ids win (guardrail 8).** Debian/Ubuntu
 > allocate `clamav` (and the other service users) dynamically from the 100–999
@@ -206,6 +225,21 @@ git add -A && git commit -m "<svc>: pristine <tpl> templates from ubuntu:<new>"
    content-filter semantics.
 5. Preserve the `_<VAR>_` spelling exactly (leading + trailing underscore):
    the entrypoint `sed s/"\_${v}\_"/.../g` only matches that form.
+
+> **Shortcut with proof (measured on the `amavis` step).** Before hand-merging a
+> 20 KB template, compare the *two pristine* trees: `docker cp` the old base's
+> package files out of a `ubuntu:<old>` throwaway container (same package list as
+> the Dockerfile, §3.2) and `cmp -s` them file by file against the new base's.
+> When a template file is byte-identical between the two releases, the archived
+> MailD file **is** the ported result (pristine + MailD's edits, nothing upstream
+> lost), so `cp` it over instead of merging hunk by hunk. On `amavis` every
+> `conf.d` file was identical jammy↔resolute **except `21-ubuntu_defaults`**, while
+> MailD's archived files differed from the *jammy pristine* in 7 files — i.e.
+> `$inet_socket_bind = ''`, `hostname -d`, the full `$banned_filename_re`, the
+> ClamAV-only `@av_scanners`, the commented `$unix_socketname`, `X_HEADER_LINE` and
+> the syslog block were **MailD's own edits**, not distro defaults. Never assume
+> either way: `cmp` first, and where the pristines differ, merge that file hunk by
+> hunk.
 
 ```bash
 git add -A && git commit -m "<svc>: port MailD customizations onto ubuntu:<new> templates"
@@ -255,7 +289,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml up -d
 Fast iteration: `./test.sh --skip-content --skip-quota`. Exit code 0 only
 when every executed check passed — run the **full** suite before moving to
 the next service and before merging. Debug via `logs -f`, `exec <svc>
-bash`, `env | sort`, `doveadm` / `postconf` / `amavisd-new test-config`
+bash`, `env | sort`, `doveadm` / `postconf` / `amavisd test-config`
 (see `.agents/devops/workflows.md → Debugging`). Typical traps: ClamAV
 first signature download (~230 MB, amavis defers mail until clamd
 answers); `mta` pointing at a dead `mda` IP; `cron`/`mda` waiting on a
@@ -270,6 +304,21 @@ compare `id <svc>` in the image with `ls -ldn ldata/<svc>`).
 absent and (re)writes `/etc/spamassassin/maild.cf` (Bayes path, autolearn
 thresholds from `vars/amavis.env`). `mda` and `cron` entrypoints **wait**
 for `/etc/spamassassin/init.pre` before proceeding. Consequences:
+
+> **Measured on the `amavis` step — what is actually mounted.** Only
+> `/var/lib/spamassassin` is shared: the dev compose bind-mounts
+> `./ldata/spamassassin` and production mounts the `spamassassin` named volume,
+> **both only on `amavis`**. `/etc/spamassassin` is an *anonymous* volume of the
+> `amavis` container (declared as `VOLUME` in its Dockerfile) and is never mounted
+> anywhere else; `mda` and `cron` ship their own copy inside their images, so their
+> `while [ ! -f /etc/spamassassin/init.pre ]` gate is satisfied by their own file.
+> Because compose **preserves anonymous volumes across a container recreate**, a
+> rebuilt image can come up on the *old* base's `/etc/spamassassin` (jammy's
+> `v3*.pre` under SpamAssassin 4.0) while the `/etc/spamassassin.dist` staging is
+> skipped (`init.pre` exists): validate with `--renew-anon-volumes` (or `down`
+> first) and check that the `.pre` set matches the new release. The `saconf` volume
+> named in `.agents/architecture/overview.md` and `.agents/services/catalog.md`
+> exists in no compose file — doc drift, not an upgrade blocker.
 
 * Never upgrade `cron/spamassassin/` from Debian docs — take it from the
   **new amavis** pristine tree so all three containers agree.
