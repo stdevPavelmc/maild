@@ -308,7 +308,7 @@ cleanup() {
     if [ "$HAVE_DC" = 1 ]; then
         dcx mda rm -f "/home/vmail/${DOMAIN}/${ADMINMAIL%%@*}/dovecot.sieve" > /dev/null 2>&1 || true
         if [ "$RES_SEEDED" = 1 ]; then
-            dcx cron sh -c 'rm -f /var/log/syslog /var/log/syslog.1' > /dev/null 2>&1 || true
+            dcx cron sh -c 'rm -f /var/log/syslog /var/log/syslog.1 /var/log/.maild-test-seeded' > /dev/null 2>&1 || true
         fi
         if [ "$QUOTA_TOUCHED" = 1 ]; then
             expunge_mailbox "$QUOTA_USER" INBOX
@@ -955,12 +955,21 @@ else
     # starts at column 0.
     RES_SUBJECT="MailD Daily stats resume"    # the script's subject is fixed, it carries no date
     RES_DAY="$(dcx cron date +" %b %d " 2>/dev/null | tr -d '\r')"   # the cron clock: it runs UTC, the host may not
+    # A previous suite run that was killed (SIGKILL, closed terminal) leaves its materialised
+    # file behind -- and reusing it scores a stale window (e.g. one where mail was still being
+    # deferred), which shows up as an unrelated G10 failure. The sentinel marks the file as
+    # ours, so a leftover from the suite is always regenerated; a real rsyslog file (production
+    # parity: the cron container binds the host /var/log) has no sentinel and is left alone.
+    if dcx cron sh -c '[ -f /var/log/.maild-test-seeded ]' ; then
+        dcx cron sh -c 'rm -f /var/log/syslog /var/log/syslog.1' > /dev/null 2>&1 || true
+    fi
     if dcx cron sh -c '[ -s /var/log/syslog ]' ; then
         info "using the /var/log/syslog already present in the cron container"
     elif "${DC[@]}" logs --no-log-prefix --no-color mta 2>/dev/null |
          sed -E "s|^|$(date +'%b %e %H:%M:%S') $(hostname) maild-mta: |" |
          timeout -k10 300 "${DC[@]}" exec -T cron sh -c 'cat > /var/log/syslog; : > /var/log/syslog.1' ; then
         RES_SEEDED=1
+        dcx cron sh -c 'touch /var/log/.maild-test-seeded' > /dev/null 2>&1 || true
         RES_LINES="$(dcx cron sh -c 'wc -l < /var/log/syslog' 2>/dev/null | tr -d ' \r')"
         t_ok "G7 today's mta log materialised as /var/log/syslog in the cron container (${RES_LINES:-0} lines)"
     else
