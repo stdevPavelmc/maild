@@ -19,6 +19,17 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## 2026-10-06 1.3.1-rc
+- Changed: **`clamav` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the first
+  service of the LTS rollover (**1/5** — `mta`, `mda`, `amavis`, `cron` still on jammy). The
+  templates are the resolute `clamav-daemon`/`clamav-freshclam` generated configs with MailD's
+  container tweaks re-applied (`TCPSocket 3310`, `Foreground true`, `DisableCertCheck yes`,
+  stdout logging, `LogRotate false`); the 1.5.x additions (`CVDCertsDirectory`,
+  `FIPSCryptoHashLimits`, `Enable*Command`, `JsonStore*`) come along. Both images ship
+  ClamAV 1.5.4, so there is no engine jump. Two resolute package changes: `libclamunrar9` →
+  `libclamunrar12` (multiverse) and `netcat` → `netcat-openbsd` (the former virtual package no
+  longer resolves). The Dockerfile also pins the `clamav` uid/gid back to `101:102`, because
+  resolute allocates `100:101` and the testbed owns the signature volume as `101:102`.
+  Recorded in `.agents/devops/base-os-upgrade.md` for the remaining services.
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
   images, start the dev stack, bootstrap the fixtures and run the full `test.sh` suite — this

@@ -1,4 +1,4 @@
-FROM ubuntu:jammy
+FROM ubuntu:resolute
 
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 ENV REFRESHED_AT 2023-04-23
@@ -8,11 +8,18 @@ RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
         clamav-daemon \
         clamav-freshclam \
-        libclamunrar9 \
-        netcat \
+        libclamunrar12 \
+        netcat-openbsd \
         ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# The packages allocate the clamav user/group ids dynamically: jammy landed on 101:102,
+# resolute on 100:101. MailD pins them back to 101:102, because the dev volume is owned
+# as 101:102 (bootstrap-dev.sh) and clamd runs as that uid below -- a drifted id would
+# leave the signature database unreadable.
+RUN groupmod -g 102 clamav && \
+    usermod -u 101 -g 102 clamav
 
 # permission juggling
 RUN mkdir -p /var/run/clamav && \
@@ -51,4 +58,4 @@ LABEL org.opencontainers.image.title="MailD antivirus (ClamAV)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-04"
+      org.opencontainers.image.created="2026-10-15"
