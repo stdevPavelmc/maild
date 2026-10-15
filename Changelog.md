@@ -18,7 +18,20 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2026-10-06 1.3.1-rc
+## 2026-10-15 1.4.0-rc
+- Fixed: **the mta ↔ amavis link could come up silently broken.** The mta resolved the
+  amavis/mda/admin addresses exactly once, at its own start, with no retry and no validation —
+  if a peer was not resolvable yet (it started later) the address was baked **empty**. An empty
+  address in the `10025` amavis reinjection allow-list makes Postfix reject the content filter's
+  return path (`554 5.7.1 … Client host rejected: Access denied`), so every filtered message
+  deferred while the container merely reported `unhealthy` and nothing acted on it. The mta now
+  waits (bounded, `PEER_WAIT_TIMEOUT`, default 120s) for amavis/mda and **refuses to start with
+  an incomplete mail path**; a runtime watchdog (`PEER_WATCH_INTERVAL`, default 30s) re-resolves
+  the peers and repatches + reloads Postfix when one is recreated with a new address;
+  `bootstrap-dev.sh` counts an **empty** cached address as drift (it used to skip it) and also
+  restarts an unhealthy mta, waiting for it to come back healthy; and `test.sh` asserts the
+  mail-path containers are healthy up front instead of leaking ~8 unrelated delivery failures.
+  Also fixed the `/tmp/OWNIP` typo in the mta entrypoint (always wrote an empty file).
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
   images, start the dev stack, bootstrap the fixtures and run the full `test.sh` suite — this

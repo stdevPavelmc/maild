@@ -104,7 +104,7 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
 ./test.sh --skip-docker    # only wire-level checks (no `docker compose exec` assertions)
 ```
 
-- 43 checks: SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
+- 44 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
   aliases and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
   DKIM, the deployment domain and the cron jobs (the daily database backup and the daily mail
   traffic resume).

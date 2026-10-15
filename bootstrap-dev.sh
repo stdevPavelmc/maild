@@ -366,26 +366,52 @@ wait_up 60 is_service_up amavis ||
 ok "amavis is up"
 
 # The mta resolves its peers once, at its own start: it writes their addresses into
-# /etc/postfix/main.cf (virtual_transport = lmtp:inet:<MDA IP>:24 — the trap of review §15.5) and
-# mirrors them in /tmp/*IP for its /check.sh. If any peer container was recreated since, the mta
-# keeps delivering to a dead address *and* reports "unhealthy" forever. Detect the drift and
-# restart it (the documented remedy); a restart also re-resolves the names.
+# /etc/postfix/main.cf (mynetworks, the policy service, virtual_transport = lmtp:inet:<MDA
+# IP>:24 — the trap of review §15.5) *and* into the 10025 amavis reinjection allow-list in
+# master.cf, mirroring them in /tmp/*IP for its /check.sh. If any peer container was recreated
+# since — or was not up yet when the mta started — the mta keeps delivering to a dead address,
+# rejects the content filter ("554 Client host rejected: Access denied") and reports
+# "unhealthy" forever. Detect the drift and restart it (the documented remedy); a restart also
+# re-resolves the names.
 mta_peer_moved() {
 	local svc cached live
 	for svc in amavis mda mua admin; do
 		cached="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mta cat "/tmp/${svc^^}IP" 2>/dev/null | tr -d ' \r\n' || true)"
 		live="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mta getent hosts "$svc" 2>/dev/null | head -n1 | cut -d' ' -f1 || true)"
-		if [ -n "$cached" ] && [ -n "$live" ] && [ "$cached" != "$live" ]; then
-			log "mta: $svc moved from $cached to $live"
+		# an EMPTY cached address counts as drift too: that is what a too-early mta start
+		# leaves behind, and it is exactly the state that makes the 10025 listener reject
+		# the content filter. The empty case used to be skipped here, so a stack in that
+		# state was never self-healed.
+		if [ -n "$live" ] && [ "$cached" != "$live" ]; then
+			if [ -n "$cached" ]; then
+				log "mta: $svc moved from $cached to $live"
+			else
+				log "mta: $svc was never resolved (cached address is empty, it is $live now)"
+			fi
 			return 0
 		fi
 	done
 	return 1
 }
-if is_service_up mta && mta_peer_moved; then
-	warn "the mta cached a peer address that changed: restarting it (otherwise LMTP delivery and its own healthcheck fail)"
+mta_health() { # healthy|unhealthy|starting|(empty) — compose-native, no container-name guessing
+	local cid
+	cid="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" ps -q mta 2>/dev/null | head -n1 || true)"
+	[ -n "$cid" ] || return 0
+	docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$cid" 2>/dev/null || true
+}
+mta_healthy() { [ "$(mta_health)" = "healthy" ]; }
+mta_unhealthy() { [ "$(mta_health)" = "unhealthy" ]; }
+
+# The mta's own /check.sh re-resolves the same peers and compares them with the /tmp/*IP files,
+# so "unhealthy" means exactly the drift handled above: use it as the second, authoritative
+# signal (belt and braces for anything the loop cannot see).
+if is_service_up mta && { mta_peer_moved || mta_unhealthy; }; then
+	warn "the mta has a stale or empty peer address: restarting it (otherwise LMTP delivery, the content filter and its own healthcheck fail)"
 	timeout -k10 120 "${DC[@]}" restart mta >/dev/null || warn "could not restart the mta service"
-	sleep 3
+	# its HEALTHCHECK carries a 2 min start-period, so wait (bounded) before letting the caller go on
+	log "waiting for the restarted mta to become healthy (up to 180s)"
+	wait_up 180 mta_healthy ||
+		warn "the mta is still not healthy after the restart: check 'docker compose -f $COMPOSE_FILE logs mta'"
 fi
 
 # Effective service addresses, read from the running containers (authoritative). Fall back to the

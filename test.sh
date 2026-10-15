@@ -354,6 +354,30 @@ info "server      : $SERVER"
 info "test domain : $DOMAIN (admin mailbox $ADMINMAIL)"
 info "credentials : $CREDS_FILE"
 info "containers  : $([ "$HAVE_DC" = 1 ] && echo 'docker compose assertions enabled' || echo 'disabled (wire-level checks only)')"
+
+# Container health, up front. The mta bakes the amavis/mda addresses at its own start
+# (mynetworks, the 10025 amavis reinjection allow-list, the LMTP/policy targets): a peer that
+# started late or was recreated afterwards leaves the mta unhealthy and rejecting the content
+# filter, which then shows up as ~8 unrelated delivery failures further down. Fail once, here,
+# with the remedy, instead of scattering them.
+if [ "$HAVE_DC" = 1 ] ; then
+    HEALTH_BAD=""
+    for HC_SVC in db mda amavis clamav mta ; do
+        HC_CID="$(timeout -k10 60 "${DC[@]}" ps -q "$HC_SVC" 2>/dev/null | head -n1)"
+        HC_ST="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$HC_CID" 2>/dev/null)"
+        info "health      : $HC_SVC ${HC_ST:-no-healthcheck}"
+        if [ "$HC_ST" != "healthy" ] ; then
+            HEALTH_BAD="$HEALTH_BAD $HC_SVC(${HC_ST:-none})"
+        fi
+    done
+    if [ -n "$HEALTH_BAD" ] ; then
+        t_fail "containers not healthy:$HEALTH_BAD"
+        info "the mta bakes its peers at start: 'docker compose --env-file env.dev -f docker-compose-dev.yml restart mta' re-resolves them (bring amavis/mda up first)"
+    else
+        t_ok "every mail-path container reports healthy"
+    fi
+fi
+
 if [ -z "$PASS" ] ; then
     echo "ERROR: no password for $ADMINMAIL in $CREDS_FILE (run ./bootstrap-dev.sh first, or export PASS)" >&2
     exit 1
