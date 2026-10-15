@@ -4,7 +4,7 @@ use strict;
 # used internally by amavisd-new except in the default X_HEADER_LINE (which
 # Debian overrides by default anyway).
 
-chomp($mydomain = `head -n 1 /etc/mailname`);
+chomp($mydomain = `hostname -d`);
 
 # amavisd-new needs to know which email domains are to be considered local
 # to the administrative domain.  Only emails to "local" domains are subject

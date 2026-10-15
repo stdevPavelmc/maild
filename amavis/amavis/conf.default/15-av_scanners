@@ -17,7 +17,7 @@ use strict;
 
 ### http://www.clamav.net/
  ['ClamAV-clamd',
-   \&ask_daemon, ["CONTSCAN {}\n", "/var/run/clamav/clamd.ctl"],
+   \&ask_daemon, ["CONTSCAN {}\n", "_CLAMAVIP_:3310"],
    qr/\bOK$/m, qr/\bFOUND$/m,
    qr/^.*?: (?!Infected Archive)(.*) FOUND$/m ],
 # NOTE: run clamd under the same user as amavisd, or run it under its own
@@ -82,32 +82,32 @@ use strict;
 # # length("$TEMPBASE/amavis-milter-xxxxxxxxxxxxxx/parts/pxxx").
 
   ### http://www.kaspersky.com/  (kav4mailservers)
-  ['KasperskyLab AVP - aveclient',
-    ['/usr/local/kav/bin/aveclient','/usr/local/share/kav/bin/aveclient',
-     '/opt/kav/5.5/kav4mailservers/bin/aveclient','aveclient'],
-    '-p /var/run/aveserver -s {}/*',
-    [0,3,6,8], qr/\b(INFECTED|SUSPICION|SUSPICIOUS)\b/m,
-    qr/(?:INFECTED|WARNING|SUSPICION|SUSPICIOUS) (.+)/m,
-  ],
+  # ['KasperskyLab AVP - aveclient',
+  #   ['/usr/local/kav/bin/aveclient','/usr/local/share/kav/bin/aveclient',
+  #    '/opt/kav/5.5/kav4mailservers/bin/aveclient','aveclient'],
+  #   '-p /var/run/aveserver -s {}/*',
+  #   [0,3,6,8], qr/\b(INFECTED|SUSPICION|SUSPICIOUS)\b/m,
+  #   qr/(?:INFECTED|WARNING|SUSPICION|SUSPICIOUS) (.+)/m,
+  # ],
   # NOTE: one may prefer [0],[2,3,4,5], depending on how suspicious,
   # currupted or protected archives are to be handled
 
   ### http://www.kaspersky.com/
-  ['KasperskyLab AntiViral Toolkit Pro (AVP)', ['avp'],
-    '-* -P -B -Y -O- {}', [0,3,6,8], [2,4],    # any use for -A -K   ?
-    qr/infected: (.+)/m,
-    sub {chdir('/opt/AVP') or die "Can't chdir to AVP: $!"},
-    sub {chdir($TEMPBASE) or die "Can't chdir back to $TEMPBASE $!"},
-  ],
+  # ['KasperskyLab AntiViral Toolkit Pro (AVP)', ['avp'],
+  #   '-* -P -B -Y -O- {}', [0,3,6,8], [2,4],    # any use for -A -K   ?
+  #   qr/infected: (.+)/m,
+  #   sub {chdir('/opt/AVP') or die "Can't chdir to AVP: $!"},
+  #   sub {chdir($TEMPBASE) or die "Can't chdir back to $TEMPBASE $!"},
+  # ],
 
   ### The kavdaemon and AVPDaemonClient have been removed from Kasperky
   ### products and replaced by aveserver and aveclient
-  ['KasperskyLab AVPDaemonClient',
-    [ '/opt/AVP/kavdaemon',       'kavdaemon',
-      '/opt/AVP/AvpDaemonClient', 'AvpDaemonClient',
-      '/opt/AVP/AvpTeamDream',    'AvpTeamDream',
-      '/opt/AVP/avpdc', 'avpdc' ],
-    "-f=$TEMPBASE {}", [0,8], [3,4,5,6], qr/infected: ([^\r\n]+)/m ],
+  # ['KasperskyLab AVPDaemonClient',
+  #   [ '/opt/AVP/kavdaemon',       'kavdaemon',
+  #     '/opt/AVP/AvpDaemonClient', 'AvpDaemonClient',
+  #     '/opt/AVP/AvpTeamDream',    'AvpTeamDream',
+  #     '/opt/AVP/avpdc', 'avpdc' ],
+  #   "-f=$TEMPBASE {}", [0,8], [3,4,5,6], qr/infected: ([^\r\n]+)/m ],
     # change the startup-script in /etc/init.d/kavd to:
     #   DPARMS="-* -Y -dl -f=/var/amavis /var/amavis"
     #   (or perhaps:   DPARMS="-I0 -Y -* /var/amavis" )
@@ -121,12 +121,12 @@ use strict;
     # su - vscan -c "${PREFIX}/kavdaemon ${DPARMS}"
 
   ### http://www.centralcommand.com/
-  ['CentralCommand Vexira (new) vascan',
-    ['vascan','/usr/lib/Vexira/vascan'],
-    "-a s --timeout=60 --temp=$TEMPBASE -y $QUARANTINEDIR ".
-    "--log=/var/log/vascan.log {}",
-    [0,3], [1,2,5],
-    qr/(?x)^\s* (?:virus|iworm|macro|mutant|sequence|trojan)\ found:\ ( [^\]\s']+ )\ \.\.\.\ /m ],
+  # ['CentralCommand Vexira (new) vascan',
+  #   ['vascan','/usr/lib/Vexira/vascan'],
+  #   "-a s --timeout=60 --temp=$TEMPBASE -y $QUARANTINEDIR ".
+  #   "--log=/var/log/vascan.log {}",
+  #   [0,3], [1,2,5],
+  #   qr/(?x)^\s* (?:virus|iworm|macro|mutant|sequence|trojan)\ found:\ ( [^\]\s']+ )\ \.\.\.\ /m ],
     # Adjust the path of the binary and the virus database as needed.
     # 'vascan' does not allow to have the temp directory to be the same as
     # the quarantine directory, and the quarantine option can not be disabled.
@@ -136,29 +136,29 @@ use strict;
 
   ### http://www.avira.com/
   ### Avira AntiVir (formerly H+BEDV) or (old) CentralCommand Vexira Antivirus
-  ['Avira AntiVir', ['antivir','vexira'],
-    '--allfiles -noboot -nombr -rs -s -z {}', [0], qr/ALERT:|VIRUS:/m,
-    qr/(?x)^\s* (?: ALERT: \s* (?: \[ | [^']* ' ) |
-         (?i) VIRUS:\ .*?\ virus\ '?) ( [^\]\s']+ )/m ],
+  # ['Avira AntiVir', ['antivir','vexira'],
+  #   '--allfiles -noboot -nombr -rs -s -z {}', [0], qr/ALERT:|VIRUS:/m,
+  #   qr/(?x)^\s* (?: ALERT: \s* (?: \[ | [^']* ' ) |
+  #        (?i) VIRUS:\ .*?\ virus\ '?) ( [^\]\s']+ )/m ],
     # NOTE: if you only have a demo version, remove -z and add 214, as in:
     #  '--allfiles -noboot -nombr -rs -s {}', [0,214], qr/ALERT:|VIRUS:/,
 
   ### http://www.commandsoftware.com/
-  ['Command AntiVirus for Linux', 'csav',
-    '-all -archive -packed {}', [50], [51,52,53],
-    qr/Infection: (.+)/m ],
+  # ['Command AntiVirus for Linux', 'csav',
+  #   '-all -archive -packed {}', [50], [51,52,53],
+  #   qr/Infection: (.+)/m ],
 
   ### http://www.symantec.com/
-  ['Symantec CarrierScan via Symantec CommandLineScanner',
-    'cscmdline', '-a scan -i 1 -v -s 127.0.0.1:7777 {}',
-    qr/^Files Infected:\s+0$/m, qr/^Infected\b/m,
-    qr/^(?:Info|Virus Name):\s+(.+)/m ],
+  # ['Symantec CarrierScan via Symantec CommandLineScanner',
+  #   'cscmdline', '-a scan -i 1 -v -s 127.0.0.1:7777 {}',
+  #   qr/^Files Infected:\s+0$/m, qr/^Infected\b/m,
+  #   qr/^(?:Info|Virus Name):\s+(.+)/m ],
 
   ### http://www.symantec.com/
-  ['Symantec AntiVirus Scan Engine',
-    'savsecls', '-server 127.0.0.1:7777 -mode scanrepair -details -verbose {}',
-    [0], qr/^Infected\b/m,
-    qr/^(?:Info|Virus Name):\s+(.+)/m ],
+  # ['Symantec AntiVirus Scan Engine',
+  #   'savsecls', '-server 127.0.0.1:7777 -mode scanrepair -details -verbose {}',
+  #   [0], qr/^Infected\b/m,
+  #   qr/^(?:Info|Virus Name):\s+(.+)/m ],
     # NOTE: check options and patterns to see which entry better applies
 
 # ### http://www.f-secure.com/products/anti-virus/  version 4.65
@@ -169,11 +169,11 @@ use strict;
 #   qr/(?:infection|Infected|Suspected): (.+)/m ],
 
   ### http://www.f-secure.com/products/anti-virus/  version 5.52
-   ['F-Secure Antivirus for Linux servers',
-    ['/opt/f-secure/fsav/bin/fsav', 'fsav'],
-    '--virus-action1=report --archive=yes --auto=yes '.
-    '--dumb=yes --list=no --mime=yes {}', [0], [3,4,6,8],
-    qr/(?:infection|Infected|Suspected|Riskware): (.+)/m ],
+  #  ['F-Secure Antivirus for Linux servers',
+  #   ['/opt/f-secure/fsav/bin/fsav', 'fsav'],
+  #   '--virus-action1=report --archive=yes --auto=yes '.
+  #   '--dumb=yes --list=no --mime=yes {}', [0], [3,4,6,8],
+  #   qr/(?:infection|Infected|Suspected|Riskware): (.+)/m ],
     # NOTE: internal archive handling may be switched off by '--archive=no'
     #   to prevent fsav from exiting with status 9 on broken archives
 
@@ -188,27 +188,27 @@ use strict;
 #   '-a /var/run/avast4/mailscanner.sock -n {}', [0], [1],
 #   qr/\t\[L\]\t([^[ \t\015\012]+)/m ],
 
-  ['CAI InoculateIT', 'inocucmd',  # retired product
-    '-sec -nex {}', [0], [100],
-    qr/was infected by virus (.+)/m ],
+  # ['CAI InoculateIT', 'inocucmd',  # retired product
+  #   '-sec -nex {}', [0], [100],
+  #   qr/was infected by virus (.+)/m ],
   # see: http://www.flatmtn.com/computer/Linux-Antivirus_CAI.html
 
   ### http://www3.ca.com/Solutions/Product.asp?ID=156  (ex InoculateIT)
-  ['CAI eTrust Antivirus', 'etrust-wrapper',
-    '-arc -nex -spm h {}', [0], [101],
-    qr/is infected by virus: (.+)/m ],
+  # ['CAI eTrust Antivirus', 'etrust-wrapper',
+  #   '-arc -nex -spm h {}', [0], [101],
+  #   qr/is infected by virus: (.+)/m ],
     # NOTE: requires suid wrapper around inocmd32; consider flag: -mod reviewer
     # see http://marc.theaimsgroup.com/?l=amavis-user&m=109229779912783
 
   ### http://mks.com.pl/english.html
-  ['MkS_Vir for Linux (beta)', ['mks32','mks'],
-    '-s {}/*', [0], [1,2],
-    qr/--[ \t]*(.+)/m ],
+  # ['MkS_Vir for Linux (beta)', ['mks32','mks'],
+  #   '-s {}/*', [0], [1,2],
+  #   qr/--[ \t]*(.+)/m ],
 
   ### http://mks.com.pl/english.html
-  ['MkS_Vir daemon', 'mksscan',
-    '-s -q {}', [0], [1..7],
-    qr/^... (\S+)/m ],
+  # ['MkS_Vir daemon', 'mksscan',
+  #   '-s -q {}', [0], [1..7],
+  #   qr/^... (\S+)/m ],
 
 # ### http://www.nod32.com/,  version v2.52 (old)
 # ['ESET NOD32 for Linux Mail servers',
@@ -229,17 +229,17 @@ use strict;
 #   '--subdir {}', [0], [1,2,3], qr/virus="([^"]+)"/m ],
 
   ### http://www.eset.com/, version 3.0
-  ['ESET Software ESETS Command Line Interface',
-    ['/usr/bin/esets_cli', 'esets_cli'],
-    '--subdir {}', [0], [2,3],
-    qr/:\s*action="(?!accepted)[^"]*"\n.*:\s*virus="([^"]*)"/m ],
+  # ['ESET Software ESETS Command Line Interface',
+  #   ['/usr/bin/esets_cli', 'esets_cli'],
+  #   '--subdir {}', [0], [2,3],
+  #   qr/:\s*action="(?!accepted)[^"]*"\n.*:\s*virus="([^"]*)"/m ],
 
   ## http://www.nod32.com/,  NOD32LFS version 2.5 and above
-  ['ESET NOD32 for Linux File servers',
-    ['/opt/eset/nod32/sbin/nod32','nod32'],
-    '--files -z --mail --sfx --rtp --adware --unsafe --pattern --heur '.
-    '-w -a --action=1 -b {}',
-    [0], [1,10], qr/^object=.*, virus="(.*?)",/m ],
+  # ['ESET NOD32 for Linux File servers',
+  #   ['/opt/eset/nod32/sbin/nod32','nod32'],
+  #   '--files -z --mail --sfx --rtp --adware --unsafe --pattern --heur '.
+  #   '-w -a --action=1 -b {}',
+  #   [0], [1,10], qr/^object=.*, virus="(.*?)",/m ],
 
 # Experimental, based on posting from Rado Dibarbora (Dibo) on 2002-05-31
 # ['ESET Software NOD32 Client/Server (NOD32SS)',
@@ -255,12 +255,12 @@ use strict;
 #    qr/(?i).* virus in .* -> \'(.+)\'/m ],
 
   ### http://www.pandasoftware.com/
-  ['Panda CommandLineSecure 9 for Linux',
-    ['/opt/pavcl/usr/bin/pavcl','pavcl'],
-    '-auto -aex -heu -cmp -nbr -nor -nos -eng -nob {}',
-    qr/Number of files infected[ .]*: 0+(?!\d)/m,
-    qr/Number of files infected[ .]*: 0*[1-9]/m,
-    qr/Found virus :\s*(\S+)/m ],
+  # ['Panda CommandLineSecure 9 for Linux',
+  #   ['/opt/pavcl/usr/bin/pavcl','pavcl'],
+  #   '-auto -aex -heu -cmp -nbr -nor -nos -eng -nob {}',
+  #   qr/Number of files infected[ .]*: 0+(?!\d)/m,
+  #   qr/Number of files infected[ .]*: 0*[1-9]/m,
+  #   qr/Found virus :\s*(\S+)/m ],
   # NOTE: for efficiency, start the Panda in resident mode with 'pavcl -tsr'
   # before starting amavisd - the bases are then loaded only once at startup.
   # To reload bases in a signature update script:
@@ -282,15 +282,15 @@ use strict;
 # # (btw, assigning stdin to /dev/null causes RAV to fail)
 
   ### http://www.nai.com/
-  ['NAI McAfee AntiVirus (uvscan)', 'uvscan',
-    '--secure -rv --mime --summary --noboot - {}', [0], [13],
-    qr/(?x) Found (?:
-        \ the\ (.+)\ (?:virus|trojan)  |
-        \ (?:virus|trojan)\ or\ variant\ ([^ ]+)  |
-        :\ (.+)\ NOT\ a\ virus)/m,
-  # sub {$ENV{LD_PRELOAD}='/lib/libc.so.6'},
-  # sub {delete $ENV{LD_PRELOAD}},
-  ],
+  # ['NAI McAfee AntiVirus (uvscan)', 'uvscan',
+  #   '--secure -rv --mime --summary --noboot - {}', [0], [13],
+  #   qr/(?x) Found (?:
+  #       \ the\ (.+)\ (?:virus|trojan)  |
+  #       \ (?:virus|trojan)\ or\ variant\ ([^ ]+)  |
+  #       :\ (.+)\ NOT\ a\ virus)/m,
+  # # sub {$ENV{LD_PRELOAD}='/lib/libc.so.6'},
+  # # sub {delete $ENV{LD_PRELOAD}},
+  # ],
   # NOTE1: with RH9: force the dynamic linker to look at /lib/libc.so.6 before
   # anything else by setting environment variable LD_PRELOAD=/lib/libc.so.6
   # and then clear it when finished to avoid confusing anything else.
@@ -298,9 +298,9 @@ use strict;
   #  qr/^\s{5,}(Found|is password-protected|.*(virus|trojan))/
 
   ### http://www.virusbuster.hu/en/
-  ['VirusBuster', ['vbuster', 'vbengcl'],
-    "{} -ss -i '*' -log=$MYHOME/vbuster.log", [0], [1],
-    qr/: '(.*)' - Virus/m ],
+  # ['VirusBuster', ['vbuster', 'vbengcl'],
+  #   "{} -ss -i '*' -log=$MYHOME/vbuster.log", [0], [1],
+  #   qr/: '(.*)' - Virus/m ],
   # VirusBuster Ltd. does not support the daemon version for the workstation
   # engine (vbuster-eng-1.12-linux-i386-libc6.tgz) any longer. The names of
   # binaries, some parameters AND return codes have changed (from 3 to 1).
@@ -314,37 +314,37 @@ use strict;
 # # although the man-page tells a different story
 
   ### http://www.cyber.com/
-  ['CyberSoft VFind', 'vfind',
-    '--vexit {}/*', [0], [23], qr/##==>>>> VIRUS ID: CVDL (.+)/m,
-  # sub {$ENV{VSTK_HOME}='/usr/lib/vstk'},
-  ],
+  # ['CyberSoft VFind', 'vfind',
+  #   '--vexit {}/*', [0], [23], qr/##==>>>> VIRUS ID: CVDL (.+)/m,
+  # # sub {$ENV{VSTK_HOME}='/usr/lib/vstk'},
+  # ],
 
   ### http://www.avast.com/
-  ['avast! Antivirus', ['/usr/bin/avastcmd','avastcmd'],
-    '-a -i -n -t=A {}', [0], [1], qr/\binfected by:\s+([^ \t\n\[\]]+)/m ],
+  # ['avast! Antivirus', ['/usr/bin/avastcmd','avastcmd'],
+  #   '-a -i -n -t=A {}', [0], [1], qr/\binfected by:\s+([^ \t\n\[\]]+)/m ],
 
   ### http://www.ikarus-software.com/
-  ['Ikarus AntiVirus for Linux', 'ikarus',
-    '{}', [0], [40], qr/Signature (.+) found/m ],
+  # ['Ikarus AntiVirus for Linux', 'ikarus',
+  #   '{}', [0], [40], qr/Signature (.+) found/m ],
 
   ### http://www.bitdefender.com/
-  ['BitDefender', 'bdscan',  # new version
-    '--action=ignore --no-list {}', qr/^Infected files *:0+(?!\d)/m,
-    qr/^(?:Infected files|Identified viruses|Suspect files) *:0*[1-9]/m,
-    qr/(?:suspected|infected): (.*)(?:\033|$)/m ],
+  # ['BitDefender', 'bdscan',  # new version
+  #   '--action=ignore --no-list {}', qr/^Infected files *:0+(?!\d)/m,
+  #   qr/^(?:Infected files|Identified viruses|Suspect files) *:0*[1-9]/m,
+  #   qr/(?:suspected|infected): (.*)(?:\033|$)/m ],
 
   ### http://www.bitdefender.com/
-  ['BitDefender', 'bdc',  # old version
-    '--arc --mail {}', qr/^Infected files *:0+(?!\d)/m,
-    qr/^(?:Infected files|Identified viruses|Suspect files) *:0*[1-9]/m,
-    qr/(?:suspected|infected): (.*)(?:\033|$)/m ],
+  # ['BitDefender', 'bdc',  # old version
+  #   '--arc --mail {}', qr/^Infected files *:0+(?!\d)/m,
+  #   qr/^(?:Infected files|Identified viruses|Suspect files) *:0*[1-9]/m,
+  #   qr/(?:suspected|infected): (.*)(?:\033|$)/m ],
   # consider also: --all --nowarn --alev=15 --flev=15.  The --all argument may
   # not apply to your version of bdc, check documentation and see 'bdc --help'
 
   ### ArcaVir for Linux and Unix http://www.arcabit.pl/
-  ['ArcaVir for Linux', ['arcacmd','arcacmd.static'],
-    '-v 1 -summary 0 -s {}', [0], [1,2],
-    qr/(?:VIR|WIR):[ \t]*(.+)/m ],
+  # ['ArcaVir for Linux', ['arcacmd','arcacmd.static'],
+  #   '-v 1 -summary 0 -s {}', [0], [1,2],
+  #   qr/(?:VIR|WIR):[ \t]*(.+)/m ],
 
 # ['File::Scan', sub {Amavis::AV::ask_av(sub{
 #   use File::Scan; my($fn)=@_;
@@ -416,41 +416,41 @@ use strict;
 @av_scanners_backup = (
 
   ### http://www.clamav.net/   - backs up clamd or Mail::ClamAV
-  ['ClamAV-clamscan', 'clamscan',
-    "--stdout --no-summary -r --tempdir=$TEMPBASE {}",
-    [0], qr/:.*\sFOUND$/m, qr/^.*?: (?!Infected Archive)(.*) FOUND$/m ],
+  # ['ClamAV-clamscan', 'clamscan',
+  #   "--stdout --no-summary -r --tempdir=$TEMPBASE {}",
+  #   [0], qr/:.*\sFOUND$/m, qr/^.*?: (?!Infected Archive)(.*) FOUND$/m ],
 
   ### http://www.f-prot.com/   - backs up F-Prot Daemon, V6
-  ['F-PROT Antivirus for UNIX', ['fpscan'],
-    '--report --mount --adware {}',  # consider: --applications -s 4 -u 3 -z 10
-    [0,8,64],  [1,2,3, 4+1,4+2,4+3, 8+1,8+2,8+3, 12+1,12+2,12+3],
-    qr/^\[Found\s+[^\]]*\]\s+<([^ \t(>]*)/m ],
+  # ['F-PROT Antivirus for UNIX', ['fpscan'],
+  #   '--report --mount --adware {}',  # consider: --applications -s 4 -u 3 -z 10
+  #   [0,8,64],  [1,2,3, 4+1,4+2,4+3, 8+1,8+2,8+3, 12+1,12+2,12+3],
+  #   qr/^\[Found\s+[^\]]*\]\s+<([^ \t(>]*)/m ],
 
   ### http://www.f-prot.com/   - backs up F-Prot Daemon (old)
-  ['FRISK F-Prot Antivirus', ['f-prot','f-prot.sh'],
-    '-dumb -archive -packed {}', [0,8], [3,6],   # or: [0], [3,6,8],
-    qr/(?:Infection:|security risk named) (.+)|\s+contains\s+(.+)$/m ],
+  # ['FRISK F-Prot Antivirus', ['f-prot','f-prot.sh'],
+  #   '-dumb -archive -packed {}', [0,8], [3,6],   # or: [0], [3,6,8],
+  #   qr/(?:Infection:|security risk named) (.+)|\s+contains\s+(.+)$/m ],
 
   ### http://www.trendmicro.com/   - backs up Trophie
-  ['Trend Micro FileScanner', ['/etc/iscan/vscan','vscan'],
-    '-za -a {}', [0], qr/Found virus/m, qr/Found virus (.+) in/m ],
+  # ['Trend Micro FileScanner', ['/etc/iscan/vscan','vscan'],
+  #   '-za -a {}', [0], qr/Found virus/m, qr/Found virus (.+) in/m ],
 
   ### http://www.sald.com/, http://drweb.imshop.de/   - backs up DrWebD
-  ['drweb - DrWeb Antivirus',  # security LHA hole in Dr.Web 4.33 and earlier
-    ['/usr/local/drweb/drweb', '/opt/drweb/drweb', 'drweb'],
-    '-path={} -al -go -ot -cn -upn -ok-',
-    [0,32], [1,9,33], qr' infected (?:with|by)(?: virus)? (.*)$'m ],
+  # ['drweb - DrWeb Antivirus',  # security LHA hole in Dr.Web 4.33 and earlier
+  #   ['/usr/local/drweb/drweb', '/opt/drweb/drweb', 'drweb'],
+  #   '-path={} -al -go -ot -cn -upn -ok-',
+  #   [0,32], [1,9,33], qr' infected (?:with|by)(?: virus)? (.*)$'m ],
 
    ### http://www.kaspersky.com/
-   ['Kaspersky Antivirus v5.5',
-     ['/opt/kaspersky/kav4fs/bin/kav4fs-kavscanner',
-      '/opt/kav/5.5/kav4unix/bin/kavscanner',
-      '/opt/kav/5.5/kav4mailservers/bin/kavscanner', 'kavscanner'],
-     '-i0 -xn -xp -mn -R -ePASBME {}/*', [0,10,15], [5,20,21,25],
-     qr/(?:INFECTED|WARNING|SUSPICION|SUSPICIOUS) (.*)/m,
-#    sub {chdir('/opt/kav/bin') or die "Can't chdir to kav: $!"},
-#    sub {chdir($TEMPBASE) or die "Can't chdir back to $TEMPBASE $!"},
-   ],
+#    ['Kaspersky Antivirus v5.5',
+#      ['/opt/kaspersky/kav4fs/bin/kav4fs-kavscanner',
+#       '/opt/kav/5.5/kav4unix/bin/kavscanner',
+#       '/opt/kav/5.5/kav4mailservers/bin/kavscanner', 'kavscanner'],
+#      '-i0 -xn -xp -mn -R -ePASBME {}/*', [0,10,15], [5,20,21,25],
+#      qr/(?:INFECTED|WARNING|SUSPICION|SUSPICIOUS) (.*)/m,
+# #    sub {chdir('/opt/kav/bin') or die "Can't chdir to kav: $!"},
+# #    sub {chdir($TEMPBASE) or die "Can't chdir back to $TEMPBASE $!"},
+#    ],
 
 # Commented out because the name 'sweep' clashes with Debian and FreeBSD
 # package/port of an audio editor. Make sure the correct 'sweep' is found
