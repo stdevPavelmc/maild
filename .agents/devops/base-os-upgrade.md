@@ -424,6 +424,33 @@ packaged `/usr/share/dovecot` defaults on first start, so a candidate tree copie
 that has already started Dovecot once is silently partly ignored. Always `rm -rf /etc/dovecot/*`
 before dropping a tree in.
 
+## 7. `cron` — the PGDG client trap is gone on resolute (measured 2026-10-16)
+
+* jammy had to fetch `postgresql-client-15` from PGDG because the distro only shipped 14 — that
+  mismatch (client older than the server) is the one that produced the silent 20-byte "successful"
+  dumps. resolute ships **`postgresql-client-18`**, which is ≥ the working-tree server
+  (`postgres:15-bookworm`) *and* equal to the canonical target (`postgres:18-bookworm`), so the
+  image installs the distro package (`ARG PG_CLIENT_MAJOR=18`) and the keyring/repository/`curl`
+  steps are gone. PGDG *does* publish `resolute-pgdg` (verified) for the day a server major beyond
+  18 arrives.
+* **`pflogsumm` moved from `/usr/sbin` to `/usr/bin`** between 1.1.5 and 1.1.14: a hardcoded path
+  breaks the resume with "No such file or directory" and mails an empty report. Resolve tools from
+  `PATH`. The report layout is stable ("Grand Totals", "Per-Hour Traffic Summary", the
+  received/delivered tallies, the domain).
+* SpamAssassin 3.4.6 → 4.0.2 in this image only affects `sa-learn`: the `Learned tokens from N
+  message(s)` line and the `--dump magic` `non-token data:` fields are unchanged, and with no bayes
+  db it prints the same error the scripts already tolerate (they default to 0).
+* Other jumps: swaks 20201014 → 20240103, bind9-host 9.18 → 9.20, cron `3.0pl1-200ubuntu1` (same
+  daemon, `-f -L 2` and `/etc/crontab` unchanged) — none needed script changes.
+* `cron/spamassassin/` is a **reference copy** of Debian's `/etc/cron.daily/spamassassin`; the image
+  never installs it (the Dockerfile purges `/etc/cron.*/*`, and the rules refresh runs in `amavis`).
+  Refresh it from the new base for the record, but do not expect it to run.
+* cron now carries a HEALTHCHECK (`/var/run/crond.pid` + `kill -0`), so it is no longer the
+  documented exception.
+* Cross-service: recreating cron changes its IP, and amavis bakes it (`_CRONIP_`) — so **restart
+  amavis** after recreating cron, and then the mta (it bakes amavis's address; its peer watchdog
+  also re-resolves, but a restart is deterministic).
+
 
 
 

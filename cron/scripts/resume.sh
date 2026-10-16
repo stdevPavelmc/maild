@@ -33,7 +33,10 @@ cat ${FILES} | grep ${MTA} | grep "${DAY}" | \
     > ${TMP}
 
 # ejecutando
-/usr/sbin/pflogsumm -i --iso-date-time --problems-first $TMP > ${RESUME}
+# pflogsumm is resolved from PATH on purpose: the jammy packages put it in /usr/sbin and the
+# resolute (1.1.14) ones in /usr/bin, and a hardcoded path here would silently turn the whole
+# resume into an empty report.
+pflogsumm -i --iso-date-time --problems-first $TMP > ${RESUME}
 
 # weekly SpamAssassin / Bayes health stats, appended to the resume on Sundays
 if [ "$(date +%u)" == "7" ] ; then
