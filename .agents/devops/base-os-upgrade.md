@@ -171,7 +171,10 @@ git add -A && git commit -m "<svc>: pristine <tpl> templates from ubuntu:<new>"
 > too: `7zip` provides it (`Provides: p7zip, p7zip-full`) and still ships
 > `/usr/bin/7z`, `/usr/bin/7za`, `/usr/bin/7zr` and `/usr/bin/p7zip`.
 > `clamav` and `amavis` are fixed; `mta` and `mda` still install `netcat` and will
-> hit the same wall.
+> hit the same wall (all five services are fixed now: `mda`/`amavis`/`clamav` install
+> `netcat-openbsd` because their healthchecks call `nc`, `cron` never needed it, and the
+> `mta` dropped both `netcat` and `net-tools` — see §8, its entrypoint used to read the
+> container address with `ifconfig`).
 >
 > **Renamed binaries/daemons.** `amavisd-new` 2.13 installs **`/usr/sbin/amavisd`**
 > and *no longer* ships the `/usr/sbin/amavisd-new` name jammy had (the man page is
@@ -450,6 +453,54 @@ before dropping a tree in.
 * Cross-service: recreating cron changes its IP, and amavis bakes it (`_CRONIP_`) — so **restart
   amavis** after recreating cron, and then the mta (it bakes amavis's address; its peer watchdog
   also re-resolves, but a restart is deterministic).
+
+## 8. `mta` — Postfix 3.6 → 3.10, and two traps that crash-loop the container (measured 2026-10-16)
+
+The last service of the rollover. Postfix **3.6.4 → 3.10.6**, `postfix-policyd-spf-python`
+2.9.3 → **3.1.0** (same `/usr/bin/policyd-spf` binary and
+`/etc/postfix-policyd-spf-python/policyd-spf.conf` path, so `master.cf` needed no change), and
+neither `netcat` nor `net-tools` is needed any more.
+
+* **Two parameters were obsoleted in 3.9** and had to go: `smtpd_tls_eecdh_grade` and
+  `smtpd_tls_dh1024_param_file` (plus its two `-o` overrides on submission/smtps). `postconf` warns
+  about them on every start ("support for parameter … will be removed; instead, do not specify").
+  With ECDHE auto-curves the DHE parameters are unnecessary, so the mta no longer references
+  `/certs/RSA2048.pem` (the mda keeps it as its `ssl_server_dh_file`) and no longer generates it.
+  MailD's other TLS settings (`smtpd_tls_ciphers`, the `*_tls_mandatory_protocols`/`*_tls_protocols`
+  lists, `smtpd_tls_exclude_ciphers`) are **not** obsolete in 3.10 — measured, they stay as they were.
+* **`compatibility_level`**: the resolute package ships **3.9** in its own `main.cf` (Postfix's
+  built-in default is 0). Per guardrail 8 the new value wins: `main.cf.s` says 3.9 and the
+  entrypoint no longer forces a value (it used to `postconf compatibility_level=3.6`, silently
+  overriding the template). The safety net warns for levels < 3.6 and < 3.11 — see
+  `COMPATIBILITY_README`.
+* **New defaults that now apply** (3.9/3.10 — behaviour changes worth announcing):
+  `smtpd_forbid_unauth_pipelining = yes`, `smtpd_forbid_bare_newline = normalize`,
+  `cleanup_replace_stray_cr_lf = yes`, the Postfix DNS client result cap,
+  `maillog_file_permissions`, plus TLSRPT/RPK parameters (off by default). Logging gained detail
+  (reject lines carry sasl_method/username/sender, abnormal connections log their queue ID) — the
+  traffic resume still parses it (pflogsumm's tallies are unchanged).
+* **Trap 1 — `configure-instance.sh` cannot be called directly.** Debian's 3.10 copy enforces the
+  "internal script" guard (`$MAIL_CONFIG/main.cf`, `$queue_directory/pid`, `$command_directory/
+  postconf` and no arguments) and exits 1 with "E: This is internal script used by postfix". Under
+  the entrypoint's `set -e` that is an immediate exit → **crash loop**. postfix-script runs it at
+  every instance start (the chroot sync it performs shows up in the logs of `postfix
+  set-permissions`), so the explicit call is unnecessary and was removed.
+* **Trap 2 — `ifconfig` is gone.** `net-tools` provided it and the entrypoint used it to fill the
+  `_OWN_IP_` placeholder (the 10025 reinjection listener). Resolute's image has **neither
+  `net-tools` nor `iproute2`**; the failing pipeline left the value **empty**, which silently turned
+  `<ip>:10025` into `:10025` (every interface). It is resolved now with
+  `getent hosts "$(hostname)"` (libc, reads `/etc/hosts`/the compose DNS) and a `hostname -i`
+  fallback — both dependency-free. **Lesson: before deleting a package, grep for every tool it
+  provides (`nc`, `netstat`, `ifconfig`), not just the one you remember.**
+* `master.cf`: MailD ships its own file, so the entrypoint's exact-line toggles for
+  postscreen/dnsblog/tlsproxy keep matching (verified after the port — they are whitespace- and
+  chroot-column sensitive). Debian's 3.10 `master.cf` flipped the chroot column to `n` for those
+  services; MailD's explicit `y` (the jail is synced for it) is kept deliberately.
+* Also verified: `/usr/lib/postfix/configure-instance.sh` still ships, `postfix-files.d/*.files` is
+  still populated (the entrypoint's for-glob is safe) and `postfix-files` still carries the
+  `directory/man` lines its sed strips, so `postfix set-permissions` stays happy.
+* Cross-service: recreating the mta changes its address and **amavis bakes it** (`_MTAIP_`) — restart
+  amavis after any mta recreate (the mta itself re-resolves its peers and reloads).
 
 
 

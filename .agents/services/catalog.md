@@ -69,6 +69,14 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 - SMTP 25, submission 587 (auth), SMTPS 465. SPF (`SPF_ENABLE`) and DNSBL (`DNSBL_ENABLE`,
   `DNSBL_LIST`) checks; `RELAY` / `ALWAYS_BCC` optional; max size `MAX_MESSAGESIZE`.
+- Postfix **3.10** (resolute): `compatibility_level = 3.9` (the value the distro ships) and the TLS
+  block follows the new parameter set — the two settings Postfix 3.9 obsoleted
+  (`smtpd_tls_dh1024_param_file`, `smtpd_tls_eecdh_grade`) are gone and ECDHE auto-curves do the
+  work, so the mta no longer reads `/certs/RSA2048.pem` (the mda owns it). 3.9/3.10 also add
+  `smtpd_forbid_unauth_pipelining`/`smtpd_forbid_bare_newline` hardening by default.
+- The image ships neither `netcat` nor `net-tools`: the healthcheck reads the master pidfile and
+  the container's own address (for the 10025 reinjection listener) comes from
+  `getent hosts "$(hostname)"`. `postfix-policyd-spf-python` 3.1.0 keeps `/usr/bin/policyd-spf`.
 - Hard-depends on mda, amavis, clamav. Delivers local mail over LMTP to the mda's IP
   (baked into `main.cf` at start — restart the mta when the mda is recreated).
 - Logs to stdout (`maillog_file = /dev/stdout`); the daily traffic resume parses a syslog
