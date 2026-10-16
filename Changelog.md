@@ -90,6 +90,59 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   mail-path containers are healthy up front instead of leaking ~8 unrelated delivery failures.
   Also fixed the `/tmp/OWNIP` typo in the mta entrypoint (always wrote an empty file).
 
+- Changed: **`mda` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the third
+  service of the LTS rollover (**3/5** — `mta` and `cron` still on jammy). This one is not a
+  package swap: the jump is **Dovecot 2.3.16 → 2.4.2** (plus SpamAssassin 3.4.6 → 4.0.2 and
+  `netcat` → `netcat-openbsd`), and 2.4 does not read 2.3 configuration at all, so the whole
+  `/etc/dovecot` tree had to be re-expressed in the new schema. Measured against the real package
+  (throwaway `ubuntu:resolute` container and then the dev stack): `doveconf -n` clean and
+  warning-free, the daemon starts with every MailD listener up (110/143/993/995/4190/12345/12340),
+  TLS on 993/995, authentication against the live catalogue, and the full acceptance suite green.
+  What changed in the configuration: `dovecot_config_version`/`dovecot_storage_version = 2.4.0` are
+  now mandatory; every section needs a name (Postfix SASL became `inet_listener auth { port =
+  12345 }`, the Postfix quota policy `inet_listener quota-status { port = 12340 }`, and the empty
+  `plugin { }`/`dict { }` skeletons are gone — `plugin` no longer exists as a section);
+  `mail_location` was replaced by `mail_driver = maildir` + `mail_path = ~/maildir`, and `%d`/`%n`
+  by the `%{user | domain}`/`%{user | username}` filters; `ssl_cert`/`ssl_key`/`ssl_dh` became
+  `ssl_server_cert_file`/`ssl_server_key_file`/`ssl_server_dh_file` (plain paths — the `<` prefix
+  would read the file *content* into the setting) and `ssl_prefer_server_ciphers = yes` became
+  `ssl_server_prefer_ciphers = server`; `disable_plaintext_auth = no` has **no** 2.4 successor
+  because 2.4 rejects `auth_allow_cleartext = yes` next to `ssl = required` — which was already
+  the effective 2.3 behaviour (TLS is mandatory before any login); the legacy `$var` references no
+  longer expand (`$mail_plugins` and `$default_internal_user` are written out explicitly, the
+  latter as `$SET:default_internal_user`, a bare reference refusing to start); the SQL moved from
+  the dropped `dovecot-sql.conf.ext` include into inline `sql_driver`/`pgsql { parameters }` +
+  `passdb sql`/`userdb sql` blocks; the sieve locations became `sieve_script` storages
+  (`personal`, `default`) and the instant-learning imapsieve settings became a `sieve_script`
+  attached to `mailbox Junk` plus an `imapsieve_from Junk` section (with `sieve_plugins =
+  sieve_imapsieve sieve_extprograms` and the extension blocks, since the 2.3 `= +vnd.dovecot.pipe`
+  spelling is ignored); the quota is a named root now (`quota "User quota" { driver = maildir
+  storage_grace = 20M warning warn95/warn80 { execute quota-warning { args } } }`); `sieve_user_log`
+  and `sieve_global_path` were dropped (removed in 2.4 / never existing in the image) and
+  `20-lmtpd.conf` follows the upstream rename to `20-lmtp.conf`. Recorded in
+  `.agents/devops/base-os-upgrade.md`.
+- Changed: **MD5-CRYPT is disabled by default in Dovecot 2.4**, while PostfixAdmin — and therefore
+  `admin/seed.sh` and the dev fixtures — hashes mailboxes with md5crypt (`$1$…`). The mda sets
+  `auth_allow_weak_schemes = yes`, without which **every existing mailbox stops authenticating**
+  (those hashes cannot be regenerated without the clear-text password). Dovecot logs "Weak password
+  schemes are allowed" at start-up as the standing reminder; migrating the catalogue to
+  SHA512-CRYPT is a separate, product-wide decision.
+- Fixed: **the per-user quota would have been silently pinned to the configured default.** Measured
+  on 2.4.2: a `storage_size` declared inside the quota root *shadows* the `quota_storage_size` the
+  userdb returns, so every mailbox would have ignored its PostfixAdmin quota. The root therefore
+  declares only the driver (and the warnings), `auth-sql.conf.ext` keeps returning the `quota`
+  column (bytes, 0 = unlimited) and the suite now pins both ends (5120 KB for a 5 MB mailbox, `-`
+  for unlimited).
+- Fixed: **the quota-warning mails would never have been sent.** `quota-warning.sh` handed the LDA
+  `-o "plugin/quota=maildir:User quota:noenforcing"`, which 2.4 rejects as an unknown setting (the
+  LDA aborts, so the 80 %/95 % warnings silently disappeared): it is `-o quota_driver=maildir -o
+  quota_enforce=no` now. 2.4 also dropped the percentage grace (`quota_grace = 10%%`), so the root
+  carries an absolute `storage_grace = 20M` instead — 10 % of the default 200M mailbox, the closest
+  expressible equivalent.
+- Fixed: the mda debug knobs were unreachable — `MDA_DEBUG_AUTH_PASSWORD`, `MDA_DEBUG_MAIL` and
+  `MDA_DEBUG_SSL` were read from `MTA_*` variables, and the SSL one flipped `verbose_ssl`, which
+  2.4 removed. The variable names are corrected and the SSL knob now says why it is a no-op.
+
 ## 2026-10-06 1.3.1-rc
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`

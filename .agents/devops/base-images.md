@@ -18,11 +18,14 @@ Confirm the intended direction with the maintainer before "fixing" either side:
 | db | `postgres:18-bookworm` | `postgres:15-bookworm` |
 | admin | `php:8.3-apache-bookworm` | `php:8.1-apache-bookworm` |
 | mua | `php:8.3-apache` | `php:8.0-apache` (the kept `mua/internet.Dockerfile` / `mua/local.Dockerfile` variants already use 8.3) |
-| mta, mda, cron | `ubuntu:resolute` | `ubuntu:jammy` |
+| mta, cron | `ubuntu:resolute` | `ubuntu:jammy` |
 
-`clamav` and `amavis` already moved to `ubuntu:resolute` on 2026-10-15 (LTS rollover **2/5**;
-the procedure and the package traps they uncovered: `.agents/devops/base-os-upgrade.md`). The
-three remaining Ubuntu services (`mta`, `mda`, `cron`) still pin `ubuntu:jammy`.
+`clamav`, `amavis` and `mda` already moved to `ubuntu:resolute` on 2026-10-15/16 (LTS rollover
+**3/5**; the procedure and the package traps they uncovered: `.agents/devops/base-os-upgrade.md`).
+`mda` was the heavy one: Dovecot went 2.3.16 → **2.4.2**, which does not read 2.3 configuration, so
+its whole `/etc/dovecot` tree was rewritten (2.4 markers, named sections, `mail_driver`/`mail_path`,
+`ssl_server_*`, `sieve_script` storages, imapsieve mailbox scripts, a named quota root). The two
+remaining Ubuntu services (`mta`, `cron`) still pin `ubuntu:jammy`.
 
 Note: changing the db major version on an existing `ldata/db` directory is not a rebuild —
 PostgreSQL data dirs are major-incompatible; dump/restore or `pg_upgrade` first.

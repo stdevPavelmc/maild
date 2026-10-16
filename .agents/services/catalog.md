@@ -48,9 +48,14 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 ## mda — Dovecot
 
 - IMAP/POP3/Sieve delivery; reads users/quotas from the catalogue via SQL
-  (`mda/dovecot/dovecot-sql.conf.ext`), Maildir under `/home/vmail`.
+  (inline `passdb sql`/`userdb sql` in `mda/dovecot/conf.d/auth-sql.conf.ext` since Dovecot 2.4
+  dropped the separate `dovecot-sql.conf.ext` include), Maildir under `/home/vmail`.
+- Its listeners carry names in 2.4: `inet_listener auth` (:12345, the mta's SASL path) and
+  `inet_listener quota-status` (:12340, Postfix's full-mailbox policy) — renaming either breaks the
+  mta.
 - Instant Bayes learning: moving mail into/out of `Junk` triggers imapsieve pipe scripts
-  (`mda/dovecot/sieve/*.sieve` → `mda/sieve-pipe/learn-{spam,ham}.sh`).
+  (a `sieve_script` on `mailbox Junk` + `imapsieve_from Junk` in `mda/dovecot/conf.d/90-imapsieve.conf`
+  → `mda/sieve-pipe/learn-{spam,ham}.sh`).
 - `mda/scripts/quota_report.sh` mails the daily mailbox-quota report to
   `MAIL_ADMIN_USER@DEFAULT_DOMAIN`; knobs in `env.sample` (`QUOTA_REPORT_*`); run manually:
   `docker compose exec mda /scripts/quota_report.sh --now [--dry-run]`.
