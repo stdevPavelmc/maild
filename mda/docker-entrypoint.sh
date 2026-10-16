@@ -82,24 +82,24 @@ if [ ! -f /etc/dovecot/configured ]; then
 
         echo "Auth verbose logging set to yes"
     fi
-    if [ "${MTA_DEBUG_AUTH_PASSWORD}" ]; then
+    if [ "${MDA_DEBUG_AUTH_PASSWORD}" ]; then
         # set auth_verbose_passwords & auth_debug_passwords to yes
         sed -i s/"^auth_verbose_passwords .*$"/"auth_verbose_passwords = yes"/g /etc/dovecot/conf.d/10-logging.conf
         sed -i s/"^auth_debug_passwords .*$"/"auth_debug_passwords = yes"/g /etc/dovecot/conf.d/10-logging.conf
 
         echo "Auth passwords verbose logging set to yes"
     fi
-    if [ "${MTA_DEBUG_MAIL}" ]; then
+    if [ "${MDA_DEBUG_MAIL}" ]; then
         # set mail_debug to yes
         sed -i s/"^mail_debug .*$"/"mail_debug = yes"/g /etc/dovecot/conf.d/10-logging.conf
 
         echo "Mail verbose logging set to yes"
     fi
-    if [ "${MTA_DEBUG_SSL}" ]; then
-        # set verbose_ssl to yes
-        sed -i s/"^verbose_ssl .*$"/"verbose_ssl = yes"/g /etc/dovecot/conf.d/10-logging.conf
-
-        echo "SSL verbose logging set to yes"
+    if [ "${MDA_DEBUG_SSL}" ]; then
+        # Dovecot 2.4 removed verbose_ssl (the setting is no longer accepted), so there
+        # is nothing to flip here: TLS-level detail is requested through log_debug with
+        # an event filter, which is left to the operator (see env.sample).
+        echo "MDA_DEBUG_SSL: verbose_ssl was removed in Dovecot 2.4, no-op (see env.sample)"
     fi
 
     # create the flag file
