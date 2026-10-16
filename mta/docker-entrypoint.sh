@@ -87,7 +87,16 @@ AMAVISIP="$(wait_peer AMAVISIP "${AMAVIS}" critical)" || exit 1
 MDAIP="$(wait_peer MDAIP "${MDA}" critical)" || exit 1
 MUAIP="$(wait_peer MUAIP "${MUA}" best-effort)"
 ADMINIP="$(wait_peer ADMINIP "${ADMIN}" best-effort)"
-OWN_IP=`ifconfig eth0 | grep inet | awk '{print $2}' | head -n 1`
+# The container's own address, used for the _OWN_IP_ placeholder (the 10025 reinjection
+# listener). It used to come from `ifconfig eth0` (net-tools), which no longer exists on
+# resolute — and neither does iproute2 in this image — so it is resolved through libc from the
+# name Docker publishes for this container (getent reads /etc/hosts first, then the compose DNS),
+# with `hostname -i` as the fallback. Both are dependency-free.
+OWN_IP="$(getent hosts "$(hostname)" | awk '/^[0-9]/ {print $1; exit}')"
+[ -n "$OWN_IP" ] || OWN_IP="$(hostname -i 2>/dev/null | awk '{print $1}')"
+if [ -z "$OWN_IP" ] ; then
+    echo "mta: WARNING - could not determine this container's IP, the 10025 listener will bind every interface" 1>&2
+fi
 
 echo "AMAVISIP=${AMAVISIP}" >> "${CFILE}"
 echo "MDAIP=${MDAIP}" >> "${CFILE}"
@@ -295,14 +304,10 @@ for f in `echo "$PMFILES" | xargs` ; do
 done
 
 ### dhparms generation
-if [ ! -f /certs/RSA2048.pem ] ; then
-    echo "Generation of SAFE dhparam, this may take a time, be patient..."
-    openssl dhparam -out /certs/RSA2048.pem -5 2048
-    chmod 0644 /certs/RSA2048.pem
-    echo "dhparam generated!"
-else
-    echo "DHparam already present, skiping generation!"
-fi
+# Postfix 3.10 obsoleted smtpd_tls_dh1024_param_file (3.9 deprecated it; with ECDHE auto-curves
+# the DHE parameters are not needed), so this container neither references nor generates
+# /certs/RSA2048.pem any more: the mda owns that file in the shared /certs volume (it is its
+# ssl_server_dh_file) and generates it on its own first boot.
 
 # generate a Self-Signed cert/key if not present already on the /cert volume
 if [ ! -f /certs/mail.crt -a ! -f /certs/mail.key ] ; then
@@ -409,16 +414,22 @@ peer_watchdog() {
 
 # let's start...
 if [ "$1" = 'postfix' ]; then
-    if [ ! -f /certs/mail.crt -o ! -f /certs/mail.key -o ! -f /certs/RSA2048.pem ] ; then
+    # only the certificate pair is required here: the DH params belong to the mda now
+    if [ ! -f /certs/mail.crt -o ! -f /certs/mail.key ] ; then
         echo "Ooops! There is some SSL files missing"
-        echo "We need a existing 'RSA2048.pem, mail.crt' & 'mail.key' files in the /certs volume!"
+        echo "We need a existing 'mail.crt' & 'mail.key' files in the /certs volume!"
         exit 1
     fi
 
     # configure instance (populate etc)
-    postconf compatibility_level=3.6
+    # compatibility_level comes from main.cf.s (3.9, the value the resolute Postfix ships) — it
+    # used to be forced here, which silently overrode whatever the template said.
+    # /usr/lib/postfix/configure-instance.sh is NOT called directly any more: Debian's Postfix
+    # 3.10 version refuses to run outside postfix-script ("E: This is internal script used by
+    # postfix") because it expects that caller's environment. postfix-script runs it itself every
+    # time an instance starts — the chroot sync it performs is already visible in the logs of the
+    # `postfix set-permissions` above — which is its designed path.
     postfix set-permissions
-    /usr/lib/postfix/configure-instance.sh
 
     # check postfix is happy (also will fix some things)
     echo "postfix >> Checking Postfix Configuration"

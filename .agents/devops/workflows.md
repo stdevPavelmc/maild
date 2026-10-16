@@ -33,7 +33,9 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   `/check.sh`; admin/mua: `curl -f localhost`). `ps` shows the status.
 - **Env inside a container:** `… exec mta env | sort`.
 - **DB:** `… exec db pg_isready`; psql session: `… exec db psql -U maild -d mailddb`;
-  connectivity from a service: `… exec mta nc -z db 5432` (or `getent hosts db`).
+  connectivity from a service: `… exec mda nc -z db 5432`, or `… exec mta getent hosts db`
+  anywhere (the mta image does not ship `nc`: nothing in it needed netcat, unlike the amavis,
+  clamav and mda healthchecks).
 - **Mailboxes:** Maildir under `ldata/vmail/` — `find ldata/vmail -name cur -o -name new`;
   `… exec mda doveadm auth test alice@example.net '<pw>'`;
   `… exec mda doveadm quota get -A`.
