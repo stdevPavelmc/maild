@@ -1,10 +1,8 @@
 #!/bin/sh
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
-# check amavis still working
-case "$(printf "HELO healthcheck\nQUIT\n\n" | nc localhost 10024 -w1 | head -n1)" in
+# Check amavis still working.
+# A plain banner read proves the daemon answers and leaves no state behind.
+case "$(nc localhost 10024 -w1 </dev/null | head -n1)" in
 	"220"*" ready"*)
 		echo "amavis ready"
 		;;

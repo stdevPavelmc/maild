@@ -1,21 +1,11 @@
-FROM php:8.3-apache-bookworm
-
-LABEL original_maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin) PorfixAdmin project"
-LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
-LABEL image.name="MailD Mail Administrator UI, aka: Web Administration"
-LABEL org.opencontainers.image.description="MailD Mail Administrator UI, aka: Web Administration"
-LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
-LABEL org.opencontainers.image.licenses=GPL-3.0
-LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2026-01-12"
-
-#repodebian
+FROM php:8.1-apache-bookworm
 
 # docker-entrypoint.sh dependencies
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
     gosu \
+    postgresql-client \
     ; \
     rm -rf /var/lib/apt/lists/*
 
@@ -61,9 +51,9 @@ RUN set -ex; \
 ARG POSTFIXADMIN_VERSION=3.3.13
 ARG POSTFIXADMIN_SHA512=bf7daaa089ee3adc4b557f1a7d0509d78979ef688fb725bab795f5c9d81e8774296245fde0cb184db51e9185cad381682c3ecc0bfadf852388b499a0a95cca64
 
-ENV POSTFIXADMIN_VERSION=$POSTFIXADMIN_VERSION
-ENV POSTFIXADMIN_SHA512=$POSTFIXADMIN_SHA512
-ENV APACHE_DOCUMENT_ROOT=/var/www/html/public
+ENV POSTFIXADMIN_VERSION $POSTFIXADMIN_VERSION
+ENV POSTFIXADMIN_SHA512 $POSTFIXADMIN_SHA512
+ENV APACHE_DOCUMENT_ROOT /var/www/html/public
 
 RUN set -eu; sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf; \
     sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
@@ -79,8 +69,9 @@ RUN set -eu; \
     mkdir -p /usr/src/postfixadmin/templates_c; \
     chown -R www-data:www-data /usr/src/postfixadmin
 
-COPY docker-entrypoint.sh /
-RUN chmod +x /docker-entrypoint.sh
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+COPY seed.sh /seed.sh
+RUN chmod +x /docker-entrypoint.sh /seed.sh
 
 # DEBUG tools only on debug build
 ARG DEBUG
@@ -94,3 +85,13 @@ HEALTHCHECK --interval=1m --timeout=3s --start-period=30s --retries=2 \
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
 CMD ["apache2-foreground"]
+
+# OCI labels (kept last; the pre-commit hook rewrites the created date)
+LABEL org.opencontainers.image.title="MailD Admin UI (PostfixAdmin)" \
+      org.opencontainers.image.description="MailD web administration interface for domains, mailboxes and aliases (PostfixAdmin)" \
+      org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
+      org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      cu.maild.original-maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin), PostfixAdmin project" \
+      org.opencontainers.image.created="2026-10-04"

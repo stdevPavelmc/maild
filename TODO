@@ -1,0 +1,5 @@
+
+- review the actual schema of passing ip or hostnames for the service integration on the containers, think on a more resilient way of manage that, maybe the tricks on the migration with one of the containers to watch for the ip changes...
+- Review the references to jammy, remove or update them, we are all ubuntu:resolute by now, improve documentation.
+- Ran a security audit of the stack with productions constraits; improve on the results
+- I can use the stack on my org with just a docker-compose + a env variable's file [or environment `VAR: value` pairs], make that possible

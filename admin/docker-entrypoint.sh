@@ -1,10 +1,6 @@
 #!/bin/bash
 set -eo pipefail
 
-
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 # usage: get_env_value VAR [DEFAULT]
 #    ie: get_env_value 'XYZ_DB_PASSWORD' 'example'
 # (will allow for "$XYZ_DB_PASSWORD_FILE" to fill in the value of
@@ -139,6 +135,20 @@ if [[ "$1" == apache2* ]] || [ "$1" == php-fpm ]; then
 	if [ -f public/upgrade.php ]; then
 		echo " ** Running database / environment upgrade.php "
 		gosu www-data php public/upgrade.php
+	fi
+
+	# First-boot provisioning: seed DEFAULT_DOMAIN, the superadmin
+	# (MAIL_ADMIN_USER@DEFAULT_DOMAIN, password MAIL_ADMIN_PASSWORD) with its mailbox and the
+	# default aliases, so a fresh deployment is usable without the manual /setup.php wizard.
+	# Idempotent; opt out with AUTO_PROVISION=no to keep the classic OTP flow (printed above).
+	if [ "${AUTO_PROVISION:-yes}" != "no" ]; then
+		echo "admin: INFO - running first-boot provisioning (AUTO_PROVISION=${AUTO_PROVISION:-yes})" >&2
+		# Hand the mapped catalogue coordinates (and the password) to the seeder: this container
+		# has no POSTGRES_PASSWORD, only POSTFIXADMIN_DB_PASSWORD.
+		export POSTFIXADMIN_DB_HOST POSTFIXADMIN_DB_PORT POSTFIXADMIN_DB_USER POSTFIXADMIN_DB_NAME POSTFIXADMIN_DB_PASSWORD
+		/seed.sh || echo "admin: WARNING - provisioning failed, falling back to the manual /setup.php flow (use the OTP printed above)" >&2
+	else
+		echo "admin: INFO - AUTO_PROVISION=no, skipping automatic provisioning (use the OTP above at /setup.php)" >&2
 	fi
 fi
 

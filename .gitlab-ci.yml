@@ -1,5 +1,5 @@
 ---
-image: docker:23
+image: docker:28
 
 variables:
   # To use DIND
@@ -10,24 +10,28 @@ variables:
   # Deploy env vars
   CERT_PATH: "/cert"
 
+  # The GitLab specific compose file (image names come from the IMG_* vars below).
+  # Without this every `docker compose …` call would fall back to docker-compose.yml.
+  COMPOSE_FILE: compose-gitlab.yml
+
   # this vars needs to get loaded from the env
   # DOCKER_SERVER
 
-  # local images
-  IMG_DB: "$CI_REGISTRY_IMAGE/db"
-  IMG_MTA: "$CI_REGISTRY_IMAGE/mta"
-  IMG_MDA: "$CI_REGISTRY_IMAGE/mda"
-  IMG_MUA: "$CI_REGISTRY_IMAGE/mua"
-  IMG_ADMIN: "$CI_REGISTRY_IMAGE/admin"
-  IMG_CLAMAV: "$CI_REGISTRY_IMAGE/clamav"
-  IMG_AMAVIS: "$CI_REGISTRY_IMAGE/amavis"
-  IMG_CRON: "$CI_REGISTRY_IMAGE/cron"
+  # local images — keep the maild-<svc> naming used by every compose file
+  IMG_DB: "$CI_REGISTRY_IMAGE/maild-db"
+  IMG_MTA: "$CI_REGISTRY_IMAGE/maild-mta"
+  IMG_MDA: "$CI_REGISTRY_IMAGE/maild-mda"
+  IMG_MUA: "$CI_REGISTRY_IMAGE/maild-mua"
+  IMG_ADMIN: "$CI_REGISTRY_IMAGE/maild-admin"
+  IMG_CLAMAV: "$CI_REGISTRY_IMAGE/maild-clamav"
+  IMG_AMAVIS: "$CI_REGISTRY_IMAGE/maild-amavis"
+  IMG_CRON: "$CI_REGISTRY_IMAGE/maild-cron"
 
   # default TAG is dev
   TAG: dev
 
 services:
-  - name: docker:23-dind
+  - name: docker:28-dind
 
 before_script:
   - docker info
@@ -333,8 +337,11 @@ deploy:
   <<: *before_script
   script:
     - export TAG=latest
-    - DOCKER_HOST=$DOCKER_SERVER DOCKER_TLS_VERIFY="true" DOCKER_CERT_PATH=$CERT_PATH docker compose pull
-    - DOCKER_HOST=$DOCKER_SERVER DOCKER_TLS_VERIFY="true" DOCKER_CERT_PATH=$CERT_PATH docker compose up -d
+    - export DOCKER_HOST=$DOCKER_SERVER
+    - export DOCKER_TLS_VERIFY="true"
+    - export DOCKER_CERT_PATH=$CERT_PATH
+    - docker compose pull
+    - docker compose up -d
   only:
     - main
   needs:

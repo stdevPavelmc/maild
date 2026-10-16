@@ -1,0 +1,27 @@
+#!/bin/bash
+# Pre commit hook
+
+# Update the OCI created label on Dockerfiles
+DOCKERFILE=$(git status | grep modified | grep Dockerfile | awk '{print $2}' | xargs)
+if [ "$DOCKERFILE" ] ; then
+    echo "Found some Dockerfile modified, updating LABELS..." 
+    # cycle on the Dockerfile updating the OCI created label line
+    for f in $DOCKERFILE; do
+        echo "  > Updating org.opencontainers.image.created on file $f"
+        sed "s|^.*org.opencontainers.image.created.*$|      org.opencontainers.image.created=\"$(date +%Y-%m-%d)\"|" -i $f
+    done
+else
+    # no dockerfile modified
+    echo "No dockerfile modified to update the created label"
+fi
+
+# Get the list of modified files, to get only executables
+EXECS=$(git status | grep modified | grep -v Dockerfile | awk '{print $2}' | xargs)
+for f in $EXECS; do
+    # check if the file is executable
+    if [ -x $f ] ; then
+        # Update the Copyright line
+        echo "  > Updating Copyright on executable file $f"
+        sed s/"^# Copyright.*Pavel Milanes.*$"/"# Copyright 2020-$(date +%Y) Pavel Milanes Costa <pavelmc@gmail.com>"/ -i $f
+    fi
+done

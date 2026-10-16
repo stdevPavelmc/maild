@@ -1,26 +1,23 @@
-FROM ubuntu:jammy
+FROM ubuntu:resolute
 
-LABEL image.app="MailD, http://github.com/stdevPavelmc/maild"
-LABEL image.name="MailD AV solution, aka: ClamAV"
-LABEL org.opencontainers.image.description="MailD AV solution, aka: ClamAV"
-LABEL org.opencontainers.image.source=https://github.com/stdevPavelmc/maild
-LABEL org.opencontainers.image.licenses=GPL-3.0
 LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
-LABEL last_modified="2024-08-11"
-
-#repoubuntu
-
-ENV DEBIAN_FRONTEND=noninteractive
+ENV REFRESHED_AT 2023-04-23
+ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
         clamav-daemon \
         clamav-freshclam \
-        libclamunrar9 \
-        netcat \
+        libclamunrar12 \
+        netcat-openbsd \
         ca-certificates && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+
+# No uid/gid pinning here on purpose: the distro-allocated clamav ids win (jammy: 101:102,
+# resolute: 100:101). The dev testbed follows whatever this image uses (bootstrap-dev.sh owns
+# ldata/clamav with those ids) and the production named volume is pre-populated from the image,
+# so it inherits them too. See .agents/devops/base-os-upgrade.md guardrail 8.
 
 # permission juggling
 RUN mkdir -p /var/run/clamav && \
@@ -33,10 +30,19 @@ COPY docker-entrypoint.sh check.sh /
 RUN chown -R clamav:clamav /etc/clamav
 RUN chmod +x /*.sh 
 
-# addd amavis compatibility
-RUN groupadd -g 114 amavis && \
-    useradd -r -u 114 -g amavis -d /var/lib/amavis -s /usr/sbin/nologin amavis && \
-    usermod -a -G clamav amavis
+# amavis compatibility: clamd is asked to CONTSCAN the message files amavisd writes into its
+# TEMPBASE, which both containers see through the *shared* /var/lib/amavis mount (dev: bind
+# ./ldata/amavis, prod: the `amavis` named volume). Those per-message dirs/files are 0750/0640
+# owned by amavis, so clamd has to be a **member of the amavis group**. On jammy this worked by
+# accident — the distro handed uid 101 to both services; resolute gives amavis 994:994 and
+# clamav 100:101, and clamd then fails every scan with "File path check failure: Permission
+# denied" (see .agents/devops/base-os-upgrade.md). The gid has to be spelled out here:
+# supplementary-group membership lives in this image's /etc/group and cannot follow another
+# image's dynamic allocation. docker-entrypoint.sh asserts the access at start and fails loudly
+# if the two ever drift apart again.
+ARG AMAVIS_GID=994
+RUN groupadd -g ${AMAVIS_GID} amavis && \
+    usermod -a -G amavis clamav
 
 VOLUME ["/var/lib/clamav"]
 VOLUME ["/var/lib/amavis"]
@@ -51,3 +57,12 @@ HEALTHCHECK --interval=1m --timeout=5s --start-period=2m --retries=2 \
 
 CMD ["/docker-entrypoint.sh"]
 
+
+# OCI labels (kept last; the pre-commit hook rewrites the created date)
+LABEL org.opencontainers.image.title="MailD antivirus (ClamAV)" \
+      org.opencontainers.image.description="MailD ClamAV antivirus scanning engine for the content filter" \
+      org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
+      org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
+      org.opencontainers.image.licenses="GPL-3.0-or-later" \
+      org.opencontainers.image.created="2026-10-15"

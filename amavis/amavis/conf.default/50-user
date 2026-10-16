@@ -21,5 +21,21 @@ $policy_bank{'MTA'} = {
   # auth_required_release => 0,  # don't require secret_id for amavisd-release
 };
 
+# --- MailD overrides for the resolute (26.04 LTS) base ----------------------
+# resolute's 21-ubuntu_defaults (loaded before this file) flipped two distro
+# defaults that would silently change how MailD handles mail, so the MailD
+# behaviour is pinned here instead — 50-user is the last distro file loaded:
+#
+# 1) spam is DELIVERED (tagged by 20-debian_defaults) so it reaches the user's
+#    Junk folder, where the imapsieve helpers and the daily cron job learn from
+#    it. resolute sets $final_spam_destiny = D_DISCARD (jammy had D_PASS), which
+#    would quarantine the spam and then drop it without delivering anything.
+$final_spam_destiny = D_PASS;
+#
+# 2) the postmaster keeps getting the virus/spam notifications. resolute sets
+#    $virus_admin / $spam_admin = undef (jammy had postmaster@$mydomain).
+$virus_admin = "postmaster\@$mydomain";
+$spam_admin  = "postmaster\@$mydomain";
+
 #------------ Do not modify anything below this line -------------
 1;  # ensure a defined return

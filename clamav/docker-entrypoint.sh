@@ -1,9 +1,6 @@
 #!/bin/bash
 set -m
 
-# This script is part of MailD
-# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
-
 if [ ! -f /etc/clamav/configured ] ; then
     # debug
     if [ "${CLAMAV_DEBUG}" ]; then
@@ -33,6 +30,31 @@ fi
 # fix perms if needed 
 chown clamav:clamav /var/lib/clamav
 chmod -R 0755 /var/lib/clamav/
+
+# This is the one thing that breaks silently when the distro reallocates the clamav
+# uid/gid (jammy 101:102 -> resolute 100:101, see base-os-upgrade.md guardrail 8): a
+# bind-mounted volume still owned by the old ids is unreadable for the uid below, and
+# clamd then dies on its signature database with permission errors. Say it out loud.
+if [ ! -w /var/lib/clamav ] ; then
+    echo "ERROR: /var/lib/clamav is not writable by $(id -un) ($(id -u):$(id -g)); owned by $(stat -c '%u:%g' /var/lib/clamav 2>/dev/null || echo '?')."
+    echo "       dev:  re-run ./bootstrap-dev.sh (it re-owns ldata/clamav to the ids this image uses)"
+    echo "       prod: docker compose run --rm --no-deps --user root --entrypoint chown clamav -R clamav:clamav /var/lib/clamav"
+    exit 1
+fi
+
+# The other silent breaker is the *shared* TEMPBASE: clamd scans, by path, the message files
+# amavisd leaves in /var/lib/amavis/tmp, so this container must be able to traverse and read it
+# — which is why the amavis group is added in the Dockerfile (amavis allocates its gid
+# dynamically: 994 on resolute). Get it wrong and every message fails with "AV: ALL VIRUS
+# SCANNERS FAILED" while all containers still report healthy. Say it out loud instead.
+if [ -d /var/lib/amavis/tmp ] && [ ! -x /var/lib/amavis/tmp ] ; then
+    echo "ERROR: /var/lib/amavis/tmp is not readable by $(id -un) ($(id -u):$(id -g); groups: $(id -G)); owned by $(stat -c '%u:%g' /var/lib/amavis/tmp 2>/dev/null || echo '?')."
+    echo "       clamd must reach amavisd's TEMPBASE through the shared /var/lib/amavis mount"
+    echo "       (group $(stat -c '%g' /var/lib/amavis/tmp 2>/dev/null || echo '?') — see AMAVIS_GID in clamav/Dockerfile)."
+    echo "       dev:  re-run ./bootstrap-dev.sh (it re-owns ldata/amavis to the amavis image's ids)"
+    echo "       prod: re-own the amavis volume to the ids the amavis image runs as"
+    exit 1
+fi
 
 DB_DIR=$(sed -n 's/^DatabaseDirectory\s\(.*\)\s*$/\1/p' /etc/clamav/freshclam.conf )
 DB_DIR=${DB_DIR:-'/var/lib/clamav'}

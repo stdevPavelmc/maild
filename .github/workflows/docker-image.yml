@@ -1,12 +1,29 @@
-name: Build and Push Docker Images
+name: Build, Test and Push Docker Images
+
+# Pipeline (see .agents/devops/workflows.md -> "GitHub Actions CI"):
+#   1. validate every compose file, build the :develop images, bring the dev
+#      stack up with fixtures (bootstrap-dev.sh) and run the acceptance suite;
+#   2. only on a push to develop/main and only if step 1 passed: retag the
+#      images for Docker Hub + ghcr.io (:develop on develop, :latest on main)
+#      and push them;
+#   3. only on a push to main and only if steps 1-2 passed: also tag the
+#      :latest images with the version from the VERSION file and push them.
+#
+# Pull requests run step 1 ONLY (no registry login, no push, no version tag).
 
 on:
   push:
     branches:
+      - develop
       - main
   pull_request:
     branches:
+      - develop
       - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -14,44 +31,142 @@ permissions:
   attestations: write
   id-token: write
 
+env:
+  COMPOSE_FILE: docker-compose-dev.yml
+  ENV_FILE: env.dev
+  # MailD service set (the 8 locally-built images; dozzle is dev-only/external)
+  SERVICES: db admin mua mda mta clamav amavis cron
+  # Docker Hub namespace and the GitHub owner for ghcr.io
+  DOCKERHUB_NAMESPACE: pavelmc
+  GHCR_NAMESPACE: ghcr.io/stdevpavelmc
+
 jobs:
-  build:
+  build-test-push-tag:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v5
 
-    - name: Set up Docker repository
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-            ca-certificates \
-            curl \
-            gnupg \
-            lsb-release
-        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-        echo \
-          "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
-          $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-        sudo apt-get update
-        sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      - name: Free disk space
+        # The 8 image builds (ClamAV, SnappyMail, PostfixAdmin, ...) plus the ~230 MB
+        # ClamAV signature download do not fit alongside the runner's preinstalled SDKs.
+        run: |
+          # NB: keep $AGENT_TOOLSDIRECTORY (/opt/hostedtoolcache) — later Node-based
+          # actions (docker/login-action) rely on it.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost || true
+          sudo apt-get clean
+          docker system prune -af || true
 
-    - name: Log in to Docker Hub
-      uses: docker/login-action@v2
-      with:
-        username: ${{ secrets.DOCKERHUB_USERNAME }}
-        password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Ensure Docker is available
+        run: |
+          if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            echo "Docker and the compose plugin are already present:"
+            docker version
+            docker compose version
+          else
+            echo "Installing Docker CE from the official repository..."
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates curl gnupg lsb-release
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+              $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+            sudo apt-get update
+            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+          fi
 
-    - name: Reset the env to internet settings
-      run: ./setrepos.sh reset
+      - name: Validate compose files
+        # `docker compose config` also resolves every env_file, so an empty .env has to
+        # exist before the production files (which list `.env` in env_file) can be parsed.
+        # Production values are interpolated from env.dev (fake, committed).
+        run: |
+          set -euo pipefail
+          cat env.sample > .env
+          printf 'POSTGRES_PASSWORD=ci-placeholder\n' >> .env
+          printf 'MAIL_ADMIN_PASSWORD=ci-placeholder\n' >> .env
+          printf 'POSTFIXADMIN_SETUP_PASSWORD=ci-placeholder\n' >> .env
+          # compose-gitlab.yml interpolates ${IMG_*}:${TAG} (defined only in .gitlab-ci.yml),
+          # so export harmless placeholders just to parse it.
+          export IMG_DB="img/maild-db" IMG_MTA="img/maild-mta" IMG_MDA="img/maild-mda" \
+                 IMG_MUA="img/maild-mua" IMG_ADMIN="img/maild-admin" IMG_CLAMAV="img/maild-clamav" \
+                 IMG_AMAVIS="img/maild-amavis" IMG_CRON="img/maild-cron" TAG="ci"
+          for f in docker-compose-dev.yml docker-compose.yml compose-github.yml compose-gitlab.yml; do
+            echo "==> validating $f"
+            docker compose --env-file "$ENV_FILE" -f "$f" config -q
+          done
+          echo "All compose files are syntactically valid."
 
-    - name: Log in to GitHub Container Registry
-      run: echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Build images (:develop)
+        # Build once and always with the :develop tag (even on main); the push step
+        # below only retags these local images.
+        run: docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" build
 
-    - name: Build and push Docker images
-      run: |
-        docker compose -f compose-dockerhub.yml build
-        docker compose -f compose-dockerhub.yml push
-        docker compose -f compose-github.yml build
-        docker compose -f compose-github.yml push
+      - name: Start the dev stack, wait for it to settle and bootstrap the fixtures
+        # bootstrap-dev.sh brings the stack up (preparing the fresh bind mounts with the
+        # right ownership), waits for db/schema/HTTP/ClamAV readiness, then provisions the
+        # DEFAULT_DOMAIN + example.net fixtures and writes test.creds. Splitting the "up"
+        # out of it would duplicate the fragile bind-mount/ownership logic.
+        run: ./bootstrap-dev.sh
+
+      - name: Install test dependencies (swaks with TLS support)
+        # test.sh needs swaks with real TLS (ports 465/587 + auth checks). Its no-root
+        # fallback unpacks only the swaks script from the .deb and pulls in NO Perl
+        # modules, so swaks dies with "TLS not available: requires Net::SSLeay"
+        # (rc=10, every TLS/authenticated check fails). Install the package properly:
+        # `swaks` only *Recommends* libnet-ssleay-perl, so request it explicitly.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y swaks libnet-ssleay-perl
+
+      - name: Run the acceptance test suite
+        run: |
+          docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
+          ./test.sh
+
+
+      # --- Phase 2: push images (push events only, after the tests passed) -------------
+      - name: Log in to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Retag and push images
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" = "main" ]; then TAG=latest; else TAG=develop; fi
+          echo "Pushing images tagged '${TAG}' (branch ${GITHUB_REF_NAME})"
+          for svc in $SERVICES; do
+            dh="${DOCKERHUB_NAMESPACE}/maild-${svc}"
+            gh="${GHCR_NAMESPACE}/maild-${svc}"
+            docker tag "${dh}:develop" "${dh}:${TAG}"
+            docker tag "${dh}:develop" "${gh}:${TAG}"
+            docker push "${dh}:${TAG}"
+            docker push "${gh}:${TAG}"
+          done
+
+      # --- Phase 3: version tag (push to main only, after phases 1-2 passed) -----------
+      - name: Tag and push the release version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          [ -n "$VERSION" ] || { echo "::error::VERSION file is empty"; exit 1; }
+          echo "Releasing version ${VERSION}"
+          for svc in $SERVICES; do
+            dh="${DOCKERHUB_NAMESPACE}/maild-${svc}"
+            gh="${GHCR_NAMESPACE}/maild-${svc}"
+            docker tag "${dh}:latest" "${dh}:${VERSION}"
+            docker tag "${dh}:latest" "${gh}:${VERSION}"
+            docker push "${dh}:${VERSION}"
+            docker push "${gh}:${VERSION}"
+          done
+

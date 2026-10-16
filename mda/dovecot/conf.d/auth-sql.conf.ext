@@ -1,30 +1,41 @@
-# Authentication for SQL users. Included from 10-auth.conf.
+# MailD: authentication and user data come from the PostgreSql catalogue.
 #
-# <doc/wiki/AuthDatabase.SQL.txt>
+# Dovecot 2.4 (resolute) dropped the separate `dovecot-sql.conf.ext` include
+# (`args = /etc/dovecot/dovecot-sql.conf.ext` is not distributed any more): the SQL
+# driver, its connection and the queries are configured inline, in the passdb/userdb
+# sections below.
+#
+# The `_POSTGRES_*_` placeholders are substituted at container start-up by
+# mda/configure.sh (the very same variables and spelling the 2.3 file used).
+# `%{user}` is the username after `auth_username_format` normalised it (10-auth.conf):
+# Dovecot 2.4 replaced `%u`/`%n`/`%d` with the `%{user | ...}` filter syntax.
 
-passdb {
-  driver = sql
+sql_driver = pgsql
 
-  # Path for SQL configuration file, see example-config/dovecot-sql.conf.ext
-  args = /etc/dovecot/dovecot-sql.conf.ext
+pgsql _POSTGRES_HOST_ {
+  parameters {
+    user = _POSTGRES_USER_
+    password = _POSTGRES_PASSWORD_
+    dbname = _POSTGRES_DB_
+  }
 }
 
-# "prefetch" user database means that the passdb already provided the
-# needed information and there's no need to do a separate userdb lookup.
-# <doc/wiki/UserDatabase.Prefetch.txt>
-#userdb {
-#  driver = prefetch
-#}
+passdb sql {
+  # PostfixAdmin's mailbox table: the password is all the passdb needs
+  query = SELECT username AS user, password FROM mailbox WHERE username = '%{user}' AND active='1'
 
-userdb {
-  driver = sql
-  args = /etc/dovecot/dovecot-sql.conf.ext
+  # PostfixAdmin stores md5crypt hashes unless POSTFIXADMIN_ENCRYPT says otherwise.
+  # MD5-CRYPT is disabled by default in Dovecot 2.4, hence the
+  # `auth_allow_weak_schemes = yes` in 10-auth.conf (see the note there).
+  default_password_scheme = MD5-CRYPT
 }
 
-# If you don't have any user-specific settings, you can avoid the user_query
-# by using userdb static instead of userdb sql, for example:
-# <doc/wiki/UserDatabase.Static.txt>
-#userdb {
-  #driver = static
-  #args = uid=vmail gid=vmail home=/var/vmail/%u
-#}
+userdb sql {
+  # uid/gid are constants (vmail 5000) and the maildir lives under /home/vmail; the
+  # per-user limit comes from the `quota` column (BYTES, 0 = unlimited) returned as
+  # the quota root's storage_size (2.3 returned `quota_rule = *:bytes=N`)
+  query = SELECT CONCAT('/home/vmail/', maildir) AS home, 5000 AS uid, 5000 AS gid, quota AS quota_storage_size FROM mailbox WHERE username = '%{user}' AND active='1'
+
+  # doveadm -A (the daily quota report) iterates the active mailboxes
+  iterate_query = SELECT username AS user FROM mailbox WHERE active = '1'
+}
