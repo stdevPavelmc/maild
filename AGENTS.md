@@ -95,6 +95,8 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh  
 | `.agents/services/provisioning.md` | First-boot provisioning: sentinel, leader/worker gate, the `PROVISION_*`/`MAIL_ADMIN_PASSWORD` variables, operations |
 | `.agents/services/configuration.md` | Env chain (`env.dev`/`.env` → compose → `vars/` → templates), adding a variable, DB schema changes |
 | `.agents/devops/base-images.md` | Base images (canonical rules + current drift), Dockerfile order, OCI LABELS, pre-commit hook |
+| `.agents/devops/base-os-upgrade.md` | Ubuntu LTS rollover playbook for the five `ubuntu:*` services (procedure + measured traps) |
+| `db_upgrade.md` | PostgreSQL **major** upgrade (dump → fresh cluster → restore), production procedure and caveats |
 | `.agents/devops/environment-setup.md` | Prerequisites, `bootstrap-dev.sh` reference, access points, reset, safety rules |
 | `.agents/devops/workflows.md` | Build/run/debug commands, per-service debugging, test suite, git guidelines |
 

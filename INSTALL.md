@@ -196,6 +196,14 @@ If you set `AUTO_PROVISION=no` you get the original hand-driven flow. After the 
 5. Take the stack down and up so the boot-time services pick up the changes
    (`docker compose … down && docker compose … up -d`), then do [DKIM](#dkim).
 
+## Upgrading the database (PostgreSQL major)
+
+The catalogue can be moved to a newer PostgreSQL major (e.g. 15 → 18) with a full dump and a
+restore into a freshly initialised cluster: the data directories are major-incompatible, so it is
+never a plain image swap and never an in-place start. The step-by-step procedure, its caveats
+(collation, the `--clean --if-exists` restore, the provisioning sentinel, downtime, secrets) and
+the rollback path are in [`db_upgrade.md`](db_upgrade.md).
+
 ## Tech details
 
 - **Volumes:** all persistent data lives in Docker volumes (mail, catalogue, filters, certs).

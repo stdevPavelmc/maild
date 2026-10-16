@@ -205,6 +205,21 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   binds `<container-ip>:10025`, starts with `postfix -v check` clean and without
   obsolete-parameter warnings, and the full acceptance suite is green (47 checks).
 
+- Changed: **the `db` service is on `postgres:18-trixie`** (was `postgres:15-bookworm`): the
+  catalogue moved **15.19 → 18.6**. PostgreSQL data directories are major-incompatible, so this is
+  not a rebuild — it is a **logical dump + restore into a freshly initialised cluster** (15 and 18
+  cannot share a data dir). The db is not part of the Ubuntu LTS rollover: it follows the official
+  image's own cadence. The `postgres:18` images changed the default data layout
+  (`PGDATA=/var/lib/postgresql/18/docker` with a single mount at `/var/lib/postgresql`) and
+  *refuse to start* when they find a mount at the legacy `/var/lib/postgresql/data`, so
+  `db/Dockerfile` pins `PGDATA=/var/lib/postgresql/data`: existing volumes stay valid and the
+  upgrade is dump/restore only. Verified on the dev bench: same encoding/collation
+  (`UTF8`/`en_US.utf8`), `data_checksums` now on (a 18 default), every row restored
+  (`domain=2 mailbox=5 alias=8 admin=2`, plus the `maild_provision` sentinel bit-for-bit), and
+  `bootstrap-dev.sh` + the full acceptance suite (47 checks) green. The production procedure, its
+  caveats (collation/`POSTGRES_INITDB_ARGS`, the mandatory `--clean --if-exists`, the sentinel,
+  secrets, downtime) and the rollback path are documented in the new **`db_upgrade.md`**.
+
 ## 2026-10-06 1.3.1-rc
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`

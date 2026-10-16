@@ -8,6 +8,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 - Image: `pavelmc/maild-db:develop`, built from `db/Dockerfile` (see
   `.agents/devops/base-images.md` for the base-image rules and their current drift).
+- PostgreSQL **18** (`postgres:18-trixie`), with `PGDATA=/var/lib/postgresql/data` pinned in the
+  Dockerfile because the 18 images changed the default layout and refuse to start on a mount at the
+  legacy path. Major upgrades are a dump/restore into a fresh cluster — the production procedure is
+  in `db_upgrade.md`.
 - Stores: domains, mailboxes, aliases, quotas — everything Postfix/Dovecot/Amavis query.
 - `db/docker-entrypoint-wrapper.sh` starts the stock postgres entrypoint, waits for
   readiness (bounded) and then runs `db/ensure_databases.sh`, which creates any **missing**

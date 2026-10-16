@@ -4,18 +4,16 @@
 
 Default for new services: **Ubuntu `resolute` (26.04 LTS)**. Use Debian only when a
 Debian-specific feature is required — then **Debian `trixie`**. The db is special:
-**`postgres:18-bookworm`** (never try postgres:16); the web UIs use the official
+**`postgres:18-trixie`** (never try postgres:16); the web UIs use the official
 `php:8.3-apache(-bookworm)` images.
 
 ### ⚠️ Known drift between these rules and the working tree
 
-The uncommitted working tree currently pins older bases (HEAD already had the newer ones —
-e.g. `db/Dockerfile` at HEAD was `postgres:18-bookworm`, the tree downgraded it to 15).
-Confirm the intended direction with the maintainer before "fixing" either side:
+The uncommitted working tree currently pins older bases for the two web UIs (HEAD already had the
+newer ones). Confirm the intended direction with the maintainer before "fixing" either side:
 
 | Service | Rule (canonical) | Working tree today |
 |---------|------------------|--------------------|
-| db | `postgres:18-bookworm` | `postgres:15-bookworm` |
 | admin | `php:8.3-apache-bookworm` | `php:8.1-apache-bookworm` |
 | mua | `php:8.3-apache` | `php:8.0-apache` (the kept `mua/internet.Dockerfile` / `mua/local.Dockerfile` variants already use 8.3) |
 
@@ -28,7 +26,10 @@ are in `.agents/devops/base-os-upgrade.md`. Highlights: `mda` was the heavy one 
 (resolute's `postgresql-client-18` is newer than both the current and the canonical db server).
 
 Note: changing the db major version on an existing `ldata/db` directory is not a rebuild —
-PostgreSQL data dirs are major-incompatible; dump/restore or `pg_upgrade` first.
+PostgreSQL data directories are major-incompatible, so the cluster is moved with a logical
+dump/restore (the production procedure, with its caveats and rollback: `db_upgrade.md`). The
+`postgres:18` images also changed the default data layout and need the `PGDATA` pin MailD keeps in
+`db/Dockerfile`.
 
 CI publishes its own variants: `mua/internet.Dockerfile` and `mua/local.Dockerfile` still
 exist for that; the dev compose always builds the plain `./<svc>/Dockerfile` (admin's
