@@ -1,23 +1,31 @@
-#
-# SSLeay configuration file for Dovecot.
-#
-
-RANDFILE                = /dev/urandom
-
 [ req ]
-default_bits            = 2048
-default_keyfile         = privkey.pem
-distinguished_name      = req_distinguished_name
-prompt                  = no
-policy			= policy_anything
-req_extensions          = v3_req
-x509_extensions         = v3_req
+default_bits = 2048
+encrypt_key = yes
+distinguished_name = req_dn
+x509_extensions = cert_type
+prompt = no
 
-[ req_distinguished_name ]
-organizationName = Dovecot mail server
-organizationalUnitName = @commonName@
-commonName = @commonName@
-emailAddress = @emailAddress@
+[ req_dn ]
+# country (2 letter code)
+C=_COUNTRY_
 
-[ v3_req ]
-basicConstraints        = CA:FALSE
+# State or Province Name (full name)
+ST=_STATE_
+
+# Locality Name (eg. city)
+L=_CITY_
+
+# Organization (eg. company)
+O=_ORG_
+
+# Organizational Unit Name (eg. section)
+OU=_OU_
+
+# Common Name (*.example.com is also possible)
+CN=_DEFAULT_DOMAIN_
+
+# E-mail contact
+emailAddress=postmaster@_DEFAULT_DOMAIN_
+
+[ cert_type ]
+nsCertType = server
