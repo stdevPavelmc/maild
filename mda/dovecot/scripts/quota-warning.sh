@@ -7,7 +7,10 @@ USER=$2
 # "Can't open log file /dev/stdout: No such device or address" (which silently broke
 # every quota warning). Point the LDA at a real file of its own.
 QW_LOG=/var/log/dovecot-quota-warning.log
-cat << EOF | /usr/lib/dovecot/dovecot-lda -d $USER -o "plugin/quota=maildir:User quota:noenforcing" -o "log_path=$QW_LOG" -o "info_log_path=$QW_LOG" -o "debug_log_path=$QW_LOG"
+# Dovecot 2.4: the LDA override is a plain setting list now — the 2.3
+# `plugin/quota=maildir:User quota:noenforcing` string is not understood by 2.4
+# (unknown setting) and the warning mail would never be delivered.
+cat << EOF | /usr/lib/dovecot/dovecot-lda -d $USER -o "quota_driver=maildir" -o "quota_enforce=no" -o "log_path=$QW_LOG" -o "info_log_path=$QW_LOG" -o "debug_log_path=$QW_LOG"
 From: postmaster@_DEFAULT_DOMAIN_
 Subject: =?UTF-8?Q?IMPORTANTE=3a_Advertencia_de_buz=c3=b3n_de_correos_al_llenarse!?=
 MIME-Version: 1.0

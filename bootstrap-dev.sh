@@ -578,8 +578,9 @@ ensure_mailbox() { # <address> <md5-crypt hash> <display name>
 	else
 		item "mailbox $addr (created)"
 	fi
-	# quota stays 0 on purpose: dovecot-sql.conf.ext returns CONCAT('*:bytes=', quota), i.e. the
-	# column is read as BYTES here, not as the MB PostfixAdmin assumes (0 = no quota limit).
+	# quota stays 0 on purpose: auth-sql.conf.ext returns the column as the quota root's
+	# storage_size, i.e. it is read as BYTES here, not as the MB PostfixAdmin assumes
+	# (0 = no quota limit, unlimited).
 	psql_in "$PGDB" -v addr="$addr" -v hash="$hash" -v name="$name" <<'SQL'
 INSERT INTO mailbox (username, password, name, maildir, quota, domain, local_part, active)
 VALUES (:'addr', :'hash', :'name',

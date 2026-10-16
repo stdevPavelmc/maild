@@ -357,6 +357,73 @@ stack runs old + new bases side by side. Make that visible:
 3. While any row still shows the old base, the upgrade is **not done** —
    say so in the PR (`Upgrade in progress: <done>/<total> on ubuntu:<new>`).
 
+## 6. `mda` — Dovecot 2.3 → 2.4 is a rewrite, not a package swap (measured 2026-10-16)
+
+`ubuntu:jammy` → `ubuntu:resolute` moves Dovecot **2.3.16 → 2.4.2**. The "pristine files are
+byte-identical" shortcut of §3.3 does **not** apply here: 2.4 refuses 2.3 configuration outright
+("New 2.4 packages are not compatible with old 2.3 configuration"), so the whole `/etc/dovecot`
+tree was rewritten. Every item below was validated twice — `doveconf` on the real package and then
+at runtime (throwaway container, then the dev stack, then the acceptance suite).
+
+* `dovecot_config_version = 2.4.0` + `dovecot_storage_version = 2.4.0` must be the first
+  non-comment lines of `dovecot.conf`.
+* Every section needs a name, and the two catch-alls are gone: `plugin { }` is now
+  "Unknown section name: plugin" and the `dict { }` skeleton is "missing section name". Service
+  listeners need names as well: MailD's `inet_listener { port = 12345 }` (Postfix SASL — the mta's
+  `smtpd_sasl_path = inet:<mda>:12345`, i.e. **cross-service**) and `inet_listener { port = 12340 }`
+  (Postfix quota policy) became `inet_listener auth` and `inet_listener quota-status`.
+* `mail_location` is gone → `mail_driver = maildir` + `mail_path = ~/maildir`; the `%d`/`%n`
+  modifiers are gone → `%{user | domain}` / `%{user | username}` (chainable filters).
+* SSL: `ssl_cert`/`ssl_key`/`ssl_dh` → `ssl_server_cert_file`/`ssl_server_key_file`/
+  `ssl_server_dh_file`, and they take a plain path — the 2.3 `<` prefix would read the file
+  *content* into the setting. `ssl_prefer_server_ciphers = yes` → `ssl_server_prefer_ciphers =
+  server` (values client|server).
+* `disable_plaintext_auth = no` has **no** successor: 2.4 rejects `auth_allow_cleartext = yes`
+  together with `ssl = required` ("has no effect with ssl=required"). With TLS mandatory the old
+  setting was already inert, so it is simply dropped.
+* The legacy `$setting` expansion is gone: `$mail_plugins` and `$default_internal_user` are taken as
+  literal plugin/user names and the daemon refuses to start (`service(auth-worker) User doesn't
+  exist: $default_internal_user`). Write the lists out, or reference with `$SET:<name>`.
+* `plugin { sieve = ...; sieve_dir = ...; sieve_default = ... }` → `sieve_script <name> { type =
+  personal|default|before; driver = file; path; active_path }`. `sieve_user_log` and
+  `sieve_global_path` no longer exist ("Unknown setting").
+* imapsieve: `imapsieve_mailboxN_*` → a `sieve_script` inside `namespace inbox { mailbox Junk { … }
+  }` plus a top-level `imapsieve_from Junk { sieve_script … }`, and the plugin moved:
+  `sieve_plugins = sieve_imapsieve sieve_extprograms` (2.4 ships imapsieve as a sieve plugin, on top
+  of the `imap_sieve` mail plugin that 20-imap.conf still loads).
+* Sieve extension lists take a bool block: `sieve_extensions { vnd.dovecot.pipe = yes }`. The 2.3
+  `= +vnd.dovecot.pipe` spelling only emits "ignored unknown extension '+vnd.dovecot.pipe'" — the
+  extension stays disabled and the learning scripts stop compiling. A parse check that only looks
+  at the exit status will not catch this: `doveconf` returns 0 and warns on stderr.
+* Quota: `plugin { quota = maildir:User quota … }` → a named root `quota "User quota" { driver =
+  maildir; storage_grace = 20M; warning warn95 { quota_storage_percentage = 95; execute
+  quota-warning { args = 95 %{user} } } }`; `quota_rule`/`quota_rule2` → `storage_size` and the
+  per-mailbox `quota_storage_extra`; `quota_status_*`/`quota_mail_size` are top-level. Percentage
+  grace does not exist any more (absolute size only).
+* **The quota root must not declare `storage_size` when userdb supplies the limit**: a configured
+  size *shadows* the `quota_storage_size` returned by userdb, silently pinning every mailbox to
+  that number (measured: 5 MB in the catalogue was still reported as 100M). Return the limit from
+  userdb and leave the root without a size.
+* SQL: `dovecot-sql.conf.ext` is not shipped any more. `passdb { driver = sql args = … }` →
+  `sql_driver = pgsql` + `pgsql <host> { parameters { user/password/dbname } }` + `passdb sql {
+  query = …; default_password_scheme = … }` / `userdb sql { query = …; iterate_query = … }`, with
+  `%{user}` instead of `%u`.
+* **MD5-CRYPT (and the other weak schemes) are disabled by default in 2.4.** PostfixAdmin,
+  `admin/seed.sh` and `bootstrap-dev.sh` all hash md5crypt, so the mda needs
+  `auth_allow_weak_schemes = yes` or no mailbox can log in (2.4 logs "Weak password schemes are
+  allowed" as the standing reminder).
+* Package/file drift: `netcat` is virtual (install `netcat-openbsd`); `20-lmtpd.conf` is
+  `20-lmtp.conf` upstream — and Debian's new version sets `auth_username_format =
+  %{user | username | lower}` inside `protocol lmtp`, which strips the domain MailD's SQL lookups
+  need, so it must not be carried over blindly.
+* `doveadm quota get` keeps its old output shape as long as the quota root keeps its name ("User
+  quota"): `test.sh` and `mda/scripts/quota_report.sh` parse those columns.
+
+Trap for later validation runs: Dovecot/Debian repopulate an **empty** `/etc/dovecot` from the
+packaged `/usr/share/dovecot` defaults on first start, so a candidate tree copied into a container
+that has already started Dovecot once is silently partly ignored. Always `rm -rf /etc/dovecot/*`
+before dropping a tree in.
+
 
 
 

@@ -104,10 +104,11 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
 ./test.sh --skip-docker    # only wire-level checks (no `docker compose exec` assertions)
 ```
 
-- 44 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
+- 47 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
   aliases and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
-  DKIM, the deployment domain and the cron jobs (the daily database backup and the daily mail
-  traffic resume).
+  DKIM, the deployment domain, the cron jobs (the daily database backup, the daily mail traffic
+  resume and the daily Bayes learning) and the SpamAssassin maintenance chain (the imapsieve
+  learning trigger and the `sa-update` loop).
 - The two open-relay negatives complement each other: `A8` targets the reserved, **non-resolvable**
   `.example` TLD (stopped by `reject_unknown_recipient_domain`), while `F3a` targets
   `RELAY_PROBE_DOMAIN` (`example.com` by default) — resolvable but not hosted here, so it is what
@@ -122,11 +123,26 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
   read back out of the admin's mailbox. Since dev has no syslog for that job to parse, the phase
   materialises one (see *Logging* below) and asserts the report carries **real** traffic rather
   than the blank, all-zeroes one pflogsumm emits for an empty log.
+- The SpamAssassin maintenance phase (`H`) covers the rules refresh, which is **not** a cron job:
+  `amavis/sa-update-loop.sh` (started by the amavis entrypoint) runs `sa-update` daily at
+  `SA_UPDATE_HOUR:SA_UPDATE_MINUTE` and HUPs amavisd. It asserts the loop is alive, that the
+  rules it maintains actually load (`spamassassin --lint`, with the `.pre` set matching the
+  installed major — a distro jump that ships `v3*.pre` under SpamAssassin 4.x is the failure it
+  catches) and, when the channel is reachable, runs the fetch itself (`rc` 0 = rules installed,
+  4 = nothing new; any other rc with the channel reachable fails).
+- The imapsieve check (`F4`) drives a real IMAP COPY into Junk — imapsieve is an IMAP plugin, so
+  `doveadm move` would not trigger it — and proves the "instant learning" pipe ran through the
+  state its vmail-user `sa-learn` helper leaves under `/tmp` (`uid 5000`), then expunges the copy.
+  The Bayes learning cron job (`G11`) is executed **twice** against the live folders to prove it
+  survives empty Junk folders and releases its lock; the summary it logs is captured through an
+  injected `logger` (the container has no `/dev/log`), so the counters are visible as output.
 - Overridable from the environment: `DOMAIN`, `ADMINMAIL`, `PASS`, `SERVER`, `FROM`,
   `RELAY_PROBE_DOMAIN`.
-- Self-cleaning: the quota fixture (`bob@…`), any sieve script it installs and the
-  `/var/log/syslog` it materialises inside the cron container are restored/removed on exit,
-  whatever the outcome; every swaks transcript is appended to `./test.log`.
+- Self-cleaning: the quota fixture (`bob@…`), any sieve script it installs, the message it
+  copies into Junk for the imapsieve check (plus the `sa-learn` state that run leaves in the
+  container) and the `/var/log/syslog` it materialises inside the cron container are
+  restored/removed on exit, whatever the outcome; every swaks transcript is appended to
+  `./test.log`.
 - The content-filter checks need AV/SpamAssassin (on by default in `env.dev`) and, for AV, the
   first ClamAV signature download to have landed — `bootstrap-dev.sh` waits for it.
 
