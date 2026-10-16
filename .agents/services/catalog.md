@@ -109,10 +109,20 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Runs `cron -f`; jobs in `cron/crontab` (UTC): traffic resume 01:10, maildir check
   02:13 monthly, Junk purge 03:00, Bayes learning 03:30, db backup 08:00 (scripts in
   `cron/scripts/`).
+- `pg_dump`/`psql` come from the **distro** `postgresql-client-18` (`ARG PG_CLIENT_MAJOR=18`): on
+  resolute it is ≥ the catalogue server, so the PGDG repository, keyring and `curl` the jammy image
+  needed are gone. `backup_db.sh` still refuses to dump when the client is older than the server
+  (it mails a CRITICAL with the `PG_CLIENT_MAJOR` remedy instead of keeping an empty archive).
+- `pflogsumm` (1.1.14) lives in `/usr/bin` on resolute, so `resume.sh` resolves it from `PATH`;
+  SpamAssassin 4.0.2 provides the `sa-learn` the Bayes job uses. The `cron/spamassassin/` file is a
+  reference copy of Debian's `/etc/cron.daily/spamassassin` that the image never installs (the
+  rules refresh runs in `amavis`).
 - Volumes: `ldata/logs:/var/log` (empty in dev — JSON logging), `ldata/vmail:/home/vmail`,
   `ldata/backups:/backups` (prod parity: without it `backup_db.sh` dumps into the
-  container's writable layer and the dump vanishes on recreate).
-- Shares the SpamAssassin bayes db with amavis (`ldata/spamassassin`).
+  container's writable layer and the dump vanishes on recreate). It does **not** mount the shared
+  SpamAssassin volume: its `sa-learn` runs with `HOME=/tmp`, so the "shared bayes db" contract only
+  holds for amavis (known drift, see `.local/caveats.md`).
+- HEALTHCHECK: `/var/run/crond.pid` + `kill -0` (added with the resolute move).
 - env_file: `vars/db.env`, `vars/amavis.env`, `env.sample`.
 
 ## dozzle — log viewer (dev only)

@@ -154,6 +154,30 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `MDA_DEBUG_SSL` were read from `MTA_*` variables, and the SSL one flipped `verbose_ssl`, which
   2.4 removed. The variable names are corrected and the SSL knob now says why it is a no-op.
 
+- Changed: **`cron` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the **fourth**
+  service of the LTS rollover (**4/5** — only `mta` is still on jammy). The PGDG repository dance
+  is gone with it: jammy only shipped `postgresql-client` 14 (older than the 15 server, which is
+  the combination that used to produce silent 20-byte "successful" dumps), while resolute ships
+  **`postgresql-client-18`** — ≥ the working-tree server (`postgres:15-bookworm`) *and* equal to
+  the canonical target (`postgres:18-bookworm`) — so the image installs the distro package
+  (`ARG PG_CLIENT_MAJOR=18`), losing the keyring fetch, the extra apt source and `curl`. Measured
+  on the real packages: `pg_dump 18.6` dumps the 15.19 catalogue (the suite's G1/G3 gate passes),
+  SpamAssassin moves 3.4.6 → **4.0.2** (only `sa-learn` is used; `Learned tokens from N message(s)`
+  and the `--dump magic` `non-token data:` lines are unchanged, and with no bayes db it degrades
+  to the same zeros as before), pflogsumm 1.1.5 → **1.1.14**, swaks 20201014 → 20240103 and
+  bind9-host 9.18 → 9.20. The daemon is still `cron 3.0pl1`. A **HEALTHCHECK** was added (the
+  documented exception until now): it reads `/var/run/crond.pid` and checks the process, so `cron`
+  reports health like every other service.
+- Fixed: **`cron/scripts/resume.sh` hardcoded `/usr/sbin/pflogsumm`**, and resolute's pflogsumm
+  1.1.14 installs to `/usr/bin/pflogsumm`: the daily traffic resume would have failed with
+  "No such file or directory" and mailed an empty report (the report *layout* is unchanged — the
+  suite's G8/G9/G10 pass with 117 received / 117 delivered and the domain in the body). The script
+  resolves `pflogsumm` from `PATH` now, like every other tool it calls.
+- Changed: **the `cron/spamassassin/` reference copy was refreshed from the resolute SpamAssassin
+  4.0.2 package** (the jammy one is archived in `cron/spamassassin-jammy/`). It is a reference
+  only: the image never installs it (the Dockerfile purges `/etc/cron.*/*`) and the rules refresh
+  runs in `amavis` — the playbook and `catalog.md` no longer imply otherwise.
+
 ## 2026-10-06 1.3.1-rc
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
