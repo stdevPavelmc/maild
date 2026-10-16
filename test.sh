@@ -18,9 +18,10 @@
 # Secrets come from ./test.creds (written by bootstrap-dev.sh); everything is also
 # overridable from the environment: DOMAIN, ADMINMAIL, PASS, SERVER, FROM, RELAY_PROBE_DOMAIN.
 #
-# The suite is self-cleaning: the quota fixture (bob@DOMAIN), any sieve script it creates
-# and the /var/log/syslog it materialises inside the cron container (phase G) are restored
-# or removed on exit, whatever the outcome.
+# The suite is self-cleaning: the quota fixture (bob@DOMAIN), any sieve script it creates,
+# the message it copies into Junk for the imapsieve check (with the sa-learn state that run
+# leaves behind) and the /var/log/syslog it materialises inside the cron container (phase G)
+# are restored or removed on exit, whatever the outcome.
 #
 # Exit code: 0 when every executed check passed, 1 otherwise (skips are reported).
 
@@ -300,13 +301,20 @@ make_file() { dd if=/dev/zero of="$1" bs=1024 count=$(( $2 / 1024 )) status=none
 
 # The stack must come back the way it was found: undo whatever the quota fixture
 # did (bob@… goes back to unlimited, its test mail is expunged), drop any sieve
-# script the suite installed and remove the syslog phase G materialised in the cron
-# container (dev has no /var/log/syslog of its own, see phase G).
+# script the suite installed, empty the Junk copy the imapsieve check made (plus
+# the sa-learn state that run left in the container's /tmp) and remove the syslog
+# phase G materialised in the cron container (dev has no /var/log/syslog of its
+# own, see phase G).
 QUOTA_TOUCHED=0
 RES_SEEDED=0
+IMAPSIEVE_TOUCHED=0
 cleanup() {
     if [ "$HAVE_DC" = 1 ]; then
         dcx mda rm -f "/home/vmail/${DOMAIN}/${ADMINMAIL%%@*}/dovecot.sieve" > /dev/null 2>&1 || true
+        if [ "$IMAPSIEVE_TOUCHED" = 1 ]; then
+            expunge_mailbox "$ADMINMAIL" Junk
+            dcx mda rm -rf /tmp/.spamassassin > /dev/null 2>&1 || true
+        fi
         if [ "$RES_SEEDED" = 1 ]; then
             dcx cron sh -c 'rm -f /var/log/syslog /var/log/syslog.1 /var/log/.maild-test-seeded' > /dev/null 2>&1 || true
         fi
@@ -838,6 +846,62 @@ else
     fi
 fi
 
+# F4 — moving a message into Junk fires the imapsieve Bayes learning, MailD's "instant learning"
+# path: Dovecot runs the global learn-spam.sieve, which pipes the message to
+# mda/sieve-pipe/learn-spam.sh (sa-learn --spam). Only a real IMAP session triggers it
+# (`doveadm move` does not: imapsieve is an IMAP plugin), so the check drives the same curl-IMAP
+# path C3/C4 use, and it produces its own message instead of depending on the folders: empty
+# Junk/INBOX folders are fine.
+# Proof of the learning is the bayes state the pipe's sa-learn leaves under its HOME (/tmp) —
+# owned by uid 5000 (vmail), which is what tells the message-triggered run apart from the root
+# probe at the end (a root-owned state dir would not even be writable by the vmail-user pipe).
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "imapsieve Junk learning trigger ($DC_NEEDED)"
+else
+    IMAPSIEVE_TOUCHED=1
+    F="$(chrono)"
+    swx -s "$SERVER" -p 587 -tls -a PLAIN -au "$ADMINMAIL" -ap "$PASS" \
+        -t "$ADMINMAIL" -f "$ADMINMAIL" --header "Subject: $F"
+    # start from a clean slate: a stale state dir is root-owned (0700) and the pipe, running as
+    # vmail, could not write its learning into it
+    dcx mda rm -rf /tmp/.spamassassin > /dev/null 2>&1 || true
+    MUID=""
+    if [ "$SW_RC" -eq 0 ] && wait_msg "$ADMINMAIL" INBOX "$F" ; then
+        MUID="$(msg_newest_uid "$ADMINMAIL" INBOX "$F")"
+    fi
+    CP_OUT=""
+    if [ -n "$MUID" ] ; then
+        CP_OUT="$(timeout -k5 40 curl --silent --insecure --user "$ADMINMAIL:$PASS" \
+                  --url "imaps://$SERVER:993/INBOX" -X "UID COPY $MUID Junk" 2>&1 | tr -d '\r')"
+    fi
+    # the pipe helper is what the sieve script calls: it must always succeed (it is written to
+    # never fail the user's IMAP operation), so it is probed verbatim with one message on stdin
+    HP_OUT="$(dcx mda sh -c 'printf "From: probe@test.invalid\nTo: probe@test.invalid\nSubject: probe\n\nprobe\n" | /usr/lib/dovecot/sieve-pipe/learn-spam.sh; echo "rc=$?"' 2>&1 | tr -d '\r')"
+    HP_RC="$(printf '%s' "$HP_OUT" | sed -n 's/^rc=\([0-9][0-9]*\)$/\1/p' | tail -n1)"
+    JUNK_UID=""
+    ART_UID=""
+    if [ -n "$MUID" ] ; then
+        for _ in 1 2 3 4 5 ; do
+            JUNK_UID="$(msg_newest_uid "$ADMINMAIL" Junk "$F")"
+            ART_UID="$(dcx mda sh -c 'stat -c %u /tmp/.spamassassin 2>/dev/null' 2>/dev/null | tr -d ' \r')"
+            [ -n "$JUNK_UID" ] && [ "$ART_UID" = 5000 ] && break
+            sleep 2
+        done
+    fi
+    if [ -n "$MUID" ] && [ -n "$JUNK_UID" ] && [ "$ART_UID" = 5000 ] && [ "${HP_RC:-1}" = 0 ] ; then
+        t_ok "moving a message into Junk triggers the imapsieve Bayes learning (the vmail-user pipe wrote /tmp/.spamassassin and the helper exits 0)"
+    else
+        t_fail "moving a message into Junk triggers the imapsieve Bayes learning (swaks rc=$SW_RC, INBOX uid='${MUID:-none}', Junk uid='${JUNK_UID:-none}', sa-learn state uid='${ART_UID:-none}' want 5000, helper rc='${HP_RC:-none}' want 0)"
+        if [ -n "$MUID" ] ; then
+            dump_swaks
+            info "COPY reply: ${CP_OUT:-none}"
+        fi
+    fi
+    # the copy is expunged right away (the assertions above already ran): the phases that follow
+    # must see the mailbox as they found it, and the exit trap is only the safety net
+    expunge_mailbox "$ADMINMAIL" Junk
+fi
+
 # ============================================================ G. db backup ====
 # The daily pg_dump of the catalogue (cron/crontab → /scripts/backup_db.sh). A pg_dump older
 # than the server aborts with "server version mismatch" and writes NOTHING on stdout, and the
@@ -1030,11 +1094,107 @@ else
         fi
     fi
 
+    # ---------------------------------------------- daily Bayes learning job --
+    # learn_from_folders.sh (cron: `30 03 * * *` → 03:30 UTC) feeds the bayes db with every
+    # message sitting on the users' Junk folders plus a random sample of their INBOXes. Two
+    # properties matter here: it must survive empty folders (nothing to learn is not an error)
+    # and it must release its flock, or the next day's run is skipped — hence the two
+    # consecutive runs, both of which must exit 0.
+    # Its only output is a `logger` summary and the container has no /dev/log, so the check runs
+    # the script with a `logger` shell function injected (sourcing it under bash: the script
+    # re-sources /etc/environment, which would drop a PATH stub) to capture that summary
+    # verbatim. The script itself is untouched and the learning is the real one. The ham counter
+    # varies from run to run (random INBOX sampling) and the spam counter can be 0 even with
+    # messages in Junk (an already-learned duplicate is skipped), so only the shape is asserted.
+    if ! dcx cron sh -c 'grep -q "^30 03 .*learn_from_folders\.sh" /etc/crontab' ; then
+        t_fail "G11 the Bayes learning job is scheduled in the cron crontab (no 03:30 learn_from_folders.sh entry)"
+    else
+        BAYES_RAW1="$(dcx cron bash -c 'logger() { echo "logger: $*"; }; . /scripts/learn_from_folders.sh' 2>&1)" ; BAYES_RC1=$?
+        BAYES_RAW2="$(dcx cron bash -c 'logger() { echo "logger: $*"; }; . /scripts/learn_from_folders.sh' 2>&1)" ; BAYES_RC2=$?
+        BAYES_SUM="$(printf '%s\n' "$BAYES_RAW1" | tr -d '\r' | sed -n 's/.*bayes learning done: //p' | head -n1)"
+        BAYES_SPAM="$(printf '%s' "$BAYES_SUM" | sed -n 's/^\([0-9][0-9]*\) spam learned from \([0-9][0-9]*\) junk message(s).*/\1/p')"
+        BAYES_JUNK="$(printf '%s' "$BAYES_SUM" | sed -n 's/^\([0-9][0-9]*\) spam learned from \([0-9][0-9]*\) junk message(s).*/\2/p')"
+        BAYES_HAM="$(printf '%s' "$BAYES_SUM" | sed -n 's/.*; \([0-9][0-9]*\) ham learned from \([0-9][0-9]*\) sampled INBOX message(s).*/\1/p')"
+        BAYES_MODE="$(dcx cron sh -c 'stat -c %a /var/lib/spamassassin/bayes 2>/dev/null' 2>/dev/null | tr -d ' \r')"
+        if [ "$BAYES_RC1" -ne 0 ] || [ "$BAYES_RC2" -ne 0 ] ; then
+            t_fail "G11 the Bayes learning job runs to completion (rc=$BAYES_RC1 then rc=$BAYES_RC2, want 0/0)"
+            info "$(printf '%s' "$BAYES_RAW1" | tr -d '\r' | tail -n 5 | sed 's/^/        /')"
+        elif [ -z "$BAYES_SUM" ] || [ -z "$BAYES_SPAM" ] || [ -z "$BAYES_JUNK" ] || [ -z "$BAYES_HAM" ] ; then
+            t_fail "G11 the Bayes learning job reports its summary (captured: '$(printf '%s' "$BAYES_RAW1" | tr -d '\r' | head -c 160)')"
+        elif [ "$BAYES_MODE" != 777 ] ; then
+            t_fail "G11 the Bayes learning job leaves the bayes dir writable for its peers (mode=$BAYES_MODE, want 777: amavis scans and the mda learns into it too)"
+        else
+            t_ok "G11 the Bayes learning job runs twice, releases its lock and reports '$BAYES_SUM'"
+        fi
+    fi
+
     if [ "$RES_SEEDED" = 1 ] ; then
         info "the materialised /var/log/syslog is removed from the cron container on exit"
     fi
 fi
 
+
+# ======================================= H. SpamAssassin maintenance ==========
+# The SpamAssassin *rules* refresh is not a cron-container job (cron only runs the Bayes
+# learning in section G): the amavis entrypoint starts amavis/sa-update-loop.sh
+# (`/sa-update-loop.sh &`), which runs `sa-update --channel updates.spamassassin.org` once a day
+# at SA_UPDATE_HOUR:SA_UPDATE_MINUTE and HUPs amavisd when new rules land. This section checks
+# the whole chain: the loop is wired and alive, the tool is installed, the knobs are documented
+# and — the part that decides whether scanning keeps working — the rules it maintains actually
+# load, with the `.pre` set matching the installed major. A distro jump that installs v3*.pre
+# under SpamAssassin 4.x is exactly that failure (see the amavis jammy→resolute move) and it
+# stays invisible until mail is filtered.
+# The live fetch needs egress to updates.spamassassin.org. It is graded when the channel is
+# reachable (rc 0 = rules installed, 4 = nothing new; anything else is a real failure), and
+# when the channel cannot be reached at all the fetch is reported as evidence while the
+# deterministic half decides the check — a mail server that cannot see the update server still
+# has to scan with the rules it has.
+section "H. SpamAssassin maintenance (sa-update loop)"
+
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "SpamAssassin rules update checks ($DC_NEEDED)"
+else
+    SAU_WHY=""
+    dcx amavis test -x /sa-update-loop.sh || SAU_WHY="$SAU_WHY loop-script-missing;"
+    dcx amavis sh -c 'pgrep -f sa-update-loop.sh > /dev/null' || SAU_WHY="$SAU_WHY loop-not-running;"
+    dcx amavis sh -c 'timeout 45 spamassassin --lint > /dev/null 2>&1' || SAU_WHY="$SAU_WHY rules-do-not-load;"
+    grep -q 'SA_UPDATE_HOUR' "$SCRIPT_DIR/vars/amavis.env" || SAU_WHY="$SAU_WHY SA_UPDATE_* knobs-undocumented;"
+    SAU_VER="$(dcx amavis sh -c 'sa-update --version 2>/dev/null' | tr -d '\r' | sed -n 's/^sa-update version \([0-9][0-9.]*\).*/\1/p' | head -n1)"
+    if [ -z "$SAU_VER" ] ; then
+        SAU_WHY="$SAU_WHY sa-update-missing;"
+        SAU_PRE=0
+    else
+        # v400/v401/v402 under SA 4.x, v310..v343 under 3.4.x: the major decides the family
+        SAU_PRE="$(dcx amavis sh -c "ls /etc/spamassassin/v${SAU_VER%%.*}*.pre 2>/dev/null | wc -l" | tr -d ' \r')"
+        [ "${SAU_PRE:-0}" -gt 0 ] || SAU_WHY="$SAU_WHY no-v${SAU_VER%%.*}xx.pre-for-SA-$SAU_VER;"
+    fi
+    if [ -n "$SAU_WHY" ] ; then
+        t_fail "H1 the sa-update loop is wired and the rules it maintains load (${SAU_WHY# })"
+    else
+        # is the channel reachable at all? (netcat-openbsd is in the amavis image)
+        SAU_REACH=0
+        dcx amavis sh -c 'timeout 10 nc -z -w5 updates.spamassassin.org 80 > /dev/null 2>&1' && SAU_REACH=1
+        SAU_OUT="$(timeout -k5 60 "${DC[@]}" exec -T amavis sa-update --channel updates.spamassassin.org 2>&1)"
+        SAU_RC=$?
+        case "$SAU_RC" in
+            0) t_ok "H1 the sa-update loop is alive, its rules load (SA $SAU_VER, $SAU_PRE v${SAU_VER%%.*}xx.pre) and the live fetch installed new rules" ;;
+            4) t_ok "H1 the sa-update loop is alive, its rules load (SA $SAU_VER, $SAU_PRE v${SAU_VER%%.*}xx.pre) and the live fetch found nothing new" ;;
+            *)
+                # an unexpected rc is only conclusive if the channel was reachable: re-check,
+                # so an intermittent network drops to the informational path instead of failing
+                dcx amavis sh -c 'timeout 10 nc -z -w5 updates.spamassassin.org 80 > /dev/null 2>&1' || SAU_REACH=0
+                SAU_MSG="$(printf '%s' "$SAU_OUT" | tr -d '\r' | grep -v '^[[:space:]]*$' | head -n1)"
+                if [ "$SAU_REACH" = 1 ] ; then
+                    t_fail "H1 sa-update fails although updates.spamassassin.org is reachable (rc=$SAU_RC: $SAU_MSG)"
+                else
+                    t_ok "H1 the sa-update loop is alive and the rules it maintains load (SA $SAU_VER, $SAU_PRE v${SAU_VER%%.*}xx.pre)"
+                    info "live sa-update probe rc=$SAU_RC: $SAU_MSG"
+                    info "that channel is unreachable from here; on a networked host the same probe must return 0 or 4"
+                fi
+                ;;
+        esac
+    fi
+fi
 
 # ================================================================= summary ====
 section "summary"

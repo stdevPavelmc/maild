@@ -64,7 +64,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 44 checks
+./test.sh                 # 47 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -73,6 +73,10 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 - Reads `test.creds`; overridable via env (`DOMAIN`, `ADMINMAIL`, `PASS`, `SERVER`, `FROM`,
   `RELAY_PROBE_DOMAIN`).
+- Beyond the mail path it exercises the SpamAssassin chain: the daily Bayes learning job (run
+  twice, so its `flock` release is proven), the imapsieve Junk-move learning trigger (a real
+  IMAP COPY) and the `sa-update` loop with the rules it maintains (`spamassassin --lint` plus
+  the `.pre` family of the installed major).
 - Self-cleaning: quota fixture, sieve scripts and the materialised `/var/log/syslog` are
   restored/removed on exit; transcripts append to `./test.log` (git-ignored).
 - Exit code 0 only when every executed check passed. Run the full suite before merging
