@@ -127,6 +127,17 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   (those hashes cannot be regenerated without the clear-text password). Dovecot logs "Weak password
   schemes are allowed" at start-up as the standing reminder; migrating the catalogue to
   SHA512-CRYPT is a separate, product-wide decision.
+- Changed: **the `mda` Dovecot configuration tree was rewritten for 2.4** (`mda/dovecot/**`). The
+  2.3 files are archived under `mda/dovecot-jammy/` (read-only, kept in-tree until the whole
+  rollover ends) and were replaced by the `ubuntu:resolute` package templates plus the MailD
+  customizations re-expressed in the new schema, so `git diff mda/dovecot-jammy mda/dovecot` shows
+  every deliberate change for review. Layout-wise: the SQL moved from the separate
+  `dovecot-sql.conf.ext` into `conf.d/auth-sql.conf.ext`, the instant-learning trigger moved into
+  `conf.d/90-imapsieve.conf` (as a `mailbox Junk` / `imapsieve_from Junk` pair), the quota root and
+  its warnings into `conf.d/90-quota.conf`, the sieve storages into `conf.d/90-sieve.conf`, and
+  `conf.d/90-acl.conf` / `conf.d/90-plugin.conf` are gone (they only carried the empty `plugin { }`
+  blocks that 2.4 removed), while `conf.d/20-lmtpd.conf` is `conf.d/20-lmtp.conf` now (upstream
+  rename in 2.4).
 - Fixed: **the per-user quota would have been silently pinned to the configured default.** Measured
   on 2.4.2: a `storage_size` declared inside the quota root *shadows* the `quota_storage_size` the
   userdb returns, so every mailbox would have ignored its PostfixAdmin quota. The root therefore
