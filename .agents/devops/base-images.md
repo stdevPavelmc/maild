@@ -18,16 +18,14 @@ Confirm the intended direction with the maintainer before "fixing" either side:
 | db | `postgres:18-bookworm` | `postgres:15-bookworm` |
 | admin | `php:8.3-apache-bookworm` | `php:8.1-apache-bookworm` |
 | mua | `php:8.3-apache` | `php:8.0-apache` (the kept `mua/internet.Dockerfile` / `mua/local.Dockerfile` variants already use 8.3) |
-| mta | `ubuntu:resolute` | `ubuntu:jammy` |
 
-`clamav`, `amavis`, `mda` and `cron` already moved to `ubuntu:resolute` on 2026-10-15/16 (LTS
-rollover **4/5**; the procedure and the package traps they uncovered:
-`.agents/devops/base-os-upgrade.md`). `mda` was the heavy one: Dovecot went 2.3.16 → **2.4.2**,
-which does not read 2.3 configuration, so its whole `/etc/dovecot` tree was rewritten (2.4
-markers, named sections, `mail_driver`/`mail_path`, `ssl_server_*`, `sieve_script` storages,
-imapsieve mailbox scripts, a named quota root). `cron` dropped the PGDG repository entirely:
-resolute's `postgresql-client-18` is newer than both the current and the canonical db server.
-The last Ubuntu service (`mta`) still pins `ubuntu:jammy`.
+`clamav`, `amavis`, `mda`, `cron` and `mta` all moved to `ubuntu:resolute` on 2026-10-15/16: the
+Ubuntu LTS rollover is **complete (5/5)** — the procedure and the package traps each step uncovered
+are in `.agents/devops/base-os-upgrade.md`. Highlights: `mda` was the heavy one (Dovecot 2.3.16 →
+**2.4.2**, which does not read 2.3 configuration, so its whole `/etc/dovecot` tree was rewritten),
+`mta` (Postfix **3.10.6**) needed its two obsoleted TLS parameters dropped and its
+`configure-instance.sh`/`ifconfig` traps fixed, and `cron` dropped the PGDG repository entirely
+(resolute's `postgresql-client-18` is newer than both the current and the canonical db server).
 
 Note: changing the db major version on an existing `ldata/db` directory is not a rebuild —
 PostgreSQL data dirs are major-incompatible; dump/restore or `pg_upgrade` first.

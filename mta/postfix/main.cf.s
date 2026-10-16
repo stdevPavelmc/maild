@@ -73,14 +73,17 @@ smtp_tls_loglevel = 1
 smtpd_tls_loglevel = 1
 
 # Attacks proteciton: LogJam, FREAK & POODLE
-smtpd_tls_eecdh_grade = strong
+# smtpd_tls_eecdh_grade was obsoleted in Postfix 3.9 ("support will be removed; leave at
+# default"): the curve is picked automatically through tls_eecdh_auto_curves now.
 smtpd_tls_ciphers = high
 smtpd_tls_mandatory_protocols = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
 smtpd_tls_protocols = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
 smtp_tls_mandatory_protocols = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
 smtp_tls_protocols = !SSLv2,!SSLv3,!TLSv1,!TLSv1.1
 smtpd_tls_exclude_ciphers = aNULL, eNULL, EXPORT, DES, RC4, MD5, PSK, aECDH, EDH-DSS-DES-CBC3-SHA, EDH-RSA-DES-CBC3-SHA, KRB5-DES, CBC3-SHA
-smtpd_tls_dh1024_param_file = /certs/RSA2048.pem
+# smtpd_tls_dh1024_param_file is obsolete too (Postfix 3.9): with ECDHE auto-curves the DHE
+# parameters are not needed, so the mta no longer reads /certs/RSA2048.pem (the mda keeps it as
+# its own ssl_server_dh_file).
 
 # EHLO RESTRICTION
 smtpd_helo_required = yes
@@ -214,7 +217,10 @@ smtpd_reject_unlisted_recipient = yes
 #smtp_sasl_password_maps = hash:/etc/postfix/sasl_passwd
 
 # compat level 
-compatibility_level = 3
+# compat level: 3.9, the value the resolute Postfix (3.10.6) ships in its own main.cf and the
+# level that silences the backwards-compatibility safety net. It used to be "3" here while the
+# entrypoint forced 3.6 at start-up; the template is the single source of truth now.
+compatibility_level = 3.9
 
 # bounce templates
 #bounce_template_file = /etc/postfix/bounce.es.cf

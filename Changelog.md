@@ -178,6 +178,33 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   only: the image never installs it (the Dockerfile purges `/etc/cron.*/*`) and the rules refresh
   runs in `amavis` — the playbook and `catalog.md` no longer imply otherwise.
 
+- Changed: **`mta` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the fifth and last
+  service of the LTS rollover — which is now **complete (5/5: clamav, amavis, mda, cron, mta)**.
+  Postfix jumps **3.6.4 → 3.10.6** and `postfix-policyd-spf-python` 2.9.3 → 3.1.0 (same
+  `/usr/bin/policyd-spf` binary and `/etc/postfix-policyd-spf-python/policyd-spf.conf` path, so
+  `master.cf` needed no change). Ported: the two parameters Postfix 3.9 obsoleted —
+  `smtpd_tls_dh1024_param_file` and `smtpd_tls_eecdh_grade` — are gone (with ECDHE auto-curves the
+  DHE parameters are not needed, so the mta no longer reads `/certs/RSA2048.pem`: the mda keeps that
+  file as its own `ssl_server_dh_file`), and `compatibility_level` is **3.9**, the value the
+  resolute package ships in its own `main.cf`, now declared only in `main.cf.s` — the entrypoint used
+  to force 3.6 at start-up, silently overriding the template. The rest of MailD's TLS block
+  (`smtpd_tls_ciphers`, the `*_tls_mandatory_protocols`/`*_tls_protocols` lists, the cipher
+  exclusions) is *not* obsolete in 3.10 and was kept as-is. Postfix 3.9/3.10 also bring security
+  defaults that now apply, deliberately: `smtpd_forbid_unauth_pipelining = yes`,
+  `smtpd_forbid_bare_newline = normalize`, `cleanup_replace_stray_cr_lf = yes` and a DNS-result cap.
+  The image drops `net-tools` and `netcat`: nothing in it used `nc`, `netstat` or `ifconfig` after
+  the port (the healthcheck reads the master pidfile).
+- Fixed: **the mta container would have crash-looped on resolute.** Two 3.10 changes bit the
+  entrypoint: `/usr/lib/postfix/configure-instance.sh` now refuses to run when invoked directly
+  ("E: This is internal script used by postfix" — it expects postfix-script's environment), so the
+  explicit call is gone and postfix-script runs it on every instance start as designed; and the
+  container's own address, used for the `_OWN_IP_` placeholder of the 10025 reinjection listener,
+  came from `ifconfig` (net-tools, no longer installed), which after the package cleanup produced an
+  **empty** value and bound that listener to every interface. It is resolved with
+  `getent hosts $(hostname)` (falling back to `hostname -i`), dependency-free. Verified: the mta
+  binds `<container-ip>:10025`, starts with `postfix -v check` clean and without
+  obsolete-parameter warnings, and the full acceptance suite is green (47 checks).
+
 ## 2026-10-06 1.3.1-rc
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into
   three gated phases on `develop`/`main`. (1) Validate every compose file, build the `:develop`
