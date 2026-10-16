@@ -65,6 +65,13 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `docker compose exec mda /scripts/quota_report.sh --now [--dry-run]`.
 - `mda/configure.sh` (startup helper, invoked by the entrypoint) and `mda/sendmail.py`
   are part of the image.
+- **Auth cache** (`mda/dovecot/conf.d/10-auth.conf`): MailD runs it short on purpose —
+  `auth_cache_size = 10M` with `auth_cache_ttl = 1 minute` and `auth_cache_negative_ttl = 0`.
+  A cached *success* keeps authenticating without asking the catalogue, so a longer TTL made a
+  superseded password (a password changed in PostfixAdmin, which never re-authenticates) look
+  alive for ten minutes; negative caching for an hour could lock a user out of a password he had
+  mistyped before adopting it. See `.agents/devops/workflows.md` for the symptom and
+  `doveadm auth cache flush`.
 - env_file: `vars/db.env`, `vars/mda.env`, `vars/ssl.env`, `env.sample`; password +
   `DEFAULT_DOMAIN`/`DEFAULT_MAILBOX_SIZE` passed explicitly at compose level.
 - Ports: 110, 143, 993, 995 (POP3/IMAP + TLS) and 4190 (ManageSieve), 12345 (SASL).
@@ -111,9 +118,41 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Webmail on Apache; dev publishes 8081:80. The app is baked into the image at
   `/var/www/html`; **only** `/var/www/html/data` is persisted (`ldata/mua_web`, owned by
   `www-data` — bootstrap-dev.sh fixes the ownership and restarts mua).
-- Writes the contacts DSN (db `contacts`) with `POSTGRES_PASSWORD` at start.
-- Waits (bounded) on the `maild_provision` sentinel before building the SnappyMail
-  per-domain configs, so a fresh deploy gets them with no restart (`AUTO_PROVISION`).
+- `config-setup.php` (a PHP helper the entrypoint runs) writes MailD's settings into
+  SnappyMail's `application.ini`: `BANNER_TITLE`, the contacts DSN (db `contacts`) with
+  `POSTGRES_PASSWORD`, and the admin panel credentials. It patches the file **at text level**
+  (comments and foreign settings untouched) quoting the values exactly like SnappyMail does,
+  then validates that it still parses and rolls back if it does not. `crudini --set` used to do
+  this job: it strips the quotes, PHP rejects the whole file, SnappyMail falls back to its
+  factory defaults — `security.admin_password` included — and mints a random password nobody
+  printed, so `/?admin` + the OTP from the logs could not work (see Changelog 1.4.0-rc).
+- Admin panel: `/?admin`, login `MUA_ADMIN_USER` (**default `maild`**). The password is the OTP
+  of the entrypoint banner (`docker compose logs mua`): generated on the first boot and kept in
+  the data volume, or the one in `MUA_ADMIN_PASSWORD` when set. A password changed from the
+  panel is respected (SnappyMail deletes `admin_password.txt` then) and no OTP is printed.
+- Baseline plugins (**`MUA_PLUGINS`**, default `add-x-originating-ip-header,change-password,
+  two-factor-auth`): their packages are downloaded at **build time** (pinned `ARG`s in
+  `mua/Dockerfile` → `/opt/maild/plugins/`) and the entrypoint copies them over the volume on
+  every boot, so a fresh deployment has them and an image bump refreshes them. The plugin
+  *settings* live in `configs/plugin-*.json` (volume) and are never overwritten; the enabled
+  list is the union of `MUA_PLUGINS` and whatever the panel enabled. Only the managed
+  directories are replaced, so a plugin installed later from the panel survives. Bump the
+  `ARG PLUGIN_*` versions together with `SNAPPY_VERSION` and re-check each package's `REQUIRED`
+  const (the repository only keeps the newer builds:
+  `https://snappymail.eu/repository/v2/packages.json`).
+- `change-password` ships with **MailD's own driver** (`mua/plugins/change-password-maild/`), a
+  sibling package of the plugin (its documented extension point, so a plugin update cannot
+  overwrite it). It writes `mailbox.password` (+`modified`) in the catalogue exactly like
+  PostfixAdmin does, md5crypt by default — the scheme PostfixAdmin (`POSTFIXADMIN_ENCRYPT`) and
+  Dovecot (`default_password_scheme`) both verify — from the container's `POSTGRES_*`, with every
+  value overridable in the panel. `config-setup.php` keeps `driver_maild_enabled` on. After a
+  change, Dovecot's auth cache (`auth_cache_ttl` **1 minute**, negative caching off — MailD's
+  settings in `mda/dovecot/conf.d/10-auth.conf`) may still answer with the old result for up to
+  that minute: IMAP/SMTP logins with the *new* password are always accepted, and
+  `doveadm auth cache flush` clears the doubt.
+- Waits (bounded, `MUA_CONFIG_WAIT_TIMEOUT`) for SnappyMail to create `application.ini`, then
+  waits (bounded) on the `maild_provision` sentinel before building the per-domain configs, so
+  a fresh deploy gets them with no restart (`AUTO_PROVISION`).
 - env_file: `vars/db.env`, `vars/mua.env`, `env.sample`.
 
 ## cron — maintenance

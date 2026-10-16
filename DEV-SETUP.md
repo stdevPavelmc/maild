@@ -208,6 +208,11 @@ All services expose debugging ports:
 ## Accessing Services
 
 - **Webmail:** http://localhost:8081
+- **Webmail admin panel:** http://localhost:8081/​?admin — login `maild`, password = the OTP the
+  mua container prints at boot (`docker compose logs mua | grep -A3 'admin panel'`)
+- **Mailbox password change:** from the webmail itself (Settings → Password) — the `change-password`
+  plugin and the MailD catalogue driver ship with the image, as do the X-Originating-IP header and
+  TOTP two-factor plugins (`MUA_PLUGINS`), installed on every boot
 - **Admin Interface:** http://localhost:8080
 - **Database:** localhost:5432
   - User: `maild`

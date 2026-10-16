@@ -153,7 +153,6 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Fixed: the mda debug knobs were unreachable — `MDA_DEBUG_AUTH_PASSWORD`, `MDA_DEBUG_MAIL` and
   `MDA_DEBUG_SSL` were read from `MTA_*` variables, and the SSL one flipped `verbose_ssl`, which
   2.4 removed. The variable names are corrected and the SSL knob now says why it is a no-op.
-
 - Changed: **`cron` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the **fourth**
   service of the LTS rollover (**4/5** — only `mta` is still on jammy). The PGDG repository dance
   is gone with it: jammy only shipped `postgresql-client` 14 (older than the 15 server, which is
@@ -177,7 +176,6 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   4.0.2 package** (the jammy one is archived in `cron/spamassassin-jammy/`). It is a reference
   only: the image never installs it (the Dockerfile purges `/etc/cron.*/*`) and the rules refresh
   runs in `amavis` — the playbook and `catalog.md` no longer imply otherwise.
-
 - Changed: **`mta` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the fifth and last
   service of the LTS rollover — which is now **complete (5/5: clamav, amavis, mda, cron, mta)**.
   Postfix jumps **3.6.4 → 3.10.6** and `postfix-policyd-spf-python` 2.9.3 → 3.1.0 (same
@@ -204,7 +202,6 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `getent hosts $(hostname)` (falling back to `hostname -i`), dependency-free. Verified: the mta
   binds `<container-ip>:10025`, starts with `postfix -v check` clean and without
   obsolete-parameter warnings, and the full acceptance suite is green (47 checks).
-
 - Changed: **the `db` service is on `postgres:18-trixie`** (was `postgres:15-bookworm`): the
   catalogue moved **15.19 → 18.6**. PostgreSQL data directories are major-incompatible, so this is
   not a rebuild — it is a **logical dump + restore into a freshly initialised cluster** (15 and 18
@@ -219,6 +216,93 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `bootstrap-dev.sh` + the full acceptance suite (47 checks) green. The production procedure, its
   caveats (collation/`POSTGRES_INITDB_ARGS`, the mandatory `--clean --if-exists`, the sentinel,
   secrets, downtime) and the rollback path are documented in the new **`db_upgrade.md`**.
+- Fixed: **the SnappyMail admin panel rejected the OTP the `mua` container printed**
+  (`/?admin` + `admin:<password from docker compose logs mua>` answered `AuthError[102]` for
+  ever). The entrypoint patched SnappyMail's own `application.ini` with
+  `crudini --set --inplace`, and crudini writes every value *unquoted* where SnappyMail quotes
+  its strings: `pdo_dsn = host=db;port=5432;dbname=contacts` is a syntax error for PHP's ini
+  parser, so `parse_ini_file()` returned `false` **for the whole file**.
+  `RainLoop\Config\AbstractConfig::Load()` reads an unparsable file as "no configuration" and
+  calls `Save()`, which rewrote it from the factory defaults — `security.admin_password`
+  included, so the `BANNER_TITLE` and the contacts settings were silently lost as well. The next
+  admin-panel request then found an empty password and minted a new random one
+  (`ActionsAdmin::AdminAppData`), written to `data/_data_/_default_/admin_password.txt` *and* to
+  the config hash: the one password nobody printed, while the entrypoint kept advertising the
+  stale one. Proven by the timestamps (`admin_password.txt` at 16:33:50.542, the config hash at
+  16:33:50.606 — the two writes of that single request), by `password_verify()` against what was
+  printed (mismatch), and by reproducing the parser failure on crudini's output. The new
+  **`mua/config-setup.php`** replaces that block: it patches the file **at text level** (comments
+  and foreign settings untouched) with SnappyMail's own quoting rules, repairs values an older
+  release left unquoted, validates that it still parses, and only then touches the credentials —
+  writing atomically and rolling the file back if the result does not verify. The wait loop no
+  longer blocks on `admin_password.txt` either (SnappyMail deletes it when an administrator sets
+  a password from the panel): if it finds a hash whose plaintext is gone it now says
+  `unchanged, set from the admin panel` instead of silently rotating a password somebody chose.
+- Added: **`MUA_ADMIN_USER`** (default **`maild`**, the panel login used to be the hardcoded
+  `admin`) and **`MUA_ADMIN_PASSWORD`** (empty ⇒ random, generated on the first boot, kept in the
+  data volume and printed as an OTP by the entrypoint banner; set ⇒ applied on every boot and the
+  plaintext file — hence the panel's "weak password" flag — is dropped). `MUA_CONFIG_WAIT_TIMEOUT`
+  bounds the configuration wait. Documented in `env.sample`, `env.sample_gitlab`, `vars/mua.env`,
+  `INSTALL.md` ("First login"), `.agents/services/catalog.md` and
+  `.agents/devops/workflows.md` (debug recipe + the two failure modes).
+- Fixed: two smaller `mua` entrypoint defects on the same path: `chmod 0600 ~/.pgpass &1>2` (a
+  typo — the bare `1>2` redirection created an empty **root-owned `2` file inside `domains/`** on
+  every boot; the cleanup is now `find … -maxdepth 1 -type f -delete`, which also drops stale
+  per-domain JSONs and does not choke on names with spaces), and `contacts enabled On`, a key
+  SnappyMail does not have (it is **`enable`**), so the contacts database had never actually been
+  enabled.
+- Changed: `mua/snappymail.ini` enables `log_errors` (`error_log = /dev/stderr`) so a PHP level
+  failure of the webmail surfaces in `docker compose logs mua` — a silent ini parse error is what
+  hid this bug — and its comments now use `;`: the php.ini parser reads a `#` line as a bogus key
+  and rejects the whole file as soon as such a line is not a valid `key = value` (the previous
+  `# log_errors = On` lines were inert for that reason). `crudini` is no longer installed.
+- Added: **the webmail ships a working password change (Settings → Password) and its plugin
+  baseline comes from the image instead of from a hand-installed volume.** Three packages —
+  `add-x-originating-ip-header` (2.0), `change-password` (2.38) and `two-factor-auth` (2.19.0) —
+  are downloaded at **build time** from `snappymail.eu/repository/v2/` (pinned `ARG PLUGIN_*`,
+  bump them together with `SNAPPY_VERSION`) into `/opt/maild/plugins/`, and the mua entrypoint
+  copies them over the data volume on every boot (`MUA_PLUGINS`, additive to whatever the admin
+  panel enabled; only the managed directories are replaced, so a plugin installed later from the
+  panel survives). Their **settings** live in the volume (`configs/plugin-*.json`) and are never
+  rewritten by the boot. Before this the plugins only existed because they had been installed by
+  hand into one volume — a fresh deployment had none — and `change-password` answered **"There
+  are no change-password drivers enabled"** on any deployment, because that plugin only offers a
+  driver when its `driver_<name>_enabled` setting is set and nothing ever set it.
+- Added: **`mua/plugins/change-password-maild/driver.php`**, MailD's own change-password driver.
+  It is a *sibling package* of the plugin (`plugins/change-password-<name>/driver.php`, the
+  extension point that plugin globs) so installing or updating `change-password` from the admin
+  panel cannot overwrite it. It writes `mailbox.password` (and `modified`) in the catalogue
+  exactly like PostfixAdmin — **md5crypt by default**, the scheme `POSTFIXADMIN_ENCRYPT` and
+  Dovecot's `default_password_scheme` both verify, generated the way `admin/seed.sh` generates it
+  — over PDO/pgsql with the container's `POSTGRES_*`, every value (DSN, credentials, hash scheme,
+  `{SCHEME}` prefix) overridable in the panel. Verified live on the dev bench: changing
+  `alice@example.net`'s password from the webmail wrote `$1$…` and bumped `modified`, the new
+  password logged in over IMAPS *and* verified through PostfixAdmin's own `pacrypt()` while the
+  old one stopped working (the fixture password was restored afterwards). A superseded password can
+  still authenticate until Dovecot's `auth_cache_ttl` runs out — see the cache bullet below.
+- Changed: the mua entrypoint syncs the plugin directories before the config stage and tightens
+  their modes (`chmod go-rwx`, matching SnappyMail's own installer); `config-setup.php` keeps
+  `[plugins] enable = On` and `enabled_list` at the union of `MUA_PLUGINS` and the panel's list,
+  and seeds `driver_maild_enabled` (forced while `change-password` is managed) and
+  `driver_maild_allowed_emails` (only when absent, so an operator restriction survives).
+  Documented in `env.sample`, `env.sample_gitlab`, `vars/mua.env`, `INSTALL.md`, `DEV-SETUP.md`,
+  `.agents/services/catalog.md` and `.agents/devops/workflows.md`.
+- Changed: **Dovecot's authentication cache is now short** —
+  `mda/dovecot/conf.d/10-auth.conf`: `auth_cache_ttl = 1 minute` and
+  `auth_cache_negative_ttl = 0` (the 10M cache itself is kept). Prompted by a bench report: after
+  changing a password in the webmail, the *old* password still logged in. The change itself was
+  correct — the catalogue verified with PostfixAdmin's own `pacrypt()`, and the webmail with the
+  new password — but a cached *success* answers an authentication without querying the passdb for
+  the whole TTL, so the superseded password kept working for up to Dovecot's default ten minutes
+  (and for a password changed in PostfixAdmin, which never re-authenticates, nothing refreshes the
+  entry before it expires; the webmail does refresh it, because it re-authenticates with the new
+  password right after the change). The same cache did the opposite, and worse: a *mismatch* cached
+  for an hour could lock a user out of a password he had mistyped once *before* adopting it. One
+  minute without negative caching makes both realistic, still absorbs a mail client's reconnect
+  bursts, and `doveadm auth cache flush` remains the instant remedy — measured on the bench: a
+  superseded password still authenticates right after the change and fails 65 s later, and a
+  previously-mistyped password works the moment it is set. `.agents/devops/workflows.md` and the
+  `mda` entry of `.agents/services/catalog.md` document the symptom and the settings.
 
 ## 2026-10-06 1.3.1-rc
 - Changed: **GitHub Actions pipeline** (`.github/workflows/docker-image.yml`) rebuilt into

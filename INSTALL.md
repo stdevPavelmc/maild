@@ -106,6 +106,19 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
   (CSV) via the PostfixAdmin tools.
 - **Webmail (SnappyMail):** open `https://webmails.domain.com` (or the webmail port of your
   compose file) and log in with a mailbox you created.
+- **Webmail admin panel:** `https://webmail.domain.com/​?admin` — the login (default `maild`)
+  and the password are printed by the webmail container on every boot, as an OTP:
+  `docker compose logs mua | grep -A3 'admin panel'`. The password is generated on the first
+  boot and kept in the data volume; set `MUA_ADMIN_PASSWORD` to pin a known one.
+- **Changing a mailbox password:** users do it themselves from the webmail (**Settings →
+  Password**). MailD ships the SnappyMail `change-password` plugin wired to its own catalogue
+  driver, so the new password is immediately valid over IMAP/POP3/SMTP and in PostfixAdmin.
+  Because Dovecot caches authentication results for a minute (`auth_cache_ttl` in
+  `mda/dovecot/conf.d/10-auth.conf`), the *previous* password can still be accepted for up to
+  that minute — the new one always works at once, and
+  `docker compose exec mda doveadm auth cache flush` removes any doubt.
+  The baseline plugins (X-Originating-IP header, change-password, TOTP two-factor) are installed
+  and enabled on every boot — `MUA_PLUGINS` in `env.sample` lists them.
 
 > The first domain is already there: do **not** recreate it, or you will get a duplicate.
 
