@@ -16,14 +16,16 @@ for maintenance jobs.
 | `clamav` | ClamAV antivirus engine                           | 3310                      |
 | `admin`  | PostfixAdmin web admin UI                         | 8080                      |
 | `mua`    | SnappyMail webmail                                | 8081                      |
+| `api`    | AdminNG API — FastAPI over the catalogue (internal only) | —                  |
+| `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083                      |
 | `cron`   | Scheduled jobs: db backup, traffic resume, SA…    | —                         |
 | `dozzle` | Dev-only live container log viewer                | 8082                      |
 
 ## Core Principles — never break these
 
 - **Never rename service hostnames** (`db`, `mta`, `mda`, `amavis`, `clamav`, `admin`,
-  `mua`, `cron`) — they are hardcoded across entrypoints, Postfix/Dovecot/Amavis config
-  and the test suite.
+  `mua`, `cron`, `api`, `adminng`) — they are hardcoded across entrypoints,
+  Postfix/Dovecot/Amavis config and the test suite.
 - **Never change the database schema** without a migration script. `db/ensure_databases.sh`
   only *creates missing* databases (`POSTGRES_EXTRA_DB`); it never alters existing ones.
 - **Environment variable names are immutable** across the chain:

@@ -1,0 +1,13 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Mobile ergonomics (technical-draft §6.1): no accidental zoom, 44px targets. */
+html {
+  -webkit-text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
+}

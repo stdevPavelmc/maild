@@ -26,6 +26,8 @@ variables:
   IMG_CLAMAV: "$CI_REGISTRY_IMAGE/maild-clamav"
   IMG_AMAVIS: "$CI_REGISTRY_IMAGE/maild-amavis"
   IMG_CRON: "$CI_REGISTRY_IMAGE/maild-cron"
+  IMG_API: "$CI_REGISTRY_IMAGE/maild-api"
+  IMG_ADMINNG: "$CI_REGISTRY_IMAGE/maild-adminng"
 
   # default TAG is dev
   TAG: dev
@@ -66,6 +68,16 @@ stages:
   rules:
     - changes:
         - admin/**/*
+
+.rule_api:
+  rules:
+    - changes:
+        - adminng/api/**/*
+
+.rule_adminng:
+  rules:
+    - changes:
+        - adminng/pwa/**/*
 
 .rule_mta:
   rules:
@@ -122,6 +134,30 @@ build_admin:
     - mails
   rules:
     !reference [.rule_admin, rules]
+
+# api (AdminNG backend)
+build_api:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build api --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_api, rules]
+
+# adminng (AdminNG PWA frontend)
+build_adminng:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build adminng --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_adminng, rules]
 
 # mta
 build_mta:
@@ -230,6 +266,38 @@ release_admin:
     - mails
   rules:
     !reference [.rule_admin, rules]
+
+# Release api (AdminNG backend)
+release_api:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull api
+    - docker tag ${IMG_API}:${TAG} ${IMG_API}:latest
+    - export TAG=latest
+    - docker compose push api
+  needs:
+    - build_api
+  tags:
+    - mails
+  rules:
+    !reference [.rule_api, rules]
+
+# Release adminng (AdminNG PWA frontend)
+release_adminng:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull adminng
+    - docker tag ${IMG_ADMINNG}:${TAG} ${IMG_ADMINNG}:latest
+    - export TAG=latest
+    - docker compose push adminng
+  needs:
+    - build_adminng
+  tags:
+    - mails
+  rules:
+    !reference [.rule_adminng, rules]
 
 # Release mta
 release_mta:
@@ -356,6 +424,10 @@ deploy:
     - job: release_mua
       optional: true
     - job: release_cron
+      optional: true
+    - job: release_api
+      optional: true
+    - job: release_adminng
       optional: true
   tags:
     - mails

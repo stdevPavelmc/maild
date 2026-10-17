@@ -15,8 +15,11 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Stores: domains, mailboxes, aliases, quotas — everything Postfix/Dovecot/Amavis query.
 - `db/docker-entrypoint-wrapper.sh` starts the stock postgres entrypoint, waits for
   readiness (bounded) and then runs `db/ensure_databases.sh`, which creates any **missing**
-  databases from `POSTGRES_DB` + `POSTGRES_EXTRA_DB` (comma-separated, e.g. `contacts`) on
-  *every* boot. It never alters existing databases or the schema.
+  databases from `POSTGRES_DB` + `POSTGRES_EXTRA_DB` (comma-separated, e.g. `contacts`) plus
+  `ADMINNG_DB` (AdminNG's own database, default `adminng`) on *every* boot. It never alters
+  existing databases or the schema. `ADMINNG_DB` is a separate variable on purpose:
+  `mua/config-setup.php` reads `POSTGRES_EXTRA_DB` as a single database name for the
+  SnappyMail contacts DSN, so the two lists must not be merged.
 - Env (new schema): defaults baked in `db/Dockerfile` (`POSTGRES_HOST/DB/USER/EXTRA_DB`);
   the operator file (`env.dev`/`.env`) is the `env_file:` and overrides any of them. The
   password is passed explicitly with a `${POSTGRES_PASSWORD:?}` guard (compose does not
@@ -119,6 +122,36 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   vars); the operator file is the `env_file:` and overrides any of them. The entrypoint maps
   `POSTGRES_PASSWORD` → `POSTFIXADMIN_DB_PASSWORD` itself; `POSTFIXADMIN_SETUP_PASSWORD`
   is ignored (the entrypoint always emits its own OTP).
+
+## api — AdminNG backend
+
+- FastAPI (Uvicorn) on `python:3.14-slim-trixie`, built from `adminng/api/`; service
+  hostname `api`, **no published port** — only the `adminng` frontend talks to it, over the
+  compose network (`/api/v1/` proxy).
+- Two databases on `db`: the PostfixAdmin catalogue `POSTGRES_DB` (read/write, **zero
+  DDL** — it writes rows exactly like PostfixAdmin: md5crypt, `maildir = domain/local/`,
+  quota in bytes) and its own `ADMINNG_DB` (devices, sessions, TOTP credentials, audit
+  trail), whose schema it migrates at boot from `adminng/api/migrations/`.
+- Mounts the vmail volume **read-only**: quota usage comes from the Maildir++ `.maildirsize`
+  files (never a Dovecot secret, never a write).
+- Ships the `adminng.py` CLI (`--list-devices`, `--approve-device`, `--revoke-device`,
+  `--totp-reset`) — the server-side device-authorization path (`adminng/README.md`).
+- HEALTHCHECK: `GET /health`, 200 only when the adminng database answers.
+- env: defaults baked in `adminng/api/Dockerfile` (`POSTGRES_*`, `ADMINNG_DB`,
+  `ADMINNG_*` TTLs/toggles); the operator file is the `env_file:` and overrides any of them;
+  `POSTGRES_PASSWORD` is passed explicitly with the compose `${POSTGRES_PASSWORD:?}` guard.
+
+## adminng — AdminNG frontend (PWA)
+
+- nginx serving the built Vite/React PWA plus a `/api/v1/` reverse proxy to `api:8080`.
+  Dev publishes **8083:80**; production publishes **no port** and is routed by the ingress
+  (`adminng.${DEFAULT_DOMAIN}`, Traefik labels; TLS terminated by the operator's proxy).
+- Stateless and env-free: **no `env_file:`** (variable separation, like clamav). Its access
+  log (stdout) is the exterior interaction record; the functional audit trail lives in the
+  `adminng` DB's `audit_event` table.
+- Built multi-stage from `adminng/pwa/` (`node:22-alpine` build → `nginx:1.27-alpine`).
+- Clients (browser/PWA/APK) can only log in until their device is approved; the Android
+  APK (Phase 4) is the only client that needs the server-URL onboarding screen.
 
 ## mua — SnappyMail
 

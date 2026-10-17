@@ -70,6 +70,41 @@ services:
     networks:
       - maild-dev
 
+  api:
+    image: pavelmc/maild-api:develop
+    build: ./adminng/api/
+    container_name: maild-dev-api
+    hostname: api
+    restart: unless-stopped
+    environment:
+      # explicit on every DB consumer (see the note on the db service): the guard
+      # makes a missing password fail at `compose config`.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
+    # operator env file (fake dev secrets); overrides any same-named image ENV default
+    env_file:
+      - env.dev
+    volumes:
+      # quota usage = Maildir++ .maildirsize; the API never writes mail storage
+      - ./ldata/vmail:/home/vmail:ro
+    depends_on:
+      - db
+    networks:
+      - maild-dev
+
+  adminng:
+    image: pavelmc/maild-adminng:develop
+    build: ./adminng/pwa/
+    container_name: maild-dev-adminng
+    hostname: adminng
+    restart: unless-stopped
+    # no env_file on purpose: static bundle + same-origin proxy to `api`.
+    ports:
+      - "8083:80"  # PWA + /api/v1 proxy - exposed for local access
+    depends_on:
+      - api
+    networks:
+      - maild-dev
+
   mua:
     image: pavelmc/maild-mua:develop
     build: ./mua/

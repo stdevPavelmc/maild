@@ -18,6 +18,22 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-16 1.6.0-dev
+- Added: **AdminNG Phase 0 scaffolding** — the next-generation PWA admin interface
+  (`adminng/`): a FastAPI backend (`adminng/api/`, service `api`, internal only, no published
+  port) and the PWA frontend served by nginx (`adminng/pwa/`, service `adminng`, dev port
+  **8083**, production `adminng.${DEFAULT_DOMAIN}` via the ingress). Both are wired into the
+  four compose files, the GitHub/GitLab pipelines and `bootstrap-dev.sh`; the frontend proxies
+  `/api/v1/` to the API (same-origin, no CORS) and keeps the exterior access log. The design
+  and roadmap live in `adminng/doc/` (`technical-draft.md`, `plan.md`).
+- Added: `ADMINNG_DB` (default `adminng`) — the database `db/ensure_databases.sh` creates on
+  every boot for AdminNG's own state (devices, sessions, TOTP credentials, audit trail). It is
+  a variable of its own, **not** an entry of `POSTGRES_EXTRA_DB`: `mua/config-setup.php` reads
+  that one as a single database name for the SnappyMail contacts DSN.
+- Changed: `db/ensure_databases.sh` now also ensures `POSTGRES_DB` unconditionally and skips
+  duplicate entries in its list (previously it exited early when `POSTGRES_EXTRA_DB` was
+  empty).
+
 ## 2026-10-17 1.5.1-rc
 - Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**
   (both Debian trixie, so the package list is unchanged). PHP 8.3 left *active* support on

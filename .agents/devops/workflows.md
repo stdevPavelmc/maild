@@ -30,12 +30,18 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 - **Logs:** every service logs to stdout (`maillog_file = /dev/stdout` on the mta);
   `docker compose logs` or the dozzle UI on http://localhost:8082.
 - **Health:** each image carries a `HEALTHCHECK` (db: `pg_isready`; mta/mda/amavis/clamav:
-  `/check.sh`; admin/mua: `curl -f localhost`). `ps` shows the status.
+  `/check.sh`; admin/mua: `curl -f localhost`; api: `GET /health` with the adminng DB
+  answering; adminng: `wget /`). `ps` shows the status.
 - **Env inside a container:** `… exec mta env | sort`.
 - **DB:** `… exec db pg_isready`; psql session: `… exec db psql -U maild -d mailddb`;
   connectivity from a service: `… exec mda nc -z db 5432`, or `… exec mta getent hosts db`
   anywhere (the mta image does not ship `nc`: nothing in it needed netcat, unlike the amavis,
   clamav and mda healthchecks).
+- **AdminNG:** the PWA is on http://localhost:8083 (nginx serves it and proxies `/api/v1/`
+  to `api`); `… logs -f adminng api` for its two halves; the adminng DB is
+  `… exec db psql -U maild -d adminng`; devices are authorized from the server side with
+  `… exec api adminng.py --list-devices` / `--approve-device <uuid>` (see
+  `adminng/README.md`). Health through the proxy: `curl -sf localhost:8083/api/v1/health`.
 - **Mailboxes:** Maildir under `ldata/vmail/` — `find ldata/vmail -name cur -o -name new`;
   `… exec mda doveadm auth test alice@example.net '<pw>'`;
   `… exec mda doveadm quota get -A`.

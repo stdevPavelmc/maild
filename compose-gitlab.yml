@@ -73,6 +73,60 @@ services:
       # optional: pin the network Traefik must use when the container joins several
       #- "traefik.docker.network=maild"
 
+  api:
+    image: ${IMG_API}:${TAG}
+    build: ./adminng/api/
+    container_name: maild-api
+    hostname: api
+    restart: always
+    # No published port: only the `adminng` frontend talks to the API, over the
+    # compose network (/api/v1/ proxy).
+    environment:
+      # explicit on every DB consumer (see the note on the db service): the guard
+      # makes a missing password fail at `compose config`.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # operator env file (from env.sample); overrides any same-named image ENV default
+    env_file:
+      - .env
+    volumes:
+      # quota usage = Maildir++ .maildirsize; the API never writes mail storage
+      - vmail:/home/vmail:ro
+    depends_on:
+      - db
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+
+  adminng:
+    image: ${IMG_ADMINNG}:${TAG}
+    build: ./adminng/pwa/
+    container_name: maild-adminng
+    hostname: adminng
+    restart: always
+    # no env_file on purpose: static bundle + same-origin proxy to `api`.
+    # No published port: exposed through the ingress proxy (Traefik labels below).
+    depends_on:
+      - api
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+    labels:
+      # Ingress (Traefik) — https://adminng.${DEFAULT_DOMAIN}
+      - "traefik.enable=true"
+      - "traefik.http.routers.adminng.rule=Host(`adminng.${DEFAULT_DOMAIN}`)"
+      - "traefik.http.routers.adminng.entrypoints=websecure"
+      - "traefik.http.routers.adminng.tls=true"
+      # custom service (non default port)
+      - "traefik.http.routers.adminng.service=adminng_custom_port"
+      - "traefik.http.services.adminng_custom_port.loadbalancer.server.port=80"
+      #- "traefik.docker.network=maild"
+
   mua:
     image: ${IMG_MUA}:${TAG}
     build: ./mua/

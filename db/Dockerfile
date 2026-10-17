@@ -7,7 +7,9 @@ FROM postgres:18-trixie
 # document was validated against; .agents/devops/base-images.md carries the canonical rule.
 
 # Extra databases are ensured on *every* boot by the entrypoint wrapper; schema migrations
-# (the maild_provision sentinel) are applied right after, by migrate.sh.
+# (the maild_provision sentinel) are applied right after, by migrate.sh. ADMINNG_DB
+# (AdminNG's own database) is created there too — kept separate from POSTGRES_EXTRA_DB
+# because mua reads that variable as a single database name (contacts DSN).
 
 # Postgres 18 images changed the default data layout to major-version directories
 # (PGDATA=/var/lib/postgresql/18/docker) and *refuse to start* when they find the legacy
@@ -29,7 +31,8 @@ ENV PGDATA=/var/lib/postgresql/data
 ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
-    POSTGRES_EXTRA_DB=contacts
+    POSTGRES_EXTRA_DB=contacts \
+    ADMINNG_DB=adminng
 
 COPY ensure_databases.sh /usr/local/bin/ensure_databases.sh
 COPY migrate.sh /usr/local/bin/migrate.sh
@@ -52,4 +55,4 @@ LABEL org.opencontainers.image.title="MailD PostgreSQL catalogue" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-16"
+      org.opencontainers.image.created="2026-10-17"

@@ -5,7 +5,7 @@
 ```
 env.dev (dev, fake secrets)  /  .env (prod, real secrets)    ← the ONLY operator file
         │  --env-file → compose interpolation (domainname, Traefik labels, guards)
-        │  env_file: → injected into the 7 DB-consumer containers
+        │  env_file: → injected into the 8 DB-consumer containers
         ▼
 container env  ⊕  image ENV defaults (per service, baked in each Dockerfile)
         │      runtime env always wins over the image default
@@ -29,7 +29,7 @@ Two distinct mechanisms — do not mix them up:
    Traefik labels, `MAILADMIN` and the `${POSTGRES_PASSWORD:?}` /
    `${DEFAULT_DOMAIN:?}` fail-fast guards.
 2. **Container env** — the operator file is injected via `env_file:` into the
-   **7 DB-consumer services** (db, admin, mua, mda, mta, amavis, cron) and wins
+   **8 DB-consumer services** (db, admin, api, mua, mda, mta, amavis, cron) and wins
    over the image `ENV` defaults. **clamav gets no `env_file`** (it needs no
    catalogue access: variable separation); its two knobs are explicit
    `environment:` entries with `${VAR:-}` — an empty value behaves exactly
@@ -58,8 +58,10 @@ every DB consumer and is never baked.
 
 | Service | Image ENV defaults (overridable) | Mandatory from the operator file | Optional overrides (documented in env.sample) |
 |---------|----------------------------------|----------------------------------|-----------------------------------------------|
-| db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=contacts` | `POSTGRES_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB` (advanced) |
+| db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=contacts` `ADMINNG_DB=adminng` | `POSTGRES_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB`, `ADMINNG_DB` (advanced; `ADMINNG_DB` must match the api's) |
 | admin | `POSTGRES_HOST/DB/USER` `POSTFIXADMIN_DB_TYPE=pgsql` `POSTFIXADMIN_SMTP_SERVER=mta` `POSTFIXADMIN_SMTP_PORT=25` `POSTFIXADMIN_ENCRYPT=md5crypt` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `MAIL_ADMIN_PASSWORD` (empty ⇒ OTP), `PROVISION_*`, `POSTFIXADMIN_*` |
+| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `ADMINNG_API_PORT=8080` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REAUTH_TTL=30` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` | every `ADMINNG_*` knob, `ADMINNG_SECRET_KEY` (Phase 2) |
+| adminng | (none — static PWA + nginx proxy) | — | — (no `env_file`) |
 | mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST/DB/USER` `POSTGRES_EXTRA_DB=contacts` `MUA_ADMIN_USER=maild` `MUA_CONFIG_WAIT_TIMEOUT=120` `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `MUA_ADMIN_PASSWORD` (empty ⇒ generated + logged), `BANNER_TITLE`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT` |
 | mda | `POSTGRES_HOST/DB/USER` `DEFAULT_MAILBOX_SIZE=200M` `QUOTA_REPORT_HOUR=0` `QUOTA_REPORT_MINUTE=1` `COUNTRY=JM` `STATE=Kingston` `CITY=Kingston` `ORG=MailD` `OU=MailD` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, cert subject (`COUNTRY/STATE/CITY/ORG/OU`) |
 | mta | `POSTGRES_HOST/DB/USER` `MAX_MESSAGESIZE=34865152` `SPF_ENABLE=True` `DNSBL_ENABLE=true` `DNSBL_LIST=zen.spamhaus.org=…` `PEER_WAIT_TIMEOUT=120` `PEER_WATCH_INTERVAL=30` `AMAVIS=amavis` `MDA=mda` `MUA=MUA` `ADMIN=admin` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `RELAY`, `ALWAYS_BCC`, `POSTMASTER_ABUSE_SETUP` (unset ⇒ off), `MAX_MESSAGESIZE`, `SPF_ENABLE`, `DNSBL_*`, `PEER_*` |
@@ -89,8 +91,9 @@ docker-compose.yml       (production source of truth, derived from -dev; env_fil
   `env_file:`), tag `develop`, JSON logs, dozzle, extra debug ports.
 - `docker-compose.yml` → named volumes, `.env` (interpolation AND `env_file:`),
   tag `latest`, syslog, image `pavelmc/maild-<svc>:latest`, external `maild`
-  network, **Traefik labels** on `admin` (`mailadmin.${DEFAULT_DOMAIN}`) and
-  `mua` (`webmail.${DEFAULT_DOMAIN}`).
+  network, **Traefik labels** on `admin` (`mailadmin.${DEFAULT_DOMAIN}`),
+  `mua` (`webmail.${DEFAULT_DOMAIN}`) and `adminng`
+  (`adminng.${DEFAULT_DOMAIN}`).
 - `compose-github.yml` / `compose-gitlab.yml` are **strict copies** — regenerate
   them from `docker-compose.yml` whenever it changes (only the `image:` lines
   differ).

@@ -35,6 +35,8 @@ Inside the cluster:
   `maild_provision` sentinel (added by `db/migrations/001_maild_provision.sql`).
 * `contacts` (`POSTGRES_EXTRA_DB`, a comma-separated list) — SnappyMail's database; empty in a
   fresh deploy.
+* `adminng` (`ADMINNG_DB`) — AdminNG's own state (devices, sessions, TOTP, audit trail); created
+  by `ensure_databases.sh` on every boot, empty until AdminNG is used.
 * `postgres` — the maintenance database (catalog only; nothing to move).
 * the `maild` role (`POSTGRES_USER`, superuser) — **recreated by the image** on the new cluster,
   so the dump does not need to carry the roles.
@@ -213,6 +215,7 @@ $DC exec -T db psql -U maild -d mailddb -tAc \
 # the catalogue and every extra database, replacing what the fresh boot created
 $DC exec -i db pg_restore -U maild -d mailddb  --clean --if-exists < pre-upgrade-15/mailddb.dump  ; echo "rc=$?"
 $DC exec -i db pg_restore -U maild -d contacts --clean --if-exists < pre-upgrade-15/contacts.dump ; echo "rc=$?"
+$DC exec -i db pg_restore -U maild -d adminng  --clean --if-exists < pre-upgrade-15/adminng.dump  ; echo "rc=$?"
 ```
 
 * `--clean --if-exists` is **required**: `ensure_databases.sh` already created the databases and
@@ -312,8 +315,9 @@ The old cluster is untouched, so rolling back is a matter of putting it back in 
 - **Password and DSN continuity.** `POSTGRES_PASSWORD` (from `env.dev`/`.env`) must stay the same:
   compose passes it explicitly to every client, and the entrypoint bakes it into the new role. The
   *mailbox* passwords are unaffected (they are md5crypt hashes inside `mailbox.password`).
-- **Extra databases are a list.** `POSTGRES_EXTRA_DB` is comma-separated (`contacts` today): dump
-  and restore **every** entry, and check the mua's env (`POSTGRES_EXTRA_DB`, defaulted in
+- **Extra databases are a list.** `POSTGRES_EXTRA_DB` is comma-separated (`contacts` today), and
+  AdminNG keeps its own `ADMINNG_DB` (default `adminng`): dump and restore **every** entry,
+  including `adminng`, and check the mua's env (`POSTGRES_EXTRA_DB`, defaulted in
   `mua/Dockerfile`) if SnappyMail starts complaining about its contacts DSN.
 - **Downtime.** The whole mail path depends on `db`: while it is down, SMTP submissions fail at
   authentication, IMAP/POP3 logins fail and the admin UI is unusable. A remote sender will retry

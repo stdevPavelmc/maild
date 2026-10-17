@@ -227,6 +227,7 @@ MAIL_ADMIN_USER="${MAIL_ADMIN_USER:-sysadmin}"
 # The stack declares port mappings in docker-compose-dev.yml; keep them here so the printed URLs
 # and the verification steps match the running stack.
 ADMIN_PORT="8080"
+ADMINNG_PORT="8083"
 MUA_PORT="8081"
 
 valid_domain "$TEST_DOMAIN" || die "--domain '$TEST_DOMAIN' is not a valid domain name"
@@ -305,8 +306,8 @@ if [ "$DO_START" = 1 ]; then
 	# path via depends_on — a subset `up` would otherwise leave it crash-looping and mail deferred.
 	# `clamav` and `amavis` are explicit (not only via mta's depends_on): the content
 	# filter sits in the delivery path, so its readiness gates everything below.
-	log "docker compose up -d db admin mda mta mua cron clamav amavis"
-	timeout -k10 600 "${DC[@]}" up -d db admin mda mta mua cron clamav amavis >/dev/null ||
+	log "docker compose up -d db admin mda mta mua cron clamav amavis api adminng"
+	timeout -k10 600 "${DC[@]}" up -d db admin mda mta mua cron clamav amavis api adminng >/dev/null ||
 		die "'docker compose up -d' failed: see 'docker compose -f $COMPOSE_FILE logs'"
 else
 	log "--no-start: assuming the stack is already up"
@@ -317,6 +318,9 @@ fi
 probe_db() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T db pg_isready -U "$PGUSER" -d "$PGDB" -q; }
 probe_schema() { [ "$(psql_q "$PGDB" "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='domain'")" = "1" ]; }
 probe_admin_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${ADMIN_PORT}/login.php"; }
+# AdminNG end to end: nginx serves the PWA and proxies /api/v1/ to the api service,
+# which answers only when its own database is up and migrated.
+probe_adminng_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${ADMINNG_PORT}/api/v1/health"; }
 probe_clamav_db() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T clamav \
 	sh -c 'test -f /var/lib/clamav/main.cvd || test -f /var/lib/clamav/main.cld'; }
 
@@ -340,6 +344,11 @@ wait_up "$WAIT_HTTP" probe_admin_http ||
 
 is_service_up mda || die "the mda (Dovecot) service is not running (docker compose -f $COMPOSE_FILE logs mda)"
 ok "admin (:${ADMIN_PORT}) and mda are reachable"
+
+log "waiting for the AdminNG frontend on :${ADMINNG_PORT} (up to ${WAIT_HTTP}s)"
+wait_up "$WAIT_HTTP" probe_adminng_http ||
+	die "http://localhost:${ADMINNG_PORT}/api/v1/health did not answer within ${WAIT_HTTP}s (docker compose -f $COMPOSE_FILE logs adminng api)"
+ok "adminng (:${ADMINNG_PORT}) answers through its nginx proxy (PWA + /api/v1/health)"
 
 # With AV enabled amavis defers every message until clamd has a signature database, so
 # the stack is not usable before that (first-run) download lands: ~230 MB, minutes on a
