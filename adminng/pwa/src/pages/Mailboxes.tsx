@@ -1,11 +1,23 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Alias, type Domain, type Mailbox } from '../lib/api'
+import { formatQuota } from '../lib/format'
 import { useOnline } from '../lib/online'
 import { setSelectedDomain, useSelectedDomain } from '../lib/selectedDomain'
 import { usePaged } from '../lib/usePaged'
 import { useNewSignal, useSearchQuery } from '../lib/useUrlState'
-import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
+import { Empty, ErrorBanner, Field, Input, Modal, QuotaInput, SectionHeader, Toggle } from '../components/kit'
+import {
+  ActionButton,
+  ActionRow,
+  Address,
+  CardGrid,
+  CardHead,
+  EntityCard,
+  MetaChip,
+  MetaRow,
+  StatusMark,
+} from '../components/cards'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
@@ -27,13 +39,20 @@ export function MailboxesPage({ password }: { password: string }) {
   const [username, setUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [name, setName] = useState('')
-  const [quotaMb, setQuotaMb] = useState(0)
+  const [quotaBytes, setQuotaBytes] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [editing, setEditing] = useState<Mailbox | null>(null)
   const [deleting, setDeleting] = useState<Mailbox | null>(null)
   const [aliases, setAliases] = useState<Alias[]>([])
   const [aliasAddress, setAliasAddress] = useState('')
   const [aliasToDelete, setAliasToDelete] = useState<Alias | null>(null)
+  // The card's 🎭 action opens the editor straight at the "add alias" input.
+  const [focusAliases, setFocusAliases] = useState(false)
+  const aliasInput = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (editing && focusAliases) aliasInput.current?.focus()
+  }, [editing, focusAliases])
 
   const list = usePaged<Mailbox>(
     (cursor) => api.listMailboxes({ domain: scope || undefined, q: query || undefined, cursor }),
@@ -44,7 +63,8 @@ export function MailboxesPage({ password }: { password: string }) {
     api.listDomains().then((page) => setDomains(page.items)).catch(() => setDomains([]))
   }, [])
 
-  const openEditor = async (mailbox: Mailbox): Promise<void> => {
+  const openEditor = async (mailbox: Mailbox, focusAliasInput = false): Promise<void> => {
+    setFocusAliases(focusAliasInput)
     setEditing(mailbox)
     setAliases([])
     try {
@@ -62,13 +82,13 @@ export function MailboxesPage({ password }: { password: string }) {
         username,
         password: newPassword,
         name,
-        quota_bytes: Math.max(0, Math.round(quotaMb)) * 1024 * 1024,
+        quota_bytes: quotaBytes,
       })
       setOpenNew(false)
       setUsername('')
       setNewPassword('')
       setName('')
-      setQuotaMb(0)
+      setQuotaBytes(0)
       await list.reload()
     } catch (err) {
       setError(err instanceof ApiError ? `${err.code}: ${err.message}` : t('login.network'))
@@ -123,52 +143,48 @@ export function MailboxesPage({ password }: { password: string }) {
         </form>
       </div>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-800">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
-            <tr>
-              <th className="px-3 py-2">{t('mailboxes.username')}</th>
-              <th className="px-3 py-2">{t('common.name')}</th>
-              <th className="px-3 py-2">{t('common.quota')}</th>
-              <th className="px-3 py-2">{t('common.active')}</th>
-              <th className="px-3 py-2">{t('common.actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.items.map((mailbox) => (
-              <tr key={mailbox.username} className="border-t border-slate-800">
-                <td className="px-3 py-2 font-mono text-xs">{mailbox.username}</td>
-                <td className="px-3 py-2 text-slate-400">{mailbox.name}</td>
-                <td className="px-3 py-2 text-xs">
-                  {mailbox.quota_bytes > 0
-                    ? `${Math.round(mailbox.quota_bytes / 1024 / 1024)} MB`
-                    : t('common.unlimited')}
-                </td>
-                <td className="px-3 py-2">
-                  {mailbox.active ? (
-                    <Badge tone="green">{t('common.yes')}</Badge>
-                  ) : (
-                    <Badge tone="red">{t('common.no')}</Badge>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={!online} onClick={() => void openEditor(mailbox)}>
-                      {t('common.edit')}
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(mailbox)}>
-                      {t('common.delete')}
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
-        )}
-      </div>
+      <CardGrid>
+        {list.items.map((mailbox) => (
+          <EntityCard key={mailbox.username} status={mailbox.active ? 'active' : 'inactive'}>
+            <CardHead>
+              <div className="flex min-w-0 items-start gap-2">
+                <StatusMark active={mailbox.active} />
+                <Address address={mailbox.username} />
+              </div>
+              <ActionRow label={t('common.actions')}>
+                <ActionButton
+                  glyph="🎭"
+                  label={t('common.aliases')}
+                  disabled={!online}
+                  onClick={() => void openEditor(mailbox, true)}
+                />
+                <ActionButton
+                  glyph="🛠"
+                  label={t('common.edit')}
+                  disabled={!online}
+                  onClick={() => void openEditor(mailbox)}
+                />
+                <ActionButton
+                  glyph="❌"
+                  label={t('common.delete')}
+                  tone="danger"
+                  disabled={!online}
+                  onClick={() => setDeleting(mailbox)}
+                />
+              </ActionRow>
+            </CardHead>
+            <p className="mt-1 break-all text-sm text-slate-400 line-clamp-1" title={mailbox.name}>
+              {mailbox.name || '—'}
+            </p>
+            <MetaRow>
+              <MetaChip icon="💾" title={t('common.quota')}>
+                {formatQuota(mailbox.quota_bytes) ?? `∞ ${t('common.unlimited')}`}
+              </MetaChip>
+            </MetaRow>
+          </EntityCard>
+        ))}
+      </CardGrid>
+      {!list.loading && list.items.length === 0 && <Empty text={t('common.empty')} />}
       {list.cursor && (
         <Button variant="outline" onClick={() => void list.more()}>{t('common.page')}</Button>
       )}
@@ -195,11 +211,7 @@ export function MailboxesPage({ password }: { password: string }) {
           <Input value={name} onChange={(event) => setName(event.target.value)} />
         </Field>
         <Field label={t('mailboxes.quota')}>
-          <Input
-            inputMode="numeric"
-            value={quotaMb}
-            onChange={(event) => setQuotaMb(Number(event.target.value) || 0)}
-          />
+          <QuotaInput bytes={quotaBytes} onCommit={setQuotaBytes} disabled={!online} />
         </Field>
       </Modal>
 
@@ -224,15 +236,12 @@ export function MailboxesPage({ password }: { password: string }) {
               />
             </Field>
             <Field label={t('mailboxes.quota')}>
-              <Input
-                inputMode="numeric"
-                defaultValue={Math.round(editing.quota_bytes / 1024 / 1024)}
+              <QuotaInput
+                bytes={editing.quota_bytes}
                 disabled={!online}
-                onBlur={(event) => {
+                onCommit={(value) => {
                   void api
-                    .updateMailbox(editing.username, {
-                      quota_bytes: Math.max(0, Number(event.target.value) || 0) * 1024 * 1024,
-                    })
+                    .updateMailbox(editing.username, { quota_bytes: value })
                     .then(() => list.reload())
                 }}
               />
@@ -277,6 +286,7 @@ export function MailboxesPage({ password }: { password: string }) {
               </div>
               <div className="mt-3 flex gap-2">
                 <Input
+                  inputRef={aliasInput}
                   placeholder={t('mailboxes.aliasAddress')}
                   value={aliasAddress}
                   disabled={!online}

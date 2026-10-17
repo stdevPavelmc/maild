@@ -6,6 +6,7 @@ import {
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
+  type Ref,
   type SelectHTMLAttributes,
 } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -22,10 +23,14 @@ export function Field({ label, children }: { label: string; children: ReactNode 
   )
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+export function Input(
+  props: InputHTMLAttributes<HTMLInputElement> & { inputRef?: Ref<HTMLInputElement> },
+) {
+  const { inputRef, ...rest } = props
   return (
     <input
-      {...props}
+      {...rest}
+      ref={inputRef}
       className={cn(
         'h-10 w-full rounded-md border border-slate-700 bg-slate-900 px-3 text-slate-100',
         'placeholder:text-slate-400 focus:border-blue-500 focus:outline-none disabled:opacity-50',
