@@ -313,8 +313,8 @@ The old cluster is untouched, so rolling back is a matter of putting it back in 
   compose passes it explicitly to every client, and the entrypoint bakes it into the new role. The
   *mailbox* passwords are unaffected (they are md5crypt hashes inside `mailbox.password`).
 - **Extra databases are a list.** `POSTGRES_EXTRA_DB` is comma-separated (`contacts` today): dump
-  and restore **every** entry, and check `vars/mua.env` if SnappyMail starts complaining about its
-  contacts DSN.
+  and restore **every** entry, and check the mua's env (`POSTGRES_EXTRA_DB`, defaulted in
+  `mua/Dockerfile`) if SnappyMail starts complaining about its contacts DSN.
 - **Downtime.** The whole mail path depends on `db`: while it is down, SMTP submissions fail at
   authentication, IMAP/POP3 logins fail and the admin UI is unusable. A remote sender will retry
   (the mta queues only what it has already accepted), so keep the window short and, ideally,

@@ -33,6 +33,34 @@ ADD postfix /etc/postfix
 ADD docker-entrypoint.sh check.sh /
 RUN chmod +x /*.sh
 
+# --- MailD default configuration (new env schema) --------------------------------
+# The deployment defaults for this service live HERE now: each image bakes only the
+# variables its own entrypoint/scripts consume, as ENV defaults. Any same-named variable
+# in the operator's env file (docker compose env_file / environment / docker run -e)
+# overrides these at runtime — never rebuild the image to deploy a different value.
+# Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
+# (dev: env.dev, prod: .env — see env.sample). DEFAULT_DOMAIN / MAIL_ADMIN_USER are
+# deployment values passed by the compose file; RELAY / ALWAYS_BCC / POSTMASTER_ABUSE_
+# SETUP and the debug switches are deliberately unset (unset ⇒ feature off).
+# AMAVIS/MDA/MUA/ADMIN are the fixed service hostnames (never rename them).
+# Full variable matrix: .agents/services/configuration.md.
+ENV POSTGRES_HOST=db \
+    POSTGRES_DB=mailddb \
+    POSTGRES_USER=maild \
+    MAX_MESSAGESIZE=34865152 \
+    SPF_ENABLE=True \
+    DNSBL_ENABLE=true \
+    DNSBL_LIST=zen.spamhaus.org=127.0.0.[2..11]*2,psbl.surriel.com,bl.spamcop.net,bl.spameatingmonkey.net \
+    PEER_WAIT_TIMEOUT=120 \
+    PEER_WATCH_INTERVAL=30 \
+    AMAVIS=amavis \
+    MDA=mda \
+    MUA=MUA \
+    ADMIN=admin \
+    AUTO_PROVISION=yes \
+    PROVISION_VERSION=1 \
+    PROVISION_WAIT_TIMEOUT=180
+
 # DEBUG tools only on debug build
 ARG DEBUG
 RUN if [ "$DEBUG" ]; then \

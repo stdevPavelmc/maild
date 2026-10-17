@@ -78,15 +78,16 @@ jobs:
           fi
 
       - name: Validate compose files
-        # `docker compose config` also resolves every env_file, so an empty .env has to
+        # `docker compose config` also resolves every env_file, so a valid .env has to
         # exist before the production files (which list `.env` in env_file) can be parsed.
-        # Production values are interpolated from env.dev (fake, committed).
+        # env.sample carries the mandatory values (placeholders) plus the commented
+        # optional overrides, and the CI appends its own secrets. Production values are
+        # interpolated from env.dev (fake, committed).
         run: |
           set -euo pipefail
-          cat env.sample > .env
+          cp env.sample .env
           printf 'POSTGRES_PASSWORD=ci-placeholder\n' >> .env
           printf 'MAIL_ADMIN_PASSWORD=ci-placeholder\n' >> .env
-          printf 'POSTFIXADMIN_SETUP_PASSWORD=ci-placeholder\n' >> .env
           # compose-gitlab.yml interpolates ${IMG_*}:${TAG} (defined only in .gitlab-ci.yml),
           # so export harmless placeholders just to parse it.
           export IMG_DB="img/maild-db" IMG_MTA="img/maild-mta" IMG_MDA="img/maild-mda" \

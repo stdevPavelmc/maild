@@ -55,6 +55,27 @@ ENV POSTFIXADMIN_VERSION $POSTFIXADMIN_VERSION
 ENV POSTFIXADMIN_SHA512 $POSTFIXADMIN_SHA512
 ENV APACHE_DOCUMENT_ROOT /var/www/html/public
 
+# --- MailD default configuration (new env schema) --------------------------------
+# The deployment defaults for this service live HERE now: each image bakes only the
+# variables its own entrypoint/scripts consume, as ENV defaults. Any same-named variable
+# in the operator's env file (docker compose env_file / environment / docker run -e)
+# overrides these at runtime — never rebuild the image to deploy a different value.
+# Secrets are NEVER baked: POSTGRES_PASSWORD and MAIL_ADMIN_PASSWORD (empty ⇒ OTP)
+# must come from the operator env file (dev: env.dev, prod: .env — see env.sample).
+# The entrypoint maps POSTGRES_* onto POSTFIXADMIN_DB_* when set. Full variable matrix:
+# .agents/services/configuration.md.
+ENV POSTGRES_HOST=db \
+    POSTGRES_DB=mailddb \
+    POSTGRES_USER=maild \
+    POSTFIXADMIN_DB_TYPE=pgsql \
+    POSTFIXADMIN_SMTP_SERVER=mta \
+    POSTFIXADMIN_SMTP_PORT=25 \
+    POSTFIXADMIN_ENCRYPT=md5crypt \
+    AUTO_PROVISION=yes \
+    PROVISION_VERSION=1 \
+    PROVISION_WAIT_TIMEOUT=180 \
+    PROVISION_FORCE=no
+
 RUN set -eu; sed -ri -e 's!/var/www/html!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/sites-available/*.conf; \
     sed -ri -e 's!/var/www/!${APACHE_DOCUMENT_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
 
@@ -94,4 +115,4 @@ LABEL org.opencontainers.image.title="MailD Admin UI (PostfixAdmin)" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
       cu.maild.original-maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin), PostfixAdmin project" \
-      org.opencontainers.image.created="2026-10-04"
+      org.opencontainers.image.created="2026-10-16"

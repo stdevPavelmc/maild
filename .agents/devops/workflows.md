@@ -66,7 +66,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 - **Mail not flowing on a cold stack:** ClamAV is downloading signatures (~230 MB first
   boot) and amavis defers everything until clamd answers. `logs -f clamav`; on restricted
-  networks set `ALTERNATE_MIRROR` in `vars/clamav.env`.
+  networks set `ALTERNATE_MIRROR` in the operator env file (`env.dev`/`.env`).
 - **Admin UI unreachable but container healthy:** dev publishes `8080:80` — check you did
   not remap it to `8080:8080` (Apache listens on 80 in the image).
 - **The old password still authenticates after a change (or `doveadm auth test` disagrees with the
@@ -99,7 +99,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 47 checks
+./test.sh                 # 48 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)

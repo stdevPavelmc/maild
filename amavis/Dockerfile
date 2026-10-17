@@ -37,6 +37,34 @@ COPY spamassassin /etc/spamassassin.dist
 COPY check.sh docker-entrypoint.sh sa-update-loop.sh /
 RUN chmod +x /*.sh
 
+# --- MailD default configuration (new env schema) --------------------------------
+# The deployment defaults for this service live HERE now: each image bakes only the
+# variables its own entrypoint/scripts consume, as ENV defaults. Any same-named variable
+# in the operator's env file (docker compose env_file / environment / docker run -e)
+# overrides these at runtime — never rebuild the image to deploy a different value.
+# Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
+# (dev: env.dev, prod: .env — see env.sample). MTA/CLAMAV/CRON are the fixed service
+# hostnames (never rename them). SA_BAYES_PATH and the debug switches are deliberately
+# unset (the entrypoint carries their fallbacks). Full variable matrix:
+# .agents/services/configuration.md.
+ENV POSTGRES_HOST=db \
+    POSTGRES_DB=mailddb \
+    POSTGRES_USER=maild \
+    MTA=mta \
+    CLAMAV=clamav \
+    CRON=cron \
+    SPAM_FILTER_ENABLED=yes \
+    AV_ENABLED=yes \
+    DKIM_SIGNING=yes \
+    SA_AUTOLEARN_NONSPAM=0.1 \
+    SA_AUTOLEARN_SPAM=10 \
+    JUNK_RETENTION_DAYS=7 \
+    SA_HAM_SAMPLE_PER_USER=25 \
+    SA_HAM_SAMPLE_MAX=400 \
+    AUTO_PROVISION=yes \
+    PROVISION_VERSION=1 \
+    PROVISION_WAIT_TIMEOUT=180
+
 # DEBUG tools only on debug build
 ARG DEBUG
 RUN if [ "$DEBUG" ]; then \
@@ -62,4 +90,4 @@ LABEL org.opencontainers.image.title="MailD content filter (Amavis + SpamAssassi
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-15"
+      org.opencontainers.image.created="2026-10-16"

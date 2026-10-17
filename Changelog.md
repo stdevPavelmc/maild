@@ -18,6 +18,48 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-16 1.5.0-rc
+- Changed: **new env distribution schema — one env file per deployment.** Every tunable now
+  defaults INSIDE each service image (an `ENV` block per Dockerfile, only the variables that
+  service's own entrypoint/scripts consume); a same-named variable in the operator env file
+  always wins over the image default (runtime env beats image `ENV`). Deploying needs a
+  single small env file: the mandatory `DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`,
+  `POSTGRES_PASSWORD` (+ the optional secrets and any deviation from a default) —
+  `cp env.sample .env`, edit, `docker compose up -d`; or let the CI craft `.env` from its own
+  variables (`.gitlab-ci.yml` now builds it from `env.sample_gitlab` + the CI/CD variables:
+  the mandatory ones must be defined as masked CI/CD settings).
+- Removed: the `vars/` directory and its 8 per-service env files. The tunables and the
+  hardcoded inter-service hostnames (`AMAVIS=amavis`, `MTA=mta`, `CLAMAV=clamav`, …) are
+  image `ENV` now, the `${VAR:-default}` forwarding hacks are gone, and two dead variables
+  were dropped with them (`CTDB` — unused, the mua reads `POSTGRES_EXTRA_DB`; and
+  `AMAVIS_MTA` — unused, the amavis entrypoint reads `MTA`). `env.sample` became the
+  minimal operator template; the full default catalogue (the per-service variable matrix)
+  lives in `.agents/services/configuration.md`.
+- Changed: **strict variable separation** — the env file is `env_file:`-loaded ONLY into
+  the 7 DB-consumer services (db, admin, mua, mda, mta, amavis, cron); clamav gets no
+  `env_file` on purpose (it needs no catalogue access): its two knobs (`ALTERNATE_MIRROR`,
+  `CLAMAV_DEBUG`) are explicit `environment:` entries. `POSTGRES_PASSWORD` and
+  `DEFAULT_DOMAIN` are passed explicitly with `:?` fail-fast guards, so a missing mandatory
+  value fails at `docker compose config` instead of at runtime.
+- Changed: `docker-compose-dev.yml` uses `env.dev` for BOTH the compose interpolation and
+  the containers' `env_file:` — the "keep `DEFAULT_DOMAIN`/`MAIL_ADMIN_USER` in sync between
+  env.dev and env.sample" constraint is gone, there is only one file per context now;
+  production (`docker-compose.yml` and the `compose-github.yml`/`compose-gitlab.yml` strict
+  copies) uses `.env` the same way. The redundant `DEFAULT_MAILBOX_SIZE` and
+  `POSTFIXADMIN_SETUP_PASSWORD` pass-throughs are gone (the admin entrypoint always emits
+  its own OTP; the variable was always ignored).
+- Changed: the empty-value trap is now explicit: never leave a variable EMPTY in the env
+  file (`FOO=` overrides the image default with an empty string) — comment the line out
+  instead. Documented in `env.sample` and `.agents/services/configuration.md`.
+- Added: `test.sh` gains an env-schema check (an untouched image default, an env-file
+  override that wins over the image default, and a baked peer hostname the env file never
+  mentions), so the schema's core promise is asserted on every run.
+- Changed: documentation updated in the same commits — `AGENTS.md`, `README.md`,
+  `INSTALL.md`, `DEV-SETUP.md`, `db_upgrade.md` and the `.agents/` set
+  (`configuration.md` carries the authoritative variable matrix; `catalog.md`,
+  `provisioning.md`, `environment-setup.md`, `workflows.md`, `base-os-upgrade.md` moved to
+  the new chain).
+
 ## 2026-10-15 1.4.0-rc
 - Changed: **`amavis` base moved `ubuntu:jammy` → `ubuntu:resolute`** (26.04 LTS), the second
   service of the LTS rollover (**2/5** — `mta`, `mda`, `cron` still on jammy). The templates are

@@ -39,6 +39,28 @@ RUN mkdir /home/vmail && \
     useradd -d /home/vmail -g 5000 -u 5000 vmail && \
     useradd -r -d /var/spool/ -g postfix postfix
 
+# --- MailD default configuration (new env schema) --------------------------------
+# The deployment defaults for this service live HERE now: each image bakes only the
+# variables its own entrypoint/scripts consume, as ENV defaults. Any same-named variable
+# in the operator's env file (docker compose env_file / environment / docker run -e)
+# overrides these at runtime — never rebuild the image to deploy a different value.
+# Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
+# (dev: env.dev, prod: .env — see env.sample). DEFAULT_DOMAIN and MAIL_ADMIN_USER are
+# deployment values passed by the compose file (they have no default here on purpose).
+# COUNTRY/STATE/CITY/ORG/OU feed the self-signed certificate subject (first boot only).
+# Full variable matrix: .agents/services/configuration.md.
+ENV POSTGRES_HOST=db \
+    POSTGRES_DB=mailddb \
+    POSTGRES_USER=maild \
+    DEFAULT_MAILBOX_SIZE=200M \
+    QUOTA_REPORT_HOUR=0 \
+    QUOTA_REPORT_MINUTE=1 \
+    COUNTRY=JM \
+    STATE=Kingston \
+    CITY=Kingston \
+    ORG=MailD \
+    OU=MailD
+
 ADD dovecot/ /etc/dovecot
 
 # NOTE: the imapsieve learning scripts are NOT compiled at build time:
@@ -95,4 +117,4 @@ LABEL org.opencontainers.image.title="MailD MDA (Dovecot)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-15"
+      org.opencontainers.image.created="2026-10-16"

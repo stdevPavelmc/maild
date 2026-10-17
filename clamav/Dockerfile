@@ -4,6 +4,12 @@ LABEL maintainer="Pavel Milanes <pavelmc@gmail.com>"
 ENV REFRESHED_AT 2023-04-23
 ENV DEBIAN_FRONTEND noninteractive
 
+# --- MailD default configuration (new env schema) --------------------------------
+# This service needs NO catalogue access, so it gets NO env_file from the compose files:
+# its only knobs (ALTERNATE_MIRROR, CLAMAV_DEBUG) are deliberately unset by default and
+# are passed as explicit environment entries by the compose files when the operator sets
+# them in the env file. Full variable matrix: .agents/services/configuration.md.
+
 RUN apt-get update && \
     apt-get install --no-install-recommends -y -qq \
         clamav-daemon \
@@ -65,4 +71,4 @@ LABEL org.opencontainers.image.title="MailD antivirus (ClamAV)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-15"
+      org.opencontainers.image.created="2026-10-16"

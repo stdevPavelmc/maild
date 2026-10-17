@@ -24,10 +24,11 @@ services:
     hostname: db
     restart: always
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # explicit on every DB consumer: compose interpolation does not read env_file
+      # contents, and the guard makes a missing password fail at `compose config`.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
-      - vars/db.env
-      - vars/mua.env
       - .env
     volumes:
       - db:/var/lib/postgresql/data
@@ -42,11 +43,14 @@ services:
     restart: always
     # No published port: the UI is exposed through the ingress proxy (Traefik labels below).
     environment:
-      POSTFIXADMIN_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTFIXADMIN_SETUP_PASSWORD: ${POSTFIXADMIN_SETUP_PASSWORD}
+      # the entrypoint maps POSTGRES_PASSWORD -> POSTFIXADMIN_DB_PASSWORD itself;
+      # POSTFIXADMIN_SETUP_PASSWORD is not passed any more (the entrypoint generates
+      # and prints its own OTP on every boot, the variable was always ignored).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+    # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
-      - vars/db.env
-      - vars/admin.env
       - .env
     depends_on:
       - db
@@ -75,11 +79,10 @@ services:
     hostname: mua
     restart: always
     environment:
-      # production parity: SnappyMail's entrypoint writes the contacts DSN with this password
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # SnappyMail's entrypoint writes the contacts DSN with this password
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
-      - vars/db.env
-      - vars/mua.env
       - .env
     volumes:
       - mua_web:/var/www/html/data
@@ -110,13 +113,13 @@ services:
     hostname: mda
     restart: always
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN}
-      DEFAULT_MAILBOX_SIZE: ${DEFAULT_MAILBOX_SIZE}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+    # DEFAULT_MAILBOX_SIZE (200M), the quota-report schedule and the self-signed
+    # cert subject now default in the image; override them from .env when needed.
+    # Operator env file; overrides any same-named image ENV default.
     env_file:
-      - vars/db.env
-      - vars/mda.env
-      - vars/ssl.env
       - .env
     ports:
       - "993:993"     # IMAPS
@@ -142,13 +145,15 @@ services:
     hostname: mta
     restart: always
     environment:
-      MAILADMIN: ${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}
+      MAILADMIN: ${MAIL_ADMIN_USER:-sysadmin}@${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
       DEBUG: 'true'
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # explicit on every DB consumer (see the note on the db service)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # MAX_MESSAGESIZE / SPF / DNSBL / peer timeouts now default in the image;
+    # override them (or RELAY / ALWAYS_BCC / POSTMASTER_ABUSE_SETUP) from .env.
+    # Operator env file; overrides any same-named image ENV default.
     env_file:
-      - vars/mta.env
-      - vars/ssl.env
-      - vars/db.env
       - .env
     ports:
       - "25:25"    # SMTP
@@ -177,8 +182,13 @@ services:
     container_name: maild-clamav
     hostname: clamav
     restart: always
-    env_file:
-      - vars/clamav.env
+    # no env_file on purpose: clamav needs no catalogue access (variable separation).
+    # Its only knobs default unset in the image and are passed as explicit entries:
+    # an empty value behaves exactly like unset for both (the entrypoint tests
+    # them with `if [ "$VAR" ]`), so `${VAR:-}` is safe here.
+    environment:
+      ALTERNATE_MIRROR: ${ALTERNATE_MIRROR:-}
+      CLAMAV_DEBUG: ${CLAMAV_DEBUG:-}
     volumes:
       - clamav:/var/lib/clamav
       - amavis:/var/lib/amavis
@@ -197,10 +207,12 @@ services:
     hostname: amavis
     restart: always
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # explicit on every DB consumer (see the note on the db service): the entrypoint
+      # queries the catalogue for the domain list
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    # AV/SPAM/DKIM and the SpamAssassin tuning now default in the image; override
+    # them from .env. Operator env file; overrides any same-named image ENV default.
     env_file:
-      - vars/amavis.env
-      - vars/db.env
       - .env
     volumes:
       - amavis:/var/lib/amavis
@@ -223,10 +235,15 @@ services:
     hostname: cron
     restart: always
     environment:
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # explicit on every DB consumer (see the note on the db service): the cron
+      # scripts talk to the catalogue with psql; the resume/report jobs also need
+      # the deployment coordinates (the entrypoint dumps the environment into
+      # /etc/environment, from where every cron job sources it).
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+    # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
-      - vars/db.env
-      - vars/amavis.env
       - .env
     volumes:
       - /var/log:/var/log

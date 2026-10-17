@@ -205,25 +205,23 @@ readonly DC=(docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE")
 "${DC[@]}" config --quiet >/dev/null 2>&1 ||
 	die "'docker compose --env-file $ENV_FILE -f $COMPOSE_FILE config' failed: fix the compose file / $ENV_FILE first"
 
-for f in env.sample vars/db.env vars/admin.env vars/mda.env vars/mta.env vars/mua.env; do
-	[ -f "$SCRIPT_DIR/$f" ] || die "$f is missing: this does not look like a MailD checkout"
-done
 [ -f "$SCRIPT_DIR/$ENV_FILE" ] ||
-	die "$ENV_FILE is missing: the dev stack needs it for POSTGRES_PASSWORD (fake dev-only secrets; the real ones in .env are never used by the dev stack)"
+	die "$ENV_FILE is missing: the dev stack needs it for DEFAULT_DOMAIN / MAIL_ADMIN_USER / POSTGRES_PASSWORD (fake dev-only secrets; the real ones in .env are never used by the dev stack)"
 
-PGUSER="$(env_file_value vars/db.env POSTGRES_USER || true)"
-PGDB="$(env_file_value vars/db.env POSTGRES_DB || true)"
+# Catalogue coordinates: they now default INSIDE the images (POSTGRES_USER=maild,
+# POSTGRES_DB=mailddb, baked in the Dockerfiles as ENV); env.dev may override them.
+PGUSER="$(env_file_value "$ENV_FILE" POSTGRES_USER || true)"
+PGDB="$(env_file_value "$ENV_FILE" POSTGRES_DB || true)"
 PGUSER="${PGUSER:-maild}"; PGDB="${PGDB:-mailddb}"
-ok "docker compose v2, compose file, $ENV_FILE and vars/ are in place"
+ok "docker compose v2, compose file and $ENV_FILE are in place"
 
 # ------------------------------------------------------------ configuration --
 step "configuration"
 
 DEFAULT_DOMAIN="$(env_file_value "$ENV_FILE" DEFAULT_DOMAIN || true)"
-[ -n "$DEFAULT_DOMAIN" ] || DEFAULT_DOMAIN="$(env_file_value env.sample DEFAULT_DOMAIN || true)"
 [ -n "$DEFAULT_DOMAIN_OVERRIDE" ] && DEFAULT_DOMAIN="$DEFAULT_DOMAIN_OVERRIDE"
+[ -n "$DEFAULT_DOMAIN" ] || die "DEFAULT_DOMAIN is not set in $ENV_FILE (the image defaults do not cover it: it is a deployment value)"
 MAIL_ADMIN_USER="$(env_file_value "$ENV_FILE" MAIL_ADMIN_USER || true)"
-[ -n "$MAIL_ADMIN_USER" ] || MAIL_ADMIN_USER="$(env_file_value env.sample MAIL_ADMIN_USER || true)"
 MAIL_ADMIN_USER="${MAIL_ADMIN_USER:-sysadmin}"
 
 # The stack declares port mappings in docker-compose-dev.yml; keep them here so the printed URLs
@@ -353,7 +351,7 @@ elif probe_clamav_db; then
 else
 	warn "waiting for the first ClamAV signature download (main.cvd is ~90 MB; ~230 MB the first time)"
 	wait_up "$WAIT_CLAMAV" probe_clamav_db ||
-		die "ClamAV still has no signature database after ${WAIT_CLAMAV}s, and amavis defers all mail until it does: check 'docker compose -f $COMPOSE_FILE logs clamav' (an ALTERNATE_MIRROR in vars/clamav.env helps on restricted networks) or re-run with --skip-clamav-wait"
+		die "ClamAV still has no signature database after ${WAIT_CLAMAV}s, and amavis defers all mail until it does: check 'docker compose -f $COMPOSE_FILE logs clamav' (an ALTERNATE_MIRROR in env.dev helps on restricted networks) or re-run with --skip-clamav-wait"
 	ok "ClamAV signature database downloaded"
 fi
 

@@ -84,10 +84,8 @@ env_value() { # <file> <key>
     sed -n "s/^[[:space:]]*$2=//p" "$1" | tail -n1 | sed -E 's/[[:space:]]+#.*$//; s/[[:space:]]+$//'
 }
 DEFAULT_DOMAIN="$(env_value "$ENV_FILE" DEFAULT_DOMAIN || true)"
-[ -n "$DEFAULT_DOMAIN" ] || DEFAULT_DOMAIN="$(env_value "$SCRIPT_DIR/env.sample" DEFAULT_DOMAIN || true)"
 DEFAULT_DOMAIN="${DEFAULT_DOMAIN:-chagod.software}"
 MAIL_ADMIN_USER="$(env_value "$ENV_FILE" MAIL_ADMIN_USER || true)"
-[ -n "$MAIL_ADMIN_USER" ] || MAIL_ADMIN_USER="$(env_value "$SCRIPT_DIR/env.sample" MAIL_ADMIN_USER || true)"
 MAIL_ADMIN_USER="${MAIL_ADMIN_USER:-sysadmin}"
 DEPLOY_ADMIN="${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}"
 # RFC 2606 reserved domain: it always resolves and it is never hosted here — the target of the
@@ -384,6 +382,27 @@ if [ "$HAVE_DC" = 1 ] ; then
     else
         t_ok "every mail-path container reports healthy"
     fi
+fi
+
+# env schema (new): the defaults are baked as ENV inside each image (per service); env.dev
+# carries only the deployment values (domain, admin user, fake secrets) and any deviation
+# from an image default. Three signals: an untouched default (mda), an override (mua's
+# BANNER_TITLE, set in env.dev) and a baked peer hostname the env file never mentions (mta).
+if [ "$HAVE_DC" = 1 ] ; then
+    ENV_WHY=""
+    [ "$(dcx mda printenv DEFAULT_MAILBOX_SIZE 2>/dev/null | tr -d '\r\n')" = "200M" ] ||
+        ENV_WHY="$ENV_WHY mda-image-default(DEFAULT_MAILBOX_SIZE);"
+    [ "$(dcx mua printenv BANNER_TITLE 2>/dev/null | tr -d '\r\n')" = "MailD Dev Override" ] ||
+        ENV_WHY="$ENV_WHY env.dev-override(BANNER_TITLE);"
+    [ "$(dcx mta printenv AMAVIS 2>/dev/null | tr -d '\r\n')" = "amavis" ] ||
+        ENV_WHY="$ENV_WHY mta-image-default(AMAVIS);"
+    if [ -n "$ENV_WHY" ] ; then
+        t_fail "image ENV defaults are baked and env.dev overrides win (${ENV_WHY# })"
+    else
+        t_ok "image ENV defaults are baked and env.dev overrides win (BANNER_TITLE)"
+    fi
+else
+    t_skip "env schema checks (docker compose is needed to read the container environment)"
 fi
 
 if [ -z "$PASS" ] ; then
@@ -1158,7 +1177,7 @@ else
     dcx amavis test -x /sa-update-loop.sh || SAU_WHY="$SAU_WHY loop-script-missing;"
     dcx amavis sh -c 'pgrep -f sa-update-loop.sh > /dev/null' || SAU_WHY="$SAU_WHY loop-not-running;"
     dcx amavis sh -c 'timeout 45 spamassassin --lint > /dev/null 2>&1' || SAU_WHY="$SAU_WHY rules-do-not-load;"
-    grep -q 'SA_UPDATE_HOUR' "$SCRIPT_DIR/vars/amavis.env" || SAU_WHY="$SAU_WHY SA_UPDATE_* knobs-undocumented;"
+    grep -q 'SA_UPDATE_HOUR' "$SCRIPT_DIR/env.sample" || SAU_WHY="$SAU_WHY SA_UPDATE_* knobs-undocumented;"
     SAU_VER="$(dcx amavis sh -c 'sa-update --version 2>/dev/null' | tr -d '\r' | sed -n 's/^sa-update version \([0-9][0-9.]*\).*/\1/p' | head -n1)"
     if [ -z "$SAU_VER" ] ; then
         SAU_WHY="$SAU_WHY sa-update-missing;"

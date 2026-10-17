@@ -17,6 +17,20 @@ FROM postgres:18-trixie
 # single mount at /var/lib/postgresql/data — the volumes of existing deployments stay valid — so
 # PGDATA is pinned back to it explicitly, which is the documented opt-out.
 ENV PGDATA=/var/lib/postgresql/data
+
+# --- MailD default configuration (new env schema) --------------------------------
+# The deployment defaults for this service live HERE now: each image bakes only the
+# variables its own entrypoint/scripts consume, as ENV defaults. Any same-named variable
+# in the operator's env file (docker compose env_file / environment / docker run -e)
+# overrides these at runtime — never rebuild the image to deploy a different value.
+# Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
+# (dev: env.dev, prod: .env — see env.sample). Full variable matrix:
+# .agents/services/configuration.md.
+ENV POSTGRES_HOST=db \
+    POSTGRES_DB=mailddb \
+    POSTGRES_USER=maild \
+    POSTGRES_EXTRA_DB=contacts
+
 COPY ensure_databases.sh /usr/local/bin/ensure_databases.sh
 COPY migrate.sh /usr/local/bin/migrate.sh
 COPY migrations/ /usr/local/share/maild/migrations/

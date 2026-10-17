@@ -37,7 +37,10 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
      to have one generated and printed in `docker compose logs admin`.
    - `POSTGRES_PASSWORD` — the database password (pick a strong one).
 
-2. Review `vars/` if you need to tweak a service.
+2. Every tunable defaults **inside the service images** (ENV in the Dockerfiles): to
+   deviate from a default, uncomment the matching line in your `.env` (the commented
+   catalogue) — never leave a variable empty (comment it out instead). Full default
+   catalogue: `.agents/services/configuration.md`.
 
 3. Pick the compose file for your case and start the stack (the `maild` network is external,
    create it once with `docker network create maild`):
@@ -154,7 +157,7 @@ on air-gapped, proxied or low-bandwidth hosts:
 - **Docker Hub blocked (Cuba, proxies):** use `compose-github.yml` (`ghcr.io` images) or a
   private registry built by the CI.
 - **ClamAV updates:** the first boot downloads ~230 MB of signatures. On a restricted link
-  set `ALTERNATE_MIRROR` in `vars/clamav.env`.
+  set `ALTERNATE_MIRROR` in your `.env`.
 - **Prefer the classic manual setup:** set
 
   ```sh
@@ -186,7 +189,7 @@ and the certs must live in the standard `/etc/letsencrypt` location.
 |---------|------------|
 | **Single server** | `docker compose -f compose-*.yml up -d`; the stack provisions itself. |
 | **Docker stack / swarm** | `docker stack deploy`; the sentinel + advisory lock make the concurrent start safe. |
-| **GitLab CI** | The pipeline builds `.env` from `env.sample_gitlab` + CI variables (`MAIL_ADMIN_PASSWORD`, `POSTGRES_PASSWORD`) and deploys `compose-gitlab.yml`. The first deploy seeds itself; the CI can poll `maild_provision` to confirm readiness. |
+| **GitLab CI** | The pipeline builds `.env` from `env.sample_gitlab` + the CI/CD variables (`DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `POSTGRES_PASSWORD`, `MAIL_ADMIN_PASSWORD`) and deploys `compose-gitlab.yml`. The first deploy seeds itself; the CI can poll `maild_provision` to confirm readiness. |
 
 ## Manual mode (AUTO_PROVISION=no)
 

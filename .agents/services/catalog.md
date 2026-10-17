@@ -17,37 +17,40 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   readiness (bounded) and then runs `db/ensure_databases.sh`, which creates any **missing**
   databases from `POSTGRES_DB` + `POSTGRES_EXTRA_DB` (comma-separated, e.g. `contacts`) on
   *every* boot. It never alters existing databases or the schema.
-- env_file: `vars/db.env` (POSTGRES_HOST/DB/USER/EXTRA_DB), `vars/mua.env` (CTDB=contacts),
-  `env.sample`. The password is passed explicitly: `POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}`
-  (compose does not interpolate `env_file:` contents; without it a fresh volume refuses to
-  initialise).
+- Env (new schema): defaults baked in `db/Dockerfile` (`POSTGRES_HOST/DB/USER/EXTRA_DB`);
+  the operator file (`env.dev`/`.env`) is the `env_file:` and overrides any of them. The
+  password is passed explicitly with a `${POSTGRES_PASSWORD:?}` guard (compose does not
+  interpolate `env_file:` contents; a missing one fails at `compose config`).
 - Port 5432 published for local debugging.
 
 ## clamav — antivirus
 
 - Runs clamd; signatures download on first boot (~230 MB) into `ldata/clamav`. On a
-  restricted network set `ALTERNATE_MIRROR` in `vars/clamav.env`.
+  restricted network set `ALTERNATE_MIRROR` in the operator env file (`env.dev`/`.env`).
 - Port 3310 published for debugging (`nc -z localhost 3310` to probe).
 - Also mounts `/var/lib/amavis`: clamd is asked (by amavis, over TCP 3310) to `CONTSCAN` the
   message files amavisd wrote into its TEMPBASE, so clamd needs read access to that shared
   mount — its user is a member of the **amavis group** (`ARG AMAVIS_GID` in `clamav/Dockerfile`,
   `994` on resolute). The entrypoint fails loudly if that access is missing.
-- env_file: `vars/clamav.env`, `env.sample`.
+- Env: **no `env_file:` on purpose** (it needs no catalogue access — variable separation);
+  its two knobs (`ALTERNATE_MIRROR`, `CLAMAV_DEBUG`) are passed as explicit `environment:`
+  entries by the compose files.
 
 ## amavis — content filter
 
 - Postfix hands mail to amavis:10024 and takes it back; amavis queries the catalogue for
   the domain list (that is why it needs `POSTGRES_PASSWORD`), scans with SpamAssassin +
-  ClamAV, signs DKIM (`DKIM_SIGNING`), and bounces the result to `AMAVIS_MTA=mta`.
+  ClamAV, signs DKIM (`DKIM_SIGNING`), and bounces the result to `MTA=mta`.
 - Dev toggles `AV_ENABLED` / `SPAM_FILTER_ENABLED` come from compose interpolation
   (`env.dev`); quarantine lands in `ldata/amavis/virusmails/`.
 - SpamAssassin config: shared `saconf` volume seeded on first boot; MailD tuning written to
-  `/etc/spamassassin/maild.cf` from `vars/amavis.env` at every start. Extra `.cf` files can
-  be dropped into the volume without a rebuild (reload/restart amavis).
+  `/etc/spamassassin/maild.cf` from the env at every start (defaults in `amavis/Dockerfile`).
+  Extra `.cf` files can be dropped into the volume without a rebuild (reload/restart amavis).
 - `amavis/sa-update-loop.sh` runs daily `sa-update` + reload.
 - Waits (bounded) on the `maild_provision` sentinel before the DKIM section, so a fresh
   deploy comes up signed with no restart (`AUTO_PROVISION`).
-- env_file: `vars/amavis.env`, `vars/db.env`, `env.sample`.
+- Env: defaults baked in `amavis/Dockerfile` (filter toggles, `SA_*`, peer hostnames); the
+  operator file is the `env_file:` and overrides any of them.
 
 ## mda — Dovecot
 
@@ -72,8 +75,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   alive for ten minutes; negative caching for an hour could lock a user out of a password he had
   mistyped before adopting it. See `.agents/devops/workflows.md` for the symptom and
   `doveadm auth cache flush`.
-- env_file: `vars/db.env`, `vars/mda.env`, `vars/ssl.env`, `env.sample`; password +
-  `DEFAULT_DOMAIN`/`DEFAULT_MAILBOX_SIZE` passed explicitly at compose level.
+- env: defaults baked in `mda/Dockerfile` (`DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, the
+  self-signed cert subject); the operator file is the `env_file:` and overrides any of them;
+  password + `DEFAULT_DOMAIN`/`MAIL_ADMIN_USER` passed explicitly at compose level.
 - Ports: 110, 143, 993, 995 (POP3/IMAP + TLS) and 4190 (ManageSieve), 12345 (SASL).
 
 ## mta — Postfix
@@ -95,8 +99,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   materialises one).
 - Waits (bounded) on the `maild_provision` sentinel before building the `virtual_aliases`, so
   a fresh deploy comes up with them in place and no restart (`AUTO_PROVISION`).
-- env_file: `vars/mta.env`, `vars/ssl.env`, `vars/db.env`, `env.sample`; `MAILADMIN`,
-  `DEBUG` and the password passed explicitly.
+- env: defaults baked in `mta/Dockerfile` (`MAX_MESSAGESIZE`, `SPF_ENABLE`, `DNSBL_*`,
+  peer hostnames/timeouts); the operator file is the `env_file:` and overrides any of them;
+  `MAILADMIN`, `DEBUG` and the password passed explicitly.
 
 ## admin — PostfixAdmin
 
@@ -110,8 +115,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `no`: this is the first-boot provisioner (leader) that seeds the default domain, the
   superadmin (`MAIL_ADMIN_USER@DEFAULT_DOMAIN`), its mailbox and the default aliases, then
   writes the `maild_provision` sentinel. See `.agents/services/provisioning.md`.
-- env_file: `vars/db.env`, `vars/admin.env`, `env.sample`; `POSTFIXADMIN_DB_PASSWORD` and
-  `POSTFIXADMIN_SETUP_PASSWORD` passed explicitly at compose level.
+- env: defaults baked in `admin/Dockerfile` (`POSTFIXADMIN_*` wiring + the provisioning
+  vars); the operator file is the `env_file:` and overrides any of them. The entrypoint maps
+  `POSTGRES_PASSWORD` → `POSTFIXADMIN_DB_PASSWORD` itself; `POSTFIXADMIN_SETUP_PASSWORD`
+  is ignored (the entrypoint always emits its own OTP).
 
 ## mua — SnappyMail
 
@@ -153,7 +160,8 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Waits (bounded, `MUA_CONFIG_WAIT_TIMEOUT`) for SnappyMail to create `application.ini`, then
   waits (bounded) on the `maild_provision` sentinel before building the per-domain configs, so
   a fresh deploy gets them with no restart (`AUTO_PROVISION`).
-- env_file: `vars/db.env`, `vars/mua.env`, `env.sample`.
+- env: defaults baked in `mua/Dockerfile` (`BANNER_TITLE`, `MUA_*`, `POSTGRES_EXTRA_DB`);
+  the operator file is the `env_file:` and overrides any of them.
 
 ## cron — maintenance
 
@@ -174,7 +182,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   SpamAssassin volume: its `sa-learn` runs with `HOME=/tmp`, so the "shared bayes db" contract only
   holds for amavis (known drift, see `.local/caveats.md`).
 - HEALTHCHECK: `/var/run/crond.pid` + `kill -0` (added with the resolute move).
-- env_file: `vars/db.env`, `vars/amavis.env`, `env.sample`.
+- env: defaults baked in `cron/Dockerfile` (`JUNK_RETENTION_DAYS`, `SA_HAM_SAMPLE_*`,
+  `MTA`); the operator file is the `env_file:` and overrides any of them. The entrypoint
+  dumps the whole environment into `/etc/environment`, from where every cron job sources it.
 
 ## dozzle — log viewer (dev only)
 

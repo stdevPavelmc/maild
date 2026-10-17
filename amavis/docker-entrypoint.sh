@@ -20,7 +20,7 @@ if [ ! -f /etc/spamassassin/init.pre ] ; then
 fi
 cat > /etc/spamassassin/maild.cf <<EOF
 # Generated at startup by MailD, do not edit by hand (overwritten on restart)
-# tune it via env vars on the amavis container (see vars/amavis.env)
+# tune it via env vars on the amavis container (see env.sample)
 use_bayes 1
 bayes_path ${SA_BAYES_PATH:-/var/lib/spamassassin/bayes/db}
 bayes_file_mode 0666

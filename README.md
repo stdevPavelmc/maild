@@ -60,7 +60,7 @@ lifecycle, no manual work is needed:
 - **Shared config**: `/etc/spamassassin` is a shared docker volume (`saconf`)
   mounted on the amavis, cron and mda containers; it's seeded with the distro
   files on the first boot. The MailD tuning lives in `/etc/spamassassin/maild.cf`,
-  regenerated at every container start; tune it via env vars on `vars/amavis.env`.
+  regenerated at every container start; tune it via env vars (see `env.sample`).
   You can also drop extra `.cf` files there and every container will pick them up
   (no rebuild needed, only an amavis reload/restart).
 - **Bayes database**: stored on the shared `spamassassin` volume
@@ -71,14 +71,15 @@ lifecycle, no manual work is needed:
     2. **Daily batch** (cron, 03:30): all the remaining messages on the users'
        Junk folders are learned as spam, plus a small random sample of each
        user's INBOX as ham (never learning spam-flagged messages).
-    3. **Autolearn** during normal scans, with the thresholds on `vars/amavis.env`.
+    3. **Autolearn** during normal scans, with the thresholds from the amavis env.
 - **Junk purge** (cron, 03:00): messages older than `JUNK_RETENTION_DAYS` (7 by
   default) are deleted from every user's Junk folder, keeping the mailboxes small.
 - **Weekly health report**: on Sundays the daily stats mail includes the Bayes
   counters (spam/ham/tokens), the spam/ham balance and the freshness of the
   rules channel, so a stalled update or a poisoned database is easy to spot.
 
-Useful env vars (see `vars/amavis.env`): `JUNK_RETENTION_DAYS`,
+Useful env vars (see `env.sample`, defaults baked in the amavis/cron images):
+`JUNK_RETENTION_DAYS`,
 `SA_HAM_SAMPLE_PER_USER`, `SA_HAM_SAMPLE_MAX`, `SA_AUTOLEARN_NONSPAM`,
 `SA_AUTOLEARN_SPAM`, `SA_BAYES_PATH`, `SA_UPDATE_HOUR`, `SA_UPDATE_MINUTE`.
 

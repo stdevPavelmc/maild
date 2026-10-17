@@ -46,6 +46,23 @@ RUN mkdir /scripts
 COPY ./scripts/* /scripts/
 RUN chmod +x /scripts/*.sh
 
+# --- MailD default configuration (new env schema) --------------------------------
+# The deployment defaults for this service live HERE now: each image bakes only the
+# variables its own entrypoint/scripts consume, as ENV defaults. Any same-named variable
+# in the operator's env file (docker compose env_file / environment / docker run -e)
+# overrides these at runtime — never rebuild the image to deploy a different value.
+# Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
+# (dev: env.dev, prod: .env — see env.sample). The entrypoint dumps the whole
+# environment into /etc/environment, from where the cron jobs source it.
+# Full variable matrix: .agents/services/configuration.md.
+ENV POSTGRES_HOST=db \
+    POSTGRES_DB=mailddb \
+    POSTGRES_USER=maild \
+    MTA=mta \
+    JUNK_RETENTION_DAYS=7 \
+    SA_HAM_SAMPLE_PER_USER=25 \
+    SA_HAM_SAMPLE_MAX=400
+
 # the daemon stays in the foreground (CMD) and every job appends to /proc/1/fd/1; the healthcheck
 # just proves cron is alive: it is the pidfile Debian's cron writes at start-up
 HEALTHCHECK --interval=1m --timeout=5s --start-period=10s --retries=2 \
@@ -69,4 +86,4 @@ LABEL org.opencontainers.image.title="MailD maintenance jobs" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-15"
+      org.opencontainers.image.created="2026-10-16"

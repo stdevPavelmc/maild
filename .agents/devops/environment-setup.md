@@ -72,7 +72,7 @@ password works over IMAP/SMTP and the PostfixAdmin UI (md5crypt `$1$…`).
 | Aspect | Development | Production |
 |--------|-------------|------------|
 | Compose file | `docker-compose-dev.yml` | `docker-compose.yml` (external net `maild`, Traefik in front) |
-| Env source | `env.dev` + `env.sample` via `--env-file`/`env_file` | `.env` with real secrets |
+| Env source | `env.dev` (interpolation + `env_file`); image `ENV` defaults behind it | `.env` (interpolation + `env_file`); image `ENV` defaults behind it |
 | Volumes | `./ldata/*` bind mounts | named volumes (`/var/backups/maild` for dumps) |
 | Images | `pavelmc/maild-*:develop`, built locally | CI-published tags |
 | Ports | everything exposed for debugging | 25/465/587, 993/995; UIs behind Traefik |

@@ -68,9 +68,10 @@ behind-proxy deployments.
 | `PROVISION_WAIT_TIMEOUT` | `180` | Seconds a gated service waits for the sentinel. |
 | `PROVISION_FORCE` | `no` | `yes` re-writes the admin password even if it exists. |
 
-`MAIL_ADMIN_PASSWORD` is already injected by `.gitlab-ci.yml`; the rest live in `env.sample`
-(`env.sample` is loaded as an `env_file` by every container, and copied to `.env` in
-production).
+`MAIL_ADMIN_PASSWORD` is already injected by `.gitlab-ci.yml`; the rest default in the
+images (admin/amavis/mua/mta bake the gate set — see the matrix in
+`.agents/services/configuration.md`) and `env.sample` documents them as optional
+overrides of the operator file (`env.dev` in dev, `.env` in production).
 
 ## Operations
 

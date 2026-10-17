@@ -47,54 +47,50 @@ stages:
   before_script:
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
     - echo "Registry Image:" $CI_REGISTRY_IMAGE
-    # env vars
-    - cat env.sample > .env
-    - echo "MAIL_ADMIN_PASSWORD=$MAIL_ADMIN_PASSWORD" >> .env
-    - echo "POSTGRES_PASSWORD=$POSTGRES_PASSWORD" >> .env
-    - echo "POSTFIXADMIN_SETUP_PASSWORD='$POSTFIXADMIN_SETUP_PASSWORD'" >> .env
+    # deploy env file (new schema): the images carry every default, so the env
+    # file only needs the CI/CD-defined values. The mandatory ones (DEFAULT_DOMAIN,
+    # MAIL_ADMIN_USER, POSTGRES_PASSWORD) must be defined as (masked) CI/CD
+    # variables; anything not defined simply stays commented in the template and
+    # the image defaults apply. compose needs the file present to resolve the
+    # env_file list, so the template is always dumped.
+    - cat env.sample_gitlab > .env
+    - env | grep -E '^(DEFAULT_DOMAIN|MAIL_ADMIN_USER|POSTGRES_PASSWORD|MAIL_ADMIN_PASSWORD|MUA_ADMIN_USER|MUA_ADMIN_PASSWORD|AUTO_PROVISION|PROVISION_VERSION|PROVISION_WAIT_TIMEOUT|PROVISION_FORCE)=' >> .env || true
 
-## Rules
+## Rules (defaults live in the Dockerfiles now, so no vars/*.env paths)
 .rule_db:
   rules:
     - changes:
         - db/**/*
-        - vars/db.env
 
 .rule_admin:
   rules:
     - changes:
         - admin/**/*
-        - vars/admin.env
 
 .rule_mta:
   rules:
     - changes:
         - mta/**/*
-        - vars/mta.env
 
 .rule_mda:
   rules:
     - changes:
         - mda/**/*
-        - vars/mda.env
 
 .rule_amavis:
   rules:
     - changes:
         - amavis/**/*
-        - vars/amavis.env
 
 .rule_clamav:
   rules:
     - changes:
         - clamav/**/*
-        - vars/clamav.env
 
 .rule_mua:
   rules:
     - changes:
         - mua/**/*
-        - vars/mua.env
 
 .rule_cron:
   rules:

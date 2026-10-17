@@ -6,10 +6,13 @@ This guide explains how to set up the mail system for local development.
 
 1. **Ensure you have the required configuration:**
    ```bash
-   # env.sample: container configuration (review and adjust, especially DEFAULT_DOMAIN)
-   # env.dev:    compose interpolation for the dev stack — fake, committed sample secrets; the
-   #             real local/production passwords in .env are never used by the dev stack
-   cat env.sample env.dev
+   # env.dev: the dev operator env file — compose interpolation AND the containers'
+   #          env_file; carries the deployment values + fake, committed dev secrets
+   #          (the real local/production passwords in .env are never used by the dev
+   #          stack). Every tunable defaults inside the images (ENV in the Dockerfiles).
+   cat env.dev
+   # env.sample: the production operator env file template (.env)
+   cat env.sample
    ```
 
 2. **Create the local data directory:**
@@ -104,7 +107,7 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
 ./test.sh --skip-docker    # only wire-level checks (no `docker compose exec` assertions)
 ```
 
-- 47 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
+- 48 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
   aliases and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
   DKIM, the deployment domain, the cron jobs (the daily database backup, the daily mail traffic
   resume and the daily Bayes learning) and the SpamAssassin maintenance chain (the imapsieve
@@ -164,9 +167,10 @@ What the content checks assert, given the shipped policies:
 The `docker-compose-dev.yml` configuration includes several changes optimized for local development:
 
 ### Configuration
-- Uses `env.sample` (container env) **plus** `env.dev` for compose interpolation — fake,
-  committed dev secrets. The git-ignored `.env` (real local/production passwords) is never
-  read by the dev stack (see `./bootstrap-dev.sh` for a one-command setup)
+- Uses `env.dev` for **both** compose interpolation and the containers' `env_file:` —
+  fake, committed dev secrets over the image `ENV` defaults (baked in each Dockerfile).
+  The git-ignored `.env` (real local/production passwords) is never read by the dev
+  stack (see `./bootstrap-dev.sh` for a one-command setup)
 - Fixed image names: `pavelmc/maild-*:develop`
 - Network: Local bridge network `maild-dev` (not external)
 - Restart policy: `unless-stopped` instead of `always`

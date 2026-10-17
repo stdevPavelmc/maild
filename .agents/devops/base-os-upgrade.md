@@ -10,7 +10,7 @@ Scope: the five services built `FROM ubuntu:<codename>` today — `mta`, `mda`,
 their own upgrade path; do not bundle them into an Ubuntu LTS rollover.
 
 Canonical base rule + current drift table: `.agents/devops/base-images.md`.
-Env chain (`env.dev`/`.env` → compose → `vars/*.env` → `_<VAR>_` templates):
+Env chain (`env.dev`/`.env` → compose → image `ENV` defaults → `_<VAR>_` templates):
 `.agents/services/configuration.md`. Build/run/test commands:
 `.agents/devops/workflows.md`. Provisioning sentinel:
 `.agents/services/provisioning.md`.
@@ -225,7 +225,8 @@ git add -A && git commit -m "<svc>: pristine <tpl> templates from ubuntu:<new>"
 1. Inventory every MailD placeholder in the archive:
    `grep -rn '_[A-Z][A-Z_]*_' <tpl>-<old>/ | sort | uniq -c | sort -rn`.
    Cross-check against the producers: `<svc>/docker-entrypoint.sh`
-   (+ `mda/configure.sh`) `CFILE` construction and `vars/<svc>.env`.
+   (+ `mda/configure.sh`) `CFILE` construction and the `ENV` defaults block in
+   `<svc>/Dockerfile`.
 2. `diff -r <tpl>-<old> <tpl>` (old-customized vs new-pristine). For each
    hunk decide: **re-apply** (MailD logic), **drop** (obsolete distro
    default), or **adapt** (directive renamed/moved).
@@ -271,8 +272,8 @@ git add -A && git commit -m "<svc>: port MailD customizations onto ubuntu:<new> 
 * `<svc>/check.sh`: probe semantics unchanged (Postfix pidfile + peer-IP
   checks on `mta`; config-test gates where present).
 * New/renamed knob → follow `.agents/services/configuration.md → Adding a
-  new configuration option`: document + default in `env.sample` → forward
-  in `vars/<svc>.env` (`VAR=${VAR}` above the `Do not edit` marker) →
+  new configuration option`: default it in the `ENV` block of `<svc>/Dockerfile`
+  → document it as a commented override in `env.sample` →
   `_<VAR>_` in the template → substitution in the entrypoint. Keep scripts
   executable, `set -e`-style, with the service log prefix.
 * If you cannot decide whether a var is still needed or what a safe
@@ -319,7 +320,7 @@ compare `id <svc>` in the image with `ls -ldn ldata/<svc>`).
 `amavis/Dockerfile` stages distro files at `/etc/spamassassin.dist`; on boot
 `amavis/docker-entrypoint.sh` seeds the shared volume if `init.pre` is
 absent and (re)writes `/etc/spamassassin/maild.cf` (Bayes path, autolearn
-thresholds from `vars/amavis.env`). `mda` and `cron` entrypoints **wait**
+thresholds from the env, defaults in the `ENV` block of `amavis/Dockerfile`). `mda` and `cron` entrypoints **wait**
 for `/etc/spamassassin/init.pre` before proceeding. Consequences:
 
 > **Measured on the `amavis` step — what is actually mounted.** Only
