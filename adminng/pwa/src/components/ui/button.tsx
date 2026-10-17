@@ -27,7 +27,9 @@ export function Button({
         variant === 'default'
           ? 'bg-blue-600 text-white hover:bg-blue-500'
           : 'border border-slate-700 text-slate-200 hover:bg-slate-800',
-        size === 'default' ? 'h-10 px-4 text-sm' : 'h-8 px-3 text-xs',
+        // Touch first: 44px targets below lg (technical-draft §6.1), compact
+        // when the pointer is a mouse.
+        size === 'default' ? 'h-11 px-4 text-sm lg:h-10' : 'h-8 px-3 text-xs',
         className,
       )}
       {...props}

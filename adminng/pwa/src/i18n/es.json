@@ -31,7 +31,10 @@
     "quota": "Cuota",
     "unlimited": "Ilimitada",
     "page": "Cargar más",
-    "retry": "Reintentar"
+    "retry": "Reintentar",
+    "aliases": "Alias",
+    "created": "Creado",
+    "more": "+{{count}} más"
   },
   "login": {
     "title": "Iniciar sesión",
@@ -100,8 +103,10 @@
     "new": "Nueva cuenta",
     "username": "Dirección",
     "password": "Contraseña",
-    "quota": "Cuota (MB)",
+    "quota": "Cuota",
     "used": "Usado",
+    "quotaHint": "0 = sin límite",
+    "quotaUnit": "Unidad de cuota",
     "create": "Crear cuenta",
     "aliases": "Alias de reenvío",
     "addAlias": "Añadir alias",
@@ -121,6 +126,7 @@
     "title": "Administradores",
     "new": "Nuevo administrador",
     "superadmin": "Superadministrador (acceso global)",
+    "superadminShort": "Superadministrador",
     "domains": "Dominios gestionados",
     "create": "Crear administrador"
   },

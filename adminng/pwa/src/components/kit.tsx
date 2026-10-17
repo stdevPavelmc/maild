@@ -1,12 +1,16 @@
 import {
   useEffect,
+  useId,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
   type SelectHTMLAttributes,
 } from 'react'
+import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/utils'
+import { QUOTA_UNITS, quotaToBytes, quotaValueFromBytes, type QuotaUnit } from '../lib/format'
 import { Button } from './ui/button'
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -211,4 +215,66 @@ export function SectionHeader({ title, action }: { title: string; action?: React
 
 export function Btn(props: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'default' | 'outline'; size?: 'default' | 'sm' }) {
   return <Button {...props} />
+}
+
+/**
+ * Quota editor: a numeric input plus a unit multiplier (MB default, GB and TB
+ * selectable). The value is bytes end to end — the unit never leaks into the
+ * page. Commits on blur of the number (the screens' established UX) and when
+ * the unit changes; 0 means unlimited, and the hint says so (linked with
+ * aria-describedby for screen readers).
+ */
+export function QuotaInput({
+  bytes,
+  onCommit,
+  disabled,
+}: {
+  bytes: number
+  onCommit: (bytes: number) => void
+  disabled?: boolean
+}) {
+  const { t } = useTranslation()
+  const hintId = useId()
+  const initial = quotaValueFromBytes(bytes)
+  const [number, setNumber] = useState(String(initial.number))
+  const [unit, setUnit] = useState<QuotaUnit>(initial.unit)
+  const committed = useRef(bytes)
+
+  const commit = (raw: string, chosen: QuotaUnit): void => {
+    const next = quotaToBytes(Math.max(0, Math.round(Number(raw) || 0)), chosen)
+    if (next === committed.current) return
+    committed.current = next
+    onCommit(next)
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        <Input
+          inputMode="numeric"
+          aria-describedby={hintId}
+          disabled={disabled}
+          value={number}
+          onChange={(event) => setNumber(event.target.value.replace(/[^0-9]/g, ''))}
+          onBlur={() => commit(number, unit)}
+        />
+        <Select
+          aria-label={t('mailboxes.quotaUnit')}
+          className="w-24"
+          disabled={disabled}
+          value={unit}
+          onChange={(event) => {
+            const chosen = event.target.value as QuotaUnit
+            setUnit(chosen)
+            commit(number, chosen)
+          }}
+        >
+          {QUOTA_UNITS.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </Select>
+      </div>
+      <p id={hintId} className="mt-1 text-xs text-slate-400">{t('mailboxes.quotaHint')}</p>
+    </div>
+  )
 }

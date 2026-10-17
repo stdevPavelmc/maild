@@ -31,7 +31,10 @@
     "quota": "Quota",
     "unlimited": "Unlimited",
     "page": "Load more",
-    "retry": "Retry"
+    "retry": "Retry",
+    "aliases": "Aliases",
+    "created": "Created",
+    "more": "+{{count}} more"
   },
   "login": {
     "title": "Sign in",
@@ -100,8 +103,10 @@
     "new": "New account",
     "username": "Address",
     "password": "Password",
-    "quota": "Quota (MB)",
+    "quota": "Quota",
     "used": "Used",
+    "quotaHint": "0 = unlimited",
+    "quotaUnit": "Quota unit",
     "create": "Create account",
     "aliases": "Forwarding aliases",
     "addAlias": "Add alias",
@@ -121,6 +126,7 @@
     "title": "Administrators",
     "new": "New administrator",
     "superadmin": "Superadmin (global access)",
+    "superadminShort": "Superadmin",
     "domains": "Managed domains",
     "create": "Create administrator"
   },
