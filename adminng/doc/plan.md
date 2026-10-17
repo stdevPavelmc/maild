@@ -460,6 +460,12 @@ is recorded and its follow-up plan exists.
   pass `APP_URL`); fixed, so the bundled-asset build really points at the deployment.
 - The signed APK is picked up from `android-project/app-release-signed.apk` (the old
   `find … -name '*.apk' | head -1` could return the *unsigned* intermediate).
+- **Local HTTP builds:** `ALLOW_LOCAL_HTTP=1` lets `app-generate.sh` target a **private** http
+  origin (10/8, 172.16/12, 192.168/16, 127.0.0.1, localhost) for LAN testing; it prints a loud
+  warning, refuses public hosts/lookalike names even with the flag, and rewrites Bubblewrap's
+  hardcoded `https` launcher URL/intent filter to `http` (without that the app opens
+  `https://…` and fails). The result runs as a Chrome Custom Tab with a URL bar and no service
+  worker (no offline/installable PWA). `http://localhost` needs no flag. Releases stay https.
 - **Keystore:** the missing runbook now exists — `adminng/pwa/keystore-generate.sh` creates a
   dev/test JKS (0600) plus the base64 for the CI secret, prints the exact build command, and
   falls back to Docker when no JDK is installed. Proven by rebuilding the APK with a generated

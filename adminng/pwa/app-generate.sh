@@ -20,6 +20,9 @@
 #   STORE_PASSWORD   keystore password
 #
 # Optional:
+#   ALLOW_LOCAL_HTTP build against a private http origin (LAN experiments only).
+#                    Accepts only 10/8, 172.16/12, 192.168/16, 127.0.0.1 and
+#                    localhost; prints a warning and yields a Custom Tab (no PWA).
 #   DOCKER_NETWORK   network for docker build/run (default: daemon default).
 #                    On networks whose IPv4 route to dl.google.com is filtered
 #                    the Android SDK/Gradle downloads fail; `host` fixes it.
@@ -49,7 +52,7 @@ cd "$SCRIPT_DIR"
 APP_URL="${APP_URL:?set APP_URL (the public https URL of the adminng frontend)}"
 APP_NAME="${APP_NAME:-MailD AdminNG}"
 APP_SHORT_NAME="${APP_SHORT_NAME:-AdminNG}"
-APP_PKG="${APP_PKG:-cu.maild.adminng}"
+APP_PKG="${APP_PKG:?set APP_PKG (the Android applicationId, e.g. cu.maild.adminng)}"
 VERSION_NAME="${VERSION_NAME:-$(node -p "require('./package.json').version")}"
 VERSION_CODE="${VERSION_CODE:-1}"
 KEYSTORE="${KEYSTORE:?set KEYSTORE (path to the .jks)}"
@@ -57,18 +60,70 @@ KEY_ALIAS="${KEY_ALIAS:?set KEY_ALIAS}"
 KEY_PASSWORD="${KEY_PASSWORD:?set KEY_PASSWORD}"
 STORE_PASSWORD="${STORE_PASSWORD:?set STORE_PASSWORD}"
 
-[ -f "$KEYSTORE" ] || { echo "app-generate: keystore '$KEYSTORE' not found" >&2; exit 1; }
+die() { echo "app-generate: $*" >&2; exit 1; }
 
-# A Trusted Web Activity only behaves as an app on a secure origin: service
-# workers and the digital-asset-links check need https (or localhost). An http
-# LAN URL still builds, but the phone shows a Custom Tab with a URL bar.
+is_ipv4() {
+    [[ "$1" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})$ ]] || return 1
+    local octet
+    for octet in "${BASH_REMATCH[@]:1}"; do
+        ((10#$octet <= 255)) || return 1
+    done
+}
+
+# Private/local IPv4 only: 10/8, 127/8, 172.16/12, 192.168/16, plus "localhost".
+is_local_host() {
+    local host="$1" o1 o2
+    [ "$host" = "localhost" ] && return 0
+    is_ipv4 "$host" || return 1
+    IFS=. read -r o1 o2 _ _ <<< "$host"
+    case "$o1" in
+        10 | 127) return 0 ;;
+        192) [ "$o2" = "168" ] && return 0 ;;
+        172) [ "$o2" -ge 16 ] 2>/dev/null && [ "$o2" -le 31 ] 2>/dev/null && return 0 ;;
+    esac
+    return 1
+}
+
+URL_REST="${APP_URL#*://}"
+URL_HOSTPORT="${URL_REST%%/*}"
+URL_HOST="${URL_HOSTPORT%%:*}"
+
+case "${ALLOW_LOCAL_HTTP:-0}" in
+    1 | yes | true | YES | TRUE) ALLOW_LOCAL_HTTP=1 ;;
+    *) ALLOW_LOCAL_HTTP=0 ;;
+esac
+
+# A Trusted Web Activity needs a secure origin: https (or localhost). A private
+# http origin still loads, but only as a Chrome Custom Tab (URL bar, no service
+# worker/offline). That is useful for LAN testing, so it is allowed behind an
+# explicit build-time opt-in and only for private/local addresses.
 case "$APP_URL" in
-    https://* | http://localhost* | http://127.0.0.1*) ;;
+    https://*) ;;
+    http://*)
+        if ! is_local_host "$URL_HOST"; then
+            if [ "$ALLOW_LOCAL_HTTP" = "1" ]; then
+                die "ALLOW_LOCAL_HTTP only permits private/local hosts (10/8, 172.16/12, 192.168/16, 127.0.0.1, localhost); '$URL_HOST' is not one"
+            fi
+            die "APP_URL must be https for a real device; http is only allowed on local networks with ALLOW_LOCAL_HTTP=1"
+        fi
+        if [ "$ALLOW_LOCAL_HTTP" = "1" ]; then
+            echo "app-generate: WARNING: ALLOW_LOCAL_HTTP=1 — building against a local HTTP origin:" >&2
+            echo "             $APP_URL" >&2
+            echo "             The APK will open as a Chrome Custom Tab (URL bar, no service worker," >&2
+            echo "             no offline/installable PWA). Use it on a trusted LAN only; releases" >&2
+            echo "             must use https." >&2
+        elif [ "$URL_HOST" = "localhost" ] || [ "$URL_HOST" = "127.0.0.1" ]; then
+            echo "app-generate: note: http://localhost build — the APK opens as a Custom Tab." >&2
+        else
+            die "APP_URL is http on a local address; set ALLOW_LOCAL_HTTP=1 to allow it (local experiments only)"
+        fi
+        ;;
     *)
-        echo "app-generate: warning: APP_URL is not https — the TWA needs a secure origin;" >&2
-        echo "             use the TLS ingress URL for a real device (http is a local experiment only)." >&2
+        die "APP_URL must start with https:// (or http:// with ALLOW_LOCAL_HTTP=1 on a local network)"
         ;;
 esac
+
+[ -f "$KEYSTORE" ] || die "keystore '$KEYSTORE' not found"
 
 # Docker network for the build and the Bubblewrap run (empty = daemon default).
 # On networks whose IPv4 path to dl.google.com is filtered (the Android SDK
@@ -160,6 +215,7 @@ docker run --rm "${NETWORK_ARGS[@]}" \
     -e HOST_UID="$(id -u)" -e HOST_GID="$(id -g)" \
     -e JAVA_OPTS="${JAVA_OPTS:-}" -e GRADLE_OPTS="${GRADLE_OPTS:-}" \
     -e JAVA_TOOL_OPTIONS="${JAVA_TOOL_OPTIONS:-}" \
+    -e ALLOW_LOCAL_HTTP="${ALLOW_LOCAL_HTTP:-0}" \
     maild-adminng-apk:local bash -lc '
         set -euo pipefail
         mkdir -p android-project
@@ -168,6 +224,14 @@ docker run --rm "${NETWORK_ARGS[@]}" \
         # manifest/checksum live beside it: build from inside the project.
         cd android-project
         bubblewrap update --skipVersionUpgrade
+        if [ "${ALLOW_LOCAL_HTTP:-0}" = "1" ]; then
+            # Bubblewrap hardcodes https in the generated launcher URL
+            # (app/build.gradle) and in the intent filter. For a private http
+            # origin both must say http or the app would open https:// and fail.
+            sed -i "s#def launchUrl = \"https://\"#def launchUrl = \"http://\"#" app/build.gradle
+            sed -i "s#android:scheme=\"https\"#android:scheme=\"http\"#g" app/src/main/AndroidManifest.xml
+            echo "local-http: launcher URL and intent filter rewritten to http"
+        fi
         bubblewrap build --skipPwaValidation
         chown -R "$HOST_UID:$HOST_GID" /app/android-project /app/twa-manifest.json \
             /app/app-release-signed.apk /app/app-release-unsigned.apk 2>/dev/null || true

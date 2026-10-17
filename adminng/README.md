@@ -131,8 +131,10 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
 - The APK loads `APP_URL`, so it is same-origin with the API and needs no runtime server
   address; the PWA's handshake → pending → approval → enrollment/2FA flow is what runs on the
   phone. `APP_URL` must be **https** for a real device (a TWA needs a secure origin for the
-  service worker and the digital-asset-links check); `http://localhost` is the only http form
-  that works, so a LAN `http://192.168.x.y` build is a local experiment only.
+  service worker and the digital-asset-links check). For LAN testing you can opt in with
+  `ALLOW_LOCAL_HTTP=1` and a private http address (10/8, 172.16/12, 192.168/16, localhost): the
+  app then opens as a Custom Tab with a URL bar and no service worker — see
+  [`pwa/README.md`](pwa/README.md) §2.1. Public hosts are refused even with the flag.
 - On networks whose IPv4 route to `dl.google.com` answers 404 (the SDK/Maven/Gradle downloads
   fail), run it as
   `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true ... ./app-generate.sh`.

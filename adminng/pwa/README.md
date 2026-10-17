@@ -16,8 +16,9 @@ shell. It is same-origin with the API, so the phone runs the normal AdminNG flow
 handshake → `PENDING` → superadmin approval → login/2FA).
 
 > `APP_URL` must be **https** for a real device. A TWA needs a secure origin (service worker +
-> digital asset links); an `http://192.168.x.y` build still compiles but opens as a Custom Tab
-> with a URL bar. `http://localhost` is the only usable http form, and only on the same machine.
+> digital asset links). For LAN experiments you can opt in with `ALLOW_LOCAL_HTTP=1` and a
+> **private** http address (10/8, 172.16/12, 192.168/16, 127.0.0.1, `localhost`); the app then
+> opens as a Custom Tab with a URL bar and no service worker (§2.1). Public hosts are refused.
 
 ## TL;DR
 
@@ -144,8 +145,38 @@ Nothing Android-related is needed on the host: every step is a container.
 | `VERSION_CODE` | no | `1` |
 | `DOCKER_NETWORK` | no | network for `docker build`/`run` (see §3) |
 | `JAVA_TOOL_OPTIONS` | no | forwarded to every JVM (see §3) |
+| `ALLOW_LOCAL_HTTP` | no | `0`; set to `1` to build against a **private** http origin (§2.1) |
 | `GRADLE_CACHE_VOLUME` | no | `maild-adminng-apk-gradle` |
 | `ANDROID_SDK_VOLUME` | no | `maild-adminng-apk-sdk` |
+
+### 2.1 Local HTTP builds (`ALLOW_LOCAL_HTTP=1`)
+
+For testing on a LAN without TLS, opt in explicitly:
+
+```bash
+ALLOW_LOCAL_HTTP=1 \
+APP_URL=http://192.168.1.163:8083 APP_PKG=cu.maild.adminng \
+KEYSTORE=$PWD/android.keystore KEY_ALIAS=maild-apk \
+KEY_PASSWORD='…' STORE_PASSWORD='…' ./app-generate.sh
+```
+
+The script prints a warning and proceeds only when the host is a **private/local** address:
+`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.1` or `localhost`. Anything else —
+a public IP, a DNS name, a lookalike like `192.168.1.163.example.com` — is refused even with the
+flag. `http://localhost` is accepted without the flag (it is a secure context).
+
+What you get and do not get:
+
+- The APK launches, but Chrome opens it as a **Custom Tab with a visible URL bar**: the TWA
+  verification (digital asset links over https) cannot succeed. The script also rewrites
+  Bubblewrap's hardcoded `https` launcher URL and intent filter to `http` for this build, so the
+  app really opens the LAN address instead of failing on `https://…`.
+- No service worker, so **no offline cache and no install/standalone PWA**; the API calls still
+  work because they are same-origin.
+- Use it on a trusted LAN only. Release builds must use the HTTPS ingress; this flag exists for
+  local testing, not for distribution.
+- The URL must be reachable **from the build machine** (Bubblewrap downloads the manifest/icon).
+
 
 ## 3. The network / IPv6 case
 
@@ -206,7 +237,7 @@ it changes nothing inside the APK.
 | `./gradlew: not found` | Bubblewrap run outside the project dir | use the script (it `cd`s into `android-project/`) |
 | `minSdkVersion … cannot be smaller than 24` | TWA helper floor | the script generates `minSdkVersion: 24` |
 | `keystore '…' not found` | wrong path, not absolute | pass an absolute `KEYSTORE` |
-| APK opens with a URL bar | `APP_URL` is not https | use the TLS ingress URL for device tests |
+| APK opens with a URL bar | `APP_URL` is http (Custom Tab by design) | expected for `ALLOW_LOCAL_HTTP=1`; use the TLS ingress URL for a standalone app |
 | `Permission denied` under `android-project/` | files created by the root container | the script reclaims ownership before/after every run |
 
 ## 6. Verify an APK

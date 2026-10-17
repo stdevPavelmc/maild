@@ -185,6 +185,8 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh   # -> dist/android/<pkg>-
   `maild-adminng-apk-sdk`; the SDK volume is seeded from the image and survives runtime installs.
 - If the IPv4 route to `dl.google.com` is filtered (404 while IPv6 works), add
   `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true`.
+- LAN testing without TLS: `ALLOW_LOCAL_HTTP=1 APP_URL=http://192.168.x.y:8083` (only private
+  addresses; prints a warning; the APK runs as a Custom Tab without a service worker).
 - Artifacts are git-ignored (`adminng/pwa/dist/`, `android-project/`, `twa-manifest.json`,
   `*.keystore*`).
 - CI: `.github/workflows/android-apk.yml` runs the script with the keystore secrets.

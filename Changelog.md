@@ -154,6 +154,12 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Fixed: `app-generate.sh` now warns when `APP_URL` is not https — a TWA needs a secure origin
   (service worker + digital asset links), so a LAN `http://192.168.x.y` build only opens as a
   Custom Tab with a URL bar. Use the TLS ingress URL for a real device.
+- Added: **`ALLOW_LOCAL_HTTP=1`** in `app-generate.sh` — build the APK against a **private**
+  http origin for LAN testing (`10/8`, `172.16/12`, `192.168/16`, `127.0.0.1`, `localhost`).
+  The script prints a prominent warning, refuses public hosts or lookalike names even with the
+  flag, and rewrites Bubblewrap's hardcoded `https` launcher URL and intent filter to `http`
+  (otherwise the app opens `https://…` and fails). Such an APK runs as a Chrome Custom Tab
+  (URL bar, no service worker/offline) — releases must use the HTTPS ingress.
 - Added: **`adminng/pwa/README.md`** — the APK runbook: dev/release keystore generation and
   preservation (backup, permissions, CI secrets, rotation caveat), the `app-generate.sh`
   variable table, the `DOCKER_NETWORK=host` +
