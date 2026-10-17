@@ -7,7 +7,9 @@ container) and the **Android packaging pipeline**:
 |---|---|
 | `app-generate.sh` | builds the PWA and wraps it in a signed TWA APK, fully in Docker |
 | `keystore-generate.sh` | creates the Android signing keystore (dev/test, or the release key) |
+| `tls-cert-generate.sh` | local CA + server certificate for the optional HTTPS listener (LAN/phone) |
 | `Dockerfile` | runtime image: builds the bundle, serves it with nginx (service `adminng`) |
+| `nginx/` | `default.conf` (HTTP vhost), `tls.conf` (optional 8084 vhost), `snippets/` (shared headers/locations) |
 | `Dockerfile.android` | toolchain image: JDK 17 + Android SDK 36 / build-tools 36.1 + Bubblewrap |
 | `android-project/`, `dist/`, `twa-manifest.json`, `*.keystore*` | generated, git-ignored |
 
@@ -15,10 +17,10 @@ The APK is a **Trusted Web Activity**: it opens `APP_URL` in a Chrome-backed ful
 shell. It is same-origin with the API, so the phone runs the normal AdminNG flow (device
 handshake → `PENDING` → superadmin approval → login/2FA).
 
-> `APP_URL` must be **https** for a real device. A TWA needs a secure origin (service worker +
-> digital asset links). For LAN experiments you can opt in with `ALLOW_LOCAL_HTTP=1` and a
-> **private** http address (10/8, 172.16/12, 192.168/16, 127.0.0.1, `localhost`); the app then
-> opens as a Custom Tab with a URL bar and no service worker (§2.1). Public hosts are refused.
+> `APP_URL` must be **https** for a real device: a TWA needs a secure origin (service worker,
+> install prompt, digital asset links and `crypto.randomUUID`). Plain `http` is rejected by
+> `app-generate.sh` — it cannot even log in. On a LAN, use the optional 8084 listener with the
+> local CA (§2.1).
 
 ## TL;DR
 
@@ -124,7 +126,8 @@ Nothing Android-related is needed on the host: every step is a container.
 > `${APP_URL}/manifest.webmanifest` and the icon to generate the TWA project. Build after the
 > ingress/DNS is live (or point it at the dev stack for an experiment).
 
-1. builds the PWA with `VITE_APP_BASE=$APP_URL` (`node:22-bookworm`);
+1. checks `${APP_URL}/manifest.webmanifest` over the expected trust chain, then builds the
+   root-relative PWA bundle (`node:22-bookworm`);
 2. builds `Dockerfile.android` (JDK 17 + Android SDK + Bubblewrap; the first run downloads the
    SDK, later runs are cached);
 3. writes `twa-manifest.json` and runs Bubblewrap `update` + `build` from inside
@@ -145,37 +148,57 @@ Nothing Android-related is needed on the host: every step is a container.
 | `VERSION_CODE` | no | `1` |
 | `DOCKER_NETWORK` | no | network for `docker build`/`run` (see §3) |
 | `JAVA_TOOL_OPTIONS` | no | forwarded to every JVM (see §3) |
-| `ALLOW_LOCAL_HTTP` | no | `0`; set to `1` to build against a **private** http origin (§2.1) |
+| `APP_CA_CERT` | no | CA certificate to trust for a LAN https origin, e.g. `ldata/certs/adminng-ca.crt` (§2.1) |
 | `GRADLE_CACHE_VOLUME` | no | `maild-adminng-apk-gradle` |
 | `ANDROID_SDK_VOLUME` | no | `maild-adminng-apk-sdk` |
 
-### 2.1 Local HTTP builds (`ALLOW_LOCAL_HTTP=1`)
+### 2.1 HTTPS on a LAN (local CA)
 
-For testing on a LAN without TLS, opt in explicitly:
+A TWA needs a secure origin: the service worker, the install prompt, Digital Asset Links and
+`crypto.randomUUID()` are unavailable over plain `http`. For a phone on the LAN, the dev stack
+serves HTTPS on **8084** with a certificate issued by a **local CA**:
 
 ```bash
-ALLOW_LOCAL_HTTP=1 \
-APP_URL=http://192.168.1.163:8083 APP_PKG=cu.maild.adminng \
+# once (bootstrap-dev.sh does it automatically), from the repository root:
+./adminng/pwa/tls-cert-generate.sh
+#   -> ldata/certs/adminng-ca.crt / .der   (the CA: install this on the phone)
+#   -> ldata/certs/adminng.crt / .key      (server cert; SAN = LAN IP + hostname + localhost)
+
+# build against it:
+cd adminng/pwa
+APP_URL=https://192.168.1.163:8084 \
+APP_CA_CERT=../../ldata/certs/adminng-ca.crt \
+APP_PKG=cu.maild.adminng \
 KEYSTORE=$PWD/android.keystore KEY_ALIAS=maild-apk \
 KEY_PASSWORD='…' STORE_PASSWORD='…' ./app-generate.sh
 ```
 
-The script prints a warning and proceeds only when the host is a **private/local** address:
-`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, `127.0.0.1` or `localhost`. Anything else —
-a public IP, a DNS name, a lookalike like `192.168.1.163.example.com` — is refused even with the
-flag. `http://localhost` is accepted without the flag (it is a secure context).
+`APP_CA_CERT` is the only LAN-specific knob: it makes the build machine trust the private CA
+(manifest preflight **and** Bubblewrap). Without it, an HTTPS URL with a private CA fails fast
+with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` instead of after the Gradle build.
 
-What you get and do not get:
+Install the CA on the phone:
 
-- The APK launches, but Chrome opens it as a **Custom Tab with a visible URL bar**: the TWA
-  verification (digital asset links over https) cannot succeed. The script also rewrites
-  Bubblewrap's hardcoded `https` launcher URL and intent filter to `http` for this build, so the
-  app really opens the LAN address instead of failing on `https://…`.
-- No service worker, so **no offline cache and no install/standalone PWA**; the API calls still
-  work because they are same-origin.
-- Use it on a trusted LAN only. Release builds must use the HTTPS ingress; this flag exists for
-  local testing, not for distribution.
-- The URL must be reachable **from the build machine** (Bubblewrap downloads the manifest/icon).
+1. Chrome → `http://<lan-ip>:8083/ca.der` (the CA certificate is public; the key never leaves
+   the host).
+2. Settings → Security → Encryption & credentials → **Install a certificate → CA certificate →
+   Install anyway** (needs a screen lock; OEM menus vary).
+3. Force-stop Chrome, then open `https://<lan-ip>:8084/` — padlock, no warning.
+4. Install the APK. On an **IP origin** Digital Asset Links cannot be verified, so Chrome shows
+   it as a **Custom Tab** (URL bar). That is expected and fully functional: service worker,
+   offline shell and login all work over the trusted HTTPS origin. A chrome-less (standalone)
+   app needs a DNS name that resolves to the server plus a served `assetlinks.json`.
+
+Notes:
+
+- `http://` builds are refused by `app-generate.sh`: they cannot log in at all
+  (`crypto.randomUUID` is secure-context only), so they are not a supported test path.
+- `RENEW=1 ./tls-cert-generate.sh` re-issues the leaf against the same CA (no device action);
+  `FORCE=1` regenerates the CA too, so **every** device must re-import `adminng-ca.der`.
+- The certificates live in the shared `ldata/certs` volume; `mail.crt`/`mail.key` are untouched,
+  so SMTP/IMAP TLS is unaffected.
+- Production does not use this listener: the operator's ingress terminates TLS and the stack
+  publishes no 443 (AGENTS.md).
 
 
 ## 3. The network / IPv6 case
@@ -237,7 +260,10 @@ it changes nothing inside the APK.
 | `./gradlew: not found` | Bubblewrap run outside the project dir | use the script (it `cd`s into `android-project/`) |
 | `minSdkVersion … cannot be smaller than 24` | TWA helper floor | the script generates `minSdkVersion: 24` |
 | `keystore '…' not found` | wrong path, not absolute | pass an absolute `KEYSTORE` |
-| APK opens with a URL bar | `APP_URL` is http (Custom Tab by design) | expected for `ALLOW_LOCAL_HTTP=1`; use the TLS ingress URL for a standalone app |
+| APK opens with a URL bar | IP origin: Digital Asset Links cannot be verified | expected on a LAN IP; a DNS name + `assetlinks.json` is needed for standalone |
+| `UNABLE_TO_VERIFY_LEAF_SIGNATURE` during the build | the build does not trust the local CA | pass `APP_CA_CERT=/path/to/adminng-ca.crt` |
+| `ERR_CERT_AUTHORITY_INVALID` on the phone | CA not installed, or SAN does not match the URL | install `ca.der`; check `openssl x509 -ext subjectAltName` lists the exact IP/host |
+| `http://` rejected by `app-generate.sh` | TWA needs a secure origin (by design) | use `https://<lan-ip>:8084` with the local CA (§2.1) |
 | `Permission denied` under `android-project/` | files created by the root container | the script reclaims ownership before/after every run |
 
 ## 6. Verify an APK
