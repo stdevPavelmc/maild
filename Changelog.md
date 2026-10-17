@@ -33,6 +33,19 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Changed: `db/ensure_databases.sh` now also ensures `POSTGRES_DB` unconditionally and skips
   duplicate entries in its list (previously it exited early when `POSTGRES_EXTRA_DB` was
   empty).
+- Added: **AdminNG Phase 1 — catalogue API** (`adminng/api/`): domain/mailbox/alias/admin
+  CRUD with cursor pagination, rapid `GET /search`, quota usage from the Maildir++
+  `.maildirsize` accounting (read-only vmail mount, `du` fallback, cache) and multi-tenant
+  scoping by `domain_admins`. Writes are PostfixAdmin-compatible (md5crypt, `maildir =
+  domain/local/`, quota bytes, explicit cascade deletes, admin password mirroring, domain
+  counters). Auth is plain bearer for now: `POST /auth/login` mints an opaque token whose
+  SHA-256 is the `session.jti` row; suspend/delete revoke the account's sessions.
+  Domain creation returns a `RESTART_REQUIRED` advisory (amavis/mua/mta cache the domain
+  list at boot). New `test.sh` section I covers login, CRUD, IMAPS login of the created
+  mailbox, suspension/reactivation, tenant negatives and the delete cascade; the
+  `adminng/api/tests/test_catalogue.py` self-test (run inside the api container) asserts the
+  write-compatibility rules. The api process now runs as uid/gid 5000 (the vmail owner) with
+  the volume mounted read-only, because maildirs are `0700`.
 
 ## 2026-10-17 1.5.1-rc
 - Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**

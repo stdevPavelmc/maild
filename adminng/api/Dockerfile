@@ -39,14 +39,18 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 COPY migrations/ ./migrations/
+COPY tests/ ./tests/
 COPY adminng.py entrypoint.sh ./
 
+# The API reads the Maildir++ .maildirsize accounting straight from the vmail
+# volume. Maildirs are 0700 owned by vmail (uid/gid 5000, pinned in mda/Dockerfile),
+# so the process runs as that uid; the volume is additionally mounted READ-ONLY in
+# every compose file, so the API can read sizes but never write mail.
 RUN chmod +x /app/entrypoint.sh /app/adminng.py \
-    && ln -s /app/adminng.py /usr/local/bin/adminng.py \
-    && useradd --system --uid 10001 --create-home --home-dir /home/adminng adminng \
-    && chown -R adminng:adminng /app
+    && ln -s /app/adminng.py /usr/local/bin/adminng.py
 
-USER adminng
+ENV HOME=/tmp
+USER 5000:5000
 
 EXPOSE 8080
 
@@ -63,4 +67,4 @@ LABEL org.opencontainers.image.title="MailD AdminNG API" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-16"
+      org.opencontainers.image.created="2026-10-17"

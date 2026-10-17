@@ -107,11 +107,12 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
 ./test.sh --skip-docker    # only wire-level checks (no `docker compose exec` assertions)
 ```
 
-- 48 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
+- 59 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
   aliases and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
-  DKIM, the deployment domain, the cron jobs (the daily database backup, the daily mail traffic
-  resume and the daily Bayes learning) and the SpamAssassin maintenance chain (the imapsieve
-  learning trigger and the `sa-update` loop).
+  DKIM, the deployment domain, the AdminNG catalogue API (login, CRUD, IMAPS login of the
+  API-created mailbox, suspension and tenant isolation), the cron jobs (the daily database
+  backup, the daily mail traffic resume and the daily Bayes learning) and the SpamAssassin
+  maintenance chain (the imapsieve learning trigger and the `sa-update` loop).
 - The two open-relay negatives complement each other: `A8` targets the reserved, **non-resolvable**
   `.example` TLD (stopped by `reject_unknown_recipient_domain`), while `F3a` targets
   `RELAY_PROBE_DOMAIN` (`example.com` by default) — resolvable but not hosted here, so it is what

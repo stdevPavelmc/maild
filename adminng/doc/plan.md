@@ -30,7 +30,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | Phase | Status | Evidence / notes |
 |---|---|---|
 | 0 — Scaffolding & wiring | **validated** (CI pending remote run) | per-task table below |
-| 1 — Core catalogue API | not started | |
+| 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
 | 2 — Security model | not started | |
 | 3 — PWA frontend | not started | |
 | 4 — APK pipeline | not started | |
@@ -62,6 +62,34 @@ running it) · **validated** (verified by running the acceptance checks).
   `bootstrap-dev.sh`'s IMAP verification can report one `temp_fail` for the
   sysadmin mailbox (Dovecot auth process reconnecting); a re-run verifies all
   fixtures cleanly — observed and confirmed on this stack.
+
+### Phase 1 — task status
+
+| # | Task | Status | Evidence |
+|---|---|---|---|
+| 1 | Catalogue layer — md5crypt, maildir layout, quota bytes, cascade deletes, counters, admin password mirroring | **validated** | `adminng/api/tests/test_catalogue.py`: 11/11 tests (hash shape/verification, maildir `domain/probe/`, quota bytes, counters, mirroring, 409 on duplicate, cascade) |
+| 2 | Routes — domains/mailboxes/aliases/admins CRUD, `GET /search`, cursor pagination, uniform errors | **validated** | curl round-trip through the nginx proxy (201/200/204/404/409, `FORBIDDEN_TENANT`), `next_cursor` present, OpenAPI at `/api/v1/docs` |
+| 3 | Quota usage — read-only vmail, `.maildirsize` + `du` fallback + cache | **validated** | quota route reports `source=maildirsize` (831 B after the first IMAPS login); `du` path when no `.maildirsize` yet |
+| 4 | Multi-tenant scoping (domain admins × `domain_admins`) | **validated** | unit test + HTTP: alice lists only `example.net`; foreign domain GET/POST → 403 `FORBIDDEN_TENANT`; `/admins` → 403 |
+| 5 | Restart advisory on domain create | **validated** | create response carries `RESTART_REQUIRED` for amavis/mua/mta |
+| 6 | Integration tests incl. write-compat + IMAP login | **validated** | self-test 11/11; `test.sh` I3 (maildir/bytes) and I4 (the API-created mailbox logs into IMAPS immediately) |
+| + | `test.sh` section I (black box) | **validated** | full suite: **59 passed, 0 failed, 0 skipped** (I1–I10, suspend/reactivate included) |
+
+**Phase 1 deviations / notes**
+
+- **Token model:** Phase 1 issues opaque DB-backed bearer tokens (only the SHA-256 is
+  stored as `session.jti`), not the JWT pair yet — Phase 2 replaces issuance with
+  `login-step1/2` + device binding + jti rotation, keeping the `Principal` dependency.
+- **The api process runs as uid/gid 5000** (the vmail owner) because maildirs are `0700`;
+  the volume is mounted read-only, so it can read `.maildirsize`/sizes but never write mail.
+- **Dovecot's auth cache** can keep a suspended account (or a superseded password) valid for
+  up to a minute; `test.sh` flushes it (`doveadm auth cache flush`) before asserting, and
+  the caveat is documented (it is identical under PostfixAdmin).
+- **Maildirs survive mailbox deletion** (PostfixAdmin's default): the API removes the rows
+  and revokes sessions, but does not `rm -rf` mail. Recreating the address keeps its mail.
+- The self-test is copied into the api image (small) so
+  `docker compose exec api python tests/test_catalogue.py` runs anywhere;
+  `adminng/api/.dockerignore` no longer excludes `tests/`.
 
 ## Phase 0 — Scaffolding & wiring
 
@@ -100,7 +128,7 @@ validate; CI is green.
 
 ## Phase 1 — Core catalogue API
 
-**Status:** not started.
+**Status:** validated (self-test 11/11; full `test.sh` 59 passed / 0 failed).
 
 **Goal:** the full CRUD surface over the legacy catalogue, correctly scoped
 and paginated — but with plain bearer auth (the security model lands in

@@ -133,7 +133,20 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   quota in bytes) and its own `ADMINNG_DB` (devices, sessions, TOTP credentials, audit
   trail), whose schema it migrates at boot from `adminng/api/migrations/`.
 - Mounts the vmail volume **read-only**: quota usage comes from the Maildir++ `.maildirsize`
-  files (never a Dovecot secret, never a write).
+  files (never a Dovecot secret, never a write). Because maildirs are `0700 vmail:vmail`,
+  the process runs as **uid/gid 5000** (the vmail owner): read-only mount + matching uid =
+  sizes readable, mail never writable.
+- Phase 1 serves the catalogue API under `/api/v1/` (domains, mailboxes, aliases, admins,
+  `search`, `mailboxes/{u}/quota`) behind **plain bearer auth**: `POST /auth/login` verifies
+  the catalogue `admin` row (md5crypt) and mints an opaque token whose SHA-256 is the
+  `session.jti` row; the idle purge (`ADMINNG_REFRESH_IDLE_TTL`) and the account's `active`
+  flag are enforced on every request. Phase 2 replaces issuance with device-bound
+  `login-step1/2` + TOTP.
+- Catalogue writes are md5crypt-compatible (admin.password mirrors the mailbox password),
+  delete/suspend revokes the account's sessions, and domain counters stay in step.
+  Dovecot's auth cache can hold a superseded result for up to a minute after a suspend or
+  password change (`doveadm auth cache flush` in the mda clears it) — same caveat as
+  PostfixAdmin.
 - Ships the `adminng.py` CLI (`--list-devices`, `--approve-device`, `--revoke-device`,
   `--totp-reset`) — the server-side device-authorization path (`adminng/README.md`).
 - HEALTHCHECK: `GET /health`, 200 only when the adminng database answers.

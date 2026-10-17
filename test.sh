@@ -321,6 +321,10 @@ cleanup() {
             expunge_mailbox "$QUOTA_USER" Junk
             quota_set "$QUOTA_USER" 0
         fi
+        # Phase I (AdminNG catalogue API) leftovers, if a run aborted mid-section.
+        dcx db psql -U maild -d mailddb -q -c \
+            "DELETE FROM alias WHERE domain='adminng-e2e.test'; DELETE FROM domain_admins WHERE domain='adminng-e2e.test'; DELETE FROM mailbox WHERE domain='adminng-e2e.test'; DELETE FROM domain WHERE domain='adminng-e2e.test';" \
+            > /dev/null 2>&1 || true
     fi
     rm -rf "$TMPRUN"
 }
@@ -1215,7 +1219,168 @@ else
     fi
 fi
 
-# ================================================================= summary ====
+# =============================================== I. AdminNG catalogue API ====
+# Phase 1 black box: login, CRUD over HTTP, PostfixAdmin write compatibility
+# (the mailbox it creates must log into IMAPS), quota from .maildirsize, tenant
+# isolation for a custom admin, and the delete cascade. The DB-level assertions
+# live in adminng/api/tests/test_catalogue.py (run inside the api container).
+section "I. AdminNG catalogue API (Phase 1)"
+
+API_BASE="http://$SERVER:8083/api/v1"
+ADMINNG_DOMAIN="adminng-e2e.test"
+ADMINNG_USER="probe@$ADMINNG_DOMAIN"
+ADMINNG_PW="$(chrono)"
+ADMIN_PW="${CRED[${DEPLOY_ADMIN,,}]:-}"
+ADMINNG_TOKEN=""
+
+adminng_call() { # <method> <path> <token> [json-body] → ADMINNG_CODE / ADMINNG_BODY
+    local method="$1" path="$2" token="$3" data="${4:-}" out="$TMPRUN/adminng.json"
+    if [ -n "$data" ]; then
+        ADMINNG_CODE="$(curl -s -o "$out" -w '%{http_code}' -X "$method" \
+            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
+            --data "$data" "$API_BASE$path")"
+    else
+        ADMINNG_CODE="$(curl -s -o "$out" -w '%{http_code}' -X "$method" \
+            -H "Authorization: Bearer $token" "$API_BASE$path")"
+    fi
+    ADMINNG_BODY="$(cat "$out" 2>/dev/null)"
+}
+adminng_imap() { # <user> <pass> → 0 when IMAP login + SEARCH succeeds
+    timeout -k5 20 curl -s --insecure --user "$1:$2" \
+        --url "imaps://$SERVER:993/INBOX" -X 'SEARCH ALL' 2>&1 | grep -q '\* SEARCH'
+}
+adminng_flush_auth() { dcx mda doveadm auth cache flush > /dev/null 2>&1 || true; }
+
+if [ "$HAVE_DC" = 0 ] || [ -z "$ADMIN_PW" ] ; then
+    t_skip "AdminNG catalogue API (needs docker and $DEPLOY_ADMIN in test.creds)"
+else
+    # Start clean: an aborted previous run must not turn the create into a 409.
+    dcx db psql -U maild -d mailddb -q -c \
+        "DELETE FROM alias WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM domain_admins WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM mailbox WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM domain WHERE domain='$ADMINNG_DOMAIN';" \
+        > /dev/null 2>&1 || true
+
+    ADMINNG_TOKEN="$(curl -s -X POST "$API_BASE/auth/login" \
+        -H 'Content-Type: application/json' \
+        --data "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}" |
+        sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+    adminng_call GET /auth/me "$ADMINNG_TOKEN"
+    if [ -n "$ADMINNG_TOKEN" ] && [ "$ADMINNG_CODE" = 200 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q '"superadmin":true' ; then
+        t_ok "I1 AdminNG login as $DEPLOY_ADMIN (superadmin) and /auth/me"
+    else
+        t_fail "I1 AdminNG login as $DEPLOY_ADMIN (status=$ADMINNG_CODE token=${#ADMINNG_TOKEN} chars)"
+    fi
+
+    adminng_call POST /domains "$ADMINNG_TOKEN" \
+        "{\"domain\":\"$ADMINNG_DOMAIN\",\"description\":\"AdminNG e2e probe\"}"
+    if [ "$ADMINNG_CODE" = 201 ] && printf '%s' "$ADMINNG_BODY" | grep -q RESTART_REQUIRED ; then
+        t_ok "I2 domain created through the API with the restart advisory (amavis/mua/mta)"
+    else
+        t_fail "I2 domain create (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+    fi
+
+    adminng_call POST /mailboxes "$ADMINNG_TOKEN" \
+        "{\"username\":\"$ADMINNG_USER\",\"password\":\"$ADMINNG_PW\",\"name\":\"AdminNG Probe\",\"quota_bytes\":10485760}"
+    if [ "$ADMINNG_CODE" = 201 ] && printf '%s' "$ADMINNG_BODY" | grep -q "\"maildir\":\"$ADMINNG_DOMAIN/probe/\"" ; then
+        t_ok "I3 mailbox created with the PostfixAdmin layout (maildir '$ADMINNG_DOMAIN/probe/', quota in bytes)"
+    else
+        t_fail "I3 mailbox create (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+    fi
+
+    if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
+        t_ok "I4 the API-created mailbox logs into IMAPS immediately (md5crypt accepted by Dovecot)"
+    else
+        t_fail "I4 IMAPS login for the API-created mailbox"
+    fi
+
+    adminng_call GET "/mailboxes/$ADMINNG_USER/quota" "$ADMINNG_TOKEN"
+    if [ "$ADMINNG_CODE" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q '"quota_bytes":10485760' &&
+       ! printf '%s' "$ADMINNG_BODY" | grep -q '"source":"unavailable"' ; then
+        t_ok "I5 quota usage from the Maildir++ accounting ($(printf '%s' "$ADMINNG_BODY" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p'))"
+    else
+        t_fail "I5 quota route (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+    fi
+
+    adminng_call POST /aliases "$ADMINNG_TOKEN" \
+        "{\"address\":\"sales@$ADMINNG_DOMAIN\",\"goto\":\"$ADMINNG_USER\"}"
+    adminng_call GET "/aliases?goto=$ADMINNG_USER" "$ADMINNG_TOKEN"
+    if [ "$ADMINNG_CODE" = 200 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q "\"address\":\"sales@$ADMINNG_DOMAIN\"" ; then
+        t_ok "I6 alias created and listed by the user-editor tag filter (?goto=)"
+    else
+        t_fail "I6 alias create/tag filter (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+    fi
+
+    adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_TOKEN" '{"active":false}'
+    adminng_flush_auth
+    if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
+        t_fail "I7 suspension is enforced for IMAPS (Dovecot still accepted the password)"
+    else
+        t_ok "I7 suspension blocks IMAPS (active=false + flushed auth cache)"
+    fi
+    adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_TOKEN" '{"active":true}'
+    adminng_flush_auth
+    if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
+        t_ok "I7 reactivation restores IMAPS access"
+    else
+        t_fail "I7 reactivation did not restore IMAPS access"
+    fi
+
+    adminng_call GET "/search?q=probe" "$ADMINNG_TOKEN"
+    if [ "$ADMINNG_CODE" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q "$ADMINNG_USER" ; then
+        t_ok "I8 rapid search finds the new mailbox"
+    else
+        t_fail "I8 rapid search (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+    fi
+
+    # Tenant isolation: ADMINMAIL is a custom admin of $DOMAIN unless bootstrap ran
+    # with --superadmin (then the negative cannot be asserted — skip honestly).
+    if [ "$(sql "SELECT superadmin FROM admin WHERE username='$ADMINMAIL'")" = "t" ] ; then
+        t_skip "I9 tenant isolation (the fixture admin $ADMINMAIL is a superadmin)"
+    else
+        ADMINNG_ATOKEN="$(curl -s -X POST "$API_BASE/auth/login" \
+            -H 'Content-Type: application/json' \
+            --data "{\"username\":\"$ADMINMAIL\",\"password\":\"$PASS\"}" |
+            sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+        adminng_call GET "/domains/$DEFAULT_DOMAIN" "$ADMINNG_ATOKEN"
+        I9_A="$ADMINNG_CODE"
+        adminng_call POST /mailboxes "$ADMINNG_ATOKEN" \
+            "{\"username\":\"intruder@$DEFAULT_DOMAIN\",\"password\":\"x\"}"
+        if [ "$I9_A" = 403 ] && [ "$ADMINNG_CODE" = 403 ] &&
+           printf '%s' "$ADMINNG_BODY" | grep -q FORBIDDEN_TENANT ; then
+            t_ok "I9 a custom admin cannot read or write a foreign domain (403 FORBIDDEN_TENANT)"
+        else
+            t_fail "I9 tenant isolation (GET $DEFAULT_DOMAIN -> $I9_A, POST mailbox -> $ADMINNG_CODE)"
+        fi
+    fi
+
+    adminng_call DELETE "/aliases/sales@$ADMINNG_DOMAIN" "$ADMINNG_TOKEN"
+    I10_A="$ADMINNG_CODE"
+    adminng_call DELETE "/mailboxes/$ADMINNG_USER" "$ADMINNG_TOKEN"
+    I10_B="$ADMINNG_CODE"
+    adminng_call DELETE "/domains/$ADMINNG_DOMAIN" "$ADMINNG_TOKEN"
+    I10_C="$ADMINNG_CODE"
+    adminng_call GET "/domains/$ADMINNG_DOMAIN" "$ADMINNG_TOKEN"
+    if [ "$I10_A" = 204 ] && [ "$I10_B" = 204 ] && [ "$I10_C" = 204 ] &&
+       [ "$ADMINNG_CODE" = 404 ] &&
+       [ "$(sql "SELECT count(*) FROM mailbox WHERE domain='$ADMINNG_DOMAIN'")" = "0" ] &&
+       [ "$(sql "SELECT count(*) FROM alias WHERE domain='$ADMINNG_DOMAIN'")" = "0" ] ; then
+        t_ok "I10 delete cascade: alias/mailbox/domain removed (204s, then 404, no rows left)"
+    else
+        t_fail "I10 delete cascade (alias=$I10_A mailbox=$I10_B domain=$I10_C get=$ADMINNG_CODE)"
+    fi
+
+    # Leave no live sessions behind (Phase 1 tokens are opaque rows).
+    curl -s -o /dev/null -X POST -H "Authorization: Bearer $ADMINNG_TOKEN" "$API_BASE/auth/logout"
+    if [ -n "${ADMINNG_ATOKEN:-}" ] ; then
+        curl -s -o /dev/null -X POST -H "Authorization: Bearer $ADMINNG_ATOKEN" "$API_BASE/auth/logout"
+    fi
+
+
+
+fi
+
+
 section "summary"
 printf '  passed : %d\n' "$T_PASS"
 printf '  failed : %d\n' "$T_FAIL"

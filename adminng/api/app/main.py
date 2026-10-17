@@ -1,9 +1,9 @@
-"""AdminNG API application (Phase 0: health only).
+"""AdminNG API application.
 
-The full catalogue/device API lands in Phases 1-2 (see adminng/doc/plan.md).
-Everything is served under /api/v1/ through the adminng-nginx frontend, which
-also owns the exterior access log; the bare /health path exists for the
-container healthcheck.
+Phase 1 serves the catalogue CRUD + search + quota usage behind plain bearer
+auth (device trust/TOTP land in Phase 2). Everything is mounted under /api/v1/
+through the `adminng` nginx frontend, which also owns the exterior access log;
+the bare /health path exists for the container healthcheck.
 """
 
 import psycopg
@@ -11,17 +11,27 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from . import settings
+from .errors import install_error_handlers
+from .routers import admins, aliases, auth, domains, mailboxes, search
 
 app = FastAPI(
     title="MailD AdminNG API",
     version=settings.APP_VERSION,
     description=(
-        "PWA-first administration API for the MailD PostfixAdmin catalogue. "
-        "Every route except /health requires an approved device (X-Device-ID)."
+        "PWA-first administration API for the MailD PostfixAdmin catalogue: "
+        "domains, mailboxes, aliases, administrators, rapid search and quota "
+        "usage. Catalogue writes follow PostfixAdmin exactly (md5crypt, "
+        "maildir layout, quota in bytes); AdminNG's own state lives in its own "
+        "database."
     ),
     docs_url="/api/v1/docs",
     openapi_url="/api/v1/openapi.json",
 )
+
+install_error_handlers(app)
+
+for _router in (auth.router, domains.router, mailboxes.router, aliases.router, admins.router, search.router):
+    app.include_router(_router, prefix="/api/v1")
 
 
 def _database_ok() -> bool:
@@ -56,3 +66,4 @@ def health() -> JSONResponse:
         },
         status_code=200 if ok else 503,
     )
+

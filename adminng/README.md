@@ -51,6 +51,33 @@ docker compose --env-file env.dev -f docker-compose-dev.yml up -d db api adminng
 `db` container from `ADMINNG_DB`, default `adminng`). `adminng` has no environment
 of its own: it is a static bundle plus the `/api/v1/` proxy.
 
+## API (Phase 1: catalogue CRUD)
+
+Everything is served under `/api/v1/` (same-origin through `adminng`). Phase 1
+uses plain bearer auth — the device gate + TOTP arrive in Phase 2:
+
+```bash
+TOKEN=$(curl -s -X POST localhost:8083/api/v1/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"sysadmin@maild.cu","password":"<password>"}' |
+  sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+curl -s -H "Authorization: Bearer $TOKEN" localhost:8083/api/v1/domains
+```
+
+Routes: `/auth/login|logout|me`, `/domains`, `/mailboxes` (plus `/{u}/quota`),
+`/aliases` (with `?goto=<mailbox>` for the user editor's tags), `/admins`
+(superadmin only) and `/search`. Interactive docs: `/api/v1/docs`. Catalogue
+writes are PostfixAdmin-compatible (md5crypt, maildir layout, quota bytes) and
+suspending/deleting an account revokes its sessions.
+
+The catalogue self-test runs inside the container:
+
+```bash
+docker compose --env-file env.dev -f docker-compose-dev.yml \
+  exec -T api python tests/test_catalogue.py
+```
+
+
 
 
 ## Authorizing the first device (server side) — READ THIS FIRST
