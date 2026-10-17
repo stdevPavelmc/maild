@@ -132,7 +132,7 @@ neither the host nor CI needs Node, a browser or `npx playwright install`:
 ```bash
 ./adminng/pwa-test/run.sh verify        # flows + installability + Lighthouse budget (the gate)
 ./adminng/pwa-test/run.sh flows         # one spec (flows | installable | superadmin)
-./adminng/pwa-test/run.sh superadmin    # TOTP enrollment + devices panel (approve/revoke via UI)
+./adminng/pwa-test/run.sh superadmin    # TOTP login (enrolls only on first run) + devices panel
 ./adminng/pwa-test/run.sh a11y          # axe-core WCAG 2.1 A/AA audit, JSON per screen
 ./adminng/pwa-test/run.sh visual        # PNG screenshots: desktop/mobile, EN/ES
 ./adminng/pwa-test/run.sh lighthouse
@@ -149,6 +149,10 @@ cd adminng/pwa && npm run i18n:check    # en/es parity; also inside `npm run bui
 - Device approval stays out of band: the suite drives `adminng.py --approve-device` in the
   api container (`docker exec`, socket mounted by the dev compose file). The other specs
   cover the UI path (devices panel, re-auth + armed authorize).
+- The superadmin helpers **never reset the TOTP credential**: they read the enrolled seed with
+  `tests/totp_code.py` (the same helper `test.sh` uses) and only enroll when the API asks for it,
+  so an authenticator enrolled on a phone survives `verify`/`superadmin`/`a11y`/`visual`. A
+  consumed 30 s step is retried once with the next one.
 - `tests/flows.spec.ts` (one context, stepped): pending device → CLI approval → login as
   `alice@example.net` → create an account → delete it with the re-auth + 5 s armed button →
   domain scope → ES/EN switch → offline banner with the FAB disabled.

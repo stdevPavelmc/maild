@@ -76,7 +76,7 @@ Chromium and Lighthouse, no host install needed):
 ```bash
 cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also runs in `npm run build`)
 ./adminng/pwa-test/run.sh verify         # Playwright flows + installability + Lighthouse budget
-./adminng/pwa-test/run.sh superadmin     # TOTP enrollment + devices panel (UI approval)
+./adminng/pwa-test/run.sh superadmin     # TOTP login + devices panel (never resets the enrollment)
 ./adminng/pwa-test/run.sh visual         # PNG screenshots (desktop/mobile, EN/ES) in ldata/e2e/screens
 ./adminng/pwa-test/run.sh a11y           # axe-core WCAG 2.1 A/AA reports in ldata/e2e/a11y
 ```

@@ -1,11 +1,12 @@
 /**
  * Superadmin path: TOTP enrollment and the devices panel (plan.md Phase 3 §6.3).
  *
- * This covers what the alice-based flow cannot: a superadmin must enroll an
- * authenticator on first login, and the pending-device queue is only reachable
- * with that role. The approval goes through the **UI** here (re-auth + the armed
- * confirm), while flows.spec.ts covers the CLI path — both are documented ways
- * to authorize a device.
+ * This covers what the alice-based flow cannot: a superadmin must present an
+ * authenticator (the helper enrolls one only when the API asks for it and
+ * otherwise reuses the enrolled seed), and the pending-device queue is only
+ * reachable with that role. The approval goes through the **UI** here (re-auth +
+ * the armed confirm), while flows.spec.ts covers the CLI path — both are
+ * documented ways to authorize a device.
  */
 
 import { expect, test } from '@playwright/test'
@@ -13,7 +14,7 @@ import { expect, test } from '@playwright/test'
 import { approveThisDevice, loginSuperadmin, pendingDeviceId, SYSADMIN } from '../lib/login'
 import { password } from '../lib/env'
 
-test('the superadmin enrolls TOTP and authorizes a device from the panel', async ({
+test('the superadmin signs in with TOTP (enrolling on first run) and authorizes a device from the panel', async ({
   page,
   browser,
 }) => {
@@ -26,7 +27,7 @@ test('the superadmin enrolls TOTP and authorizes a device from the panel', async
     expect(id).toBeTruthy()
   })
 
-  await test.step('the superadmin enrolls TOTP and opens the devices panel', async () => {
+  await test.step('the superadmin signs in with TOTP and opens the devices panel', async () => {
     await approveThisDevice(page)
     await loginSuperadmin(page)
     await page.getByRole('link', { name: /Devices/ }).first().click()

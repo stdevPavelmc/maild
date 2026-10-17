@@ -136,6 +136,12 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `adminng.py --approve-device` in the `api` container. New specs: `superadmin` (TOTP enrollment
   + devices panel authorize/revoke through the UI), `visual` (21 PNGs, desktop/mobile, EN/ES)
   and `a11y` (axe WCAG 2.1 A/AA). `flows` now also asserts the real Ctrl/⌘K search palette.
+- Fixed: the **`superadmin` harness spec no longer resets** `sysadmin@<domain>`'s TOTP
+  credential on every run (the `adminng.py --totp-reset` call is gone). It reads the enrolled
+  seed through `tests/totp_code.py` — the same helper `test.sh` uses — and only enrolls when the
+  API asks for it, so an authenticator enrolled on a phone survives
+  `run.sh verify|superadmin|a11y|visual`; a consumed step is retried once with the next one.
+  `adminng.py --totp-reset` remains the explicit recovery path.
 - Fixed: the **devices panel and the admins table never paginated** — both consumed `usePaged`
   without passing the cursor or rendering "Load more", so only the first page was reachable.
   They now paginate like the other catalogue screens.

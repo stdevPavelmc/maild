@@ -3,13 +3,14 @@
  *
  * The device approval is out of band on purpose (a pending device cannot
  * authorize itself), so the helpers drive the documented CLI in the api
- * container. The superadmin helper also enrolls a fresh TOTP credential, which
- * is what a real superadmin does on first login.
+ * container. The superadmin helper reuses the enrolled authenticator (reading
+ * its seed through the api container) and only enrolls when the API asks for
+ * it, so a phone enrolled by a human is never invalidated by a test run.
  */
 
 import { expect, type Page } from '@playwright/test'
 
-import { adminngCli, password } from './env'
+import { adminngCli, password, totpCode } from './env'
 import { totp } from './totp'
 
 export const ALICE = 'alice@example.net'
@@ -53,27 +54,49 @@ export async function login(page: Page, user: string, secret?: string): Promise<
 }
 
 /**
- * Superadmin login: reset any previous credential (deterministic runs), enroll
- * the authenticator shown by the UI and complete the 2FA step. The same code is
- * reused for the immediate login — the API deliberately leaves the enrollment
- * step usable once so the follow-up login inside the same 30 s window works.
+ * Superadmin login. Nothing is reset: an enrolled authenticator (a phone, the
+ * previous run) is reused by reading its seed through the api container, the
+ * same helper test.sh uses. Only when the API asks for enrollment (a fresh
+ * database, or after a deliberate `adminng.py --totp-reset`) does the helper
+ * enroll the secret shown on screen and reuse that code for the login.
  */
 export async function loginSuperadmin(page: Page): Promise<void> {
-  adminngCli('--totp-reset', SYSADMIN)
   await submitCredentials(page, SYSADMIN)
 
-  const body = page.getByText(/Superadmins must enroll an authenticator/)
-  await expect(body).toBeVisible()
-  const secret = (await page.locator('p.font-mono').first().innerText()).trim()
-  const code = totp(secret)
-
-  await page.locator('input[inputmode="numeric"]').fill(code)
-  await page.getByRole('button', { name: 'Confirm' }).click()
-
+  const enrollHint = page.getByText(/Superadmins must enroll an authenticator/)
+  const codeInput = page.locator('input[inputmode="numeric"]')
   const verify = page.getByRole('button', { name: 'Verify' })
-  await expect(verify).toBeVisible()
-  await page.locator('input[inputmode="numeric"]').fill(code)
-  await verify.click()
+  const domains = page.getByRole('link', { name: /Domains/ }).first()
 
-  await expect(page.getByRole('link', { name: /Domains/ }).first()).toBeVisible()
+  // Wait for whichever screen the API chose (enrollment or 2FA) instead of
+  // assuming one: isVisible() alone would race the render.
+  await Promise.race([
+    enrollHint.waitFor({ state: 'visible', timeout: 10_000 }),
+    verify.waitFor({ state: 'visible', timeout: 10_000 }),
+  ]).catch(() => {})
+
+  if (await enrollHint.isVisible().catch(() => false)) {
+    const secret = (await page.locator('p.font-mono').first().innerText()).trim()
+    const code = totp(secret)
+    await codeInput.fill(code)
+    await page.getByRole('button', { name: 'Confirm' }).click()
+    await expect(verify).toBeVisible()
+    await codeInput.fill(code)
+    await verify.click()
+  } else {
+    await expect(verify).toBeVisible()
+    await codeInput.fill(totpCode(SYSADMIN))
+    await verify.click()
+
+    // The current step may already be consumed (a human on the phone, test.sh).
+    // One retry with the next step stays inside the API's ±1 window; the
+    // 5-attempt lockout is not at risk.
+    await domains.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
+    if (!(await domains.isVisible().catch(() => false))) {
+      await codeInput.fill(totpCode(SYSADMIN, true))
+      await verify.click()
+    }
+  }
+
+  await expect(domains).toBeVisible()
 }

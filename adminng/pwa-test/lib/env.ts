@@ -42,17 +42,17 @@ export function password(user: string): string {
 }
 
 /**
- * Run `adminng.py …` inside the api container (device approval, TOTP reset).
+ * Run a command inside the api container.
  *
  * In the harness container the Compose CLI is unavailable, so the call goes
  * straight to `docker exec` against the named container; `run.sh` mounts the
  * socket for exactly this purpose. On the host the documented compose command
  * is used instead.
  */
-export function adminngCli(...args: string[]): string {
+function apiExec(binary: string, args: string[]): string {
   const container = process.env.ADMINNG_API_CONTAINER
   const argv = container
-    ? ['exec', container, 'adminng.py', ...args]
+    ? ['exec', container, binary, ...args]
     : [
         'compose',
         '--env-file',
@@ -62,7 +62,7 @@ export function adminngCli(...args: string[]): string {
         'exec',
         '-T',
         'api',
-        'adminng.py',
+        binary,
         ...args,
       ]
 
@@ -72,7 +72,24 @@ export function adminngCli(...args: string[]): string {
     const hint = container
       ? `is the docker socket mounted and the '${container}' container running?`
       : 'is the dev stack up (./bootstrap-dev.sh)?'
-    throw new Error(`adminng.py ${args.join(' ')} failed — ${hint}\n${String(error)}`)
+    throw new Error(`${binary} ${args.join(' ')} failed — ${hint}\n${String(error)}`)
   }
+}
+
+/** Run `adminng.py …` inside the api container (device approval). */
+export function adminngCli(...args: string[]): string {
+  return apiExec('adminng.py', args)
+}
+
+/**
+ * The current TOTP code for an enrolled admin, read from the stored (encrypted)
+ * seed by `tests/totp_code.py` — the same helper test.sh uses. Nothing is
+ * reset, so an authenticator enrolled by a human keeps working. `next` asks for
+ * the following 30-second step (the API accepts ±1), which covers a step already
+ * consumed by another login.
+ */
+export function totpCode(user: string, next = false): string {
+  const args = ['tests/totp_code.py', user, ...(next ? ['--next'] : [])]
+  return apiExec('python', args).trim()
 }
 
