@@ -95,7 +95,10 @@ def cmd_add_device(device_id: str) -> int:
         cur.execute("SELECT device_id, state FROM device WHERE device_id = %s", (device_id,))
         row = cur.fetchone()
         conn.commit()
-    print(f"{row['device_id']} -> {row['state']} (registered)")
+    print(
+        f"{row['device_id']} -> {row['state']} (registered; "
+        f"run --approve-device {row['device_id']} to authorize)"
+    )
     return 0
 
 

@@ -59,6 +59,7 @@ const resources = {
         id: 'Device identifier',
         copy: 'Copy ID',
         check: 'Check approval',
+        cliHint: 'Server-side command: docker compose exec api adminng.py --approve-device {{id}}',
         revoked: 'This device was revoked. Ask a superadmin to approve it again.',
       },
       enroll: {
@@ -204,6 +205,7 @@ const resources = {
         id: 'Identificador del dispositivo',
         copy: 'Copiar ID',
         check: 'Verificar aprobación',
+        cliHint: 'Comando en el servidor: docker compose exec api adminng.py --approve-device {{id}}',
         revoked:
           'Este dispositivo fue revocado. Pide a un superadministrador que lo apruebe de nuevo.',
       },

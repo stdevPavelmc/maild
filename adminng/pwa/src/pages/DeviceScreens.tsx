@@ -40,6 +40,9 @@ export function PendingScreen() {
             {t('login.logout')}
           </Button>
         </div>
+        <p className="break-all rounded bg-slate-800/60 px-2 py-1 font-mono text-[11px] text-slate-400">
+          {t('device.cliHint', { id: device })}
+        </p>
       </div>
     </div>
   )

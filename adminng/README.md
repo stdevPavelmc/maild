@@ -113,6 +113,12 @@ docker compose exec api adminng.py --revoke-device 'DE793C1A-4F82-411B-9A74-5F11
 docker compose exec api adminng.py --totp-reset 'admin@example.com'
 ```
 
+> **`--add-device` does not authorize anything:** it only *registers* a row in the
+> `PENDING` state (used by `bootstrap-dev.sh` for its well-known dev device). The
+> browser/phone generates **its own UUID** and shows it on the lock screen — copy
+> that ID and run `--approve-device <id>` (or use the devices panel once another
+> superadmin device is approved).
+
 The device ID is shown on the client's lock screen (with a copy button) while
 it waits for authorization, so the admin can read it to you over a trusted
 channel — always verify the identity of the requester before approving.
