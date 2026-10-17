@@ -3,7 +3,18 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Admin, type Domain } from '../lib/api'
 import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
-import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
+import { Empty, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
+import {
+  ActionButton,
+  ActionRow,
+  Address,
+  CardGrid,
+  CardHead,
+  EntityCard,
+  MetaChip,
+  MetaRow,
+  StatusMark,
+} from '../components/cards'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
@@ -49,65 +60,61 @@ export function AdminsPage({ password }: { password: string }) {
         }
       />
       <ErrorBanner message={list.error} />
-      <div className="overflow-x-auto rounded-lg border border-slate-800">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
-            <tr>
-              <th className="px-3 py-2">{t('login.username')}</th>
-              <th className="px-3 py-2">{t('admins.superadmin')}</th>
-              <th className="px-3 py-2">{t('admins.domains')}</th>
-              <th className="px-3 py-2">{t('common.active')}</th>
-              <th className="px-3 py-2">{t('common.actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.items.map((admin) => (
-              <tr key={admin.username} className="border-t border-slate-800">
-                <td className="px-3 py-2 font-mono text-xs">{admin.username}</td>
-                <td className="px-3 py-2">
-                  {admin.superadmin ? (
-                    <Badge tone="blue">{t('common.yes')}</Badge>
-                  ) : (
-                    <Badge>{t('common.no')}</Badge>
+      <CardGrid>
+        {list.items.map((admin) => (
+          <EntityCard key={admin.username} status={admin.active ? 'active' : 'inactive'}>
+            <CardHead>
+              <div className="flex min-w-0 items-start gap-2">
+                <StatusMark active={admin.active} />
+                <Address address={admin.username} />
+              </div>
+              <ActionRow label={t('common.actions')}>
+                <ActionButton
+                  glyph={admin.active ? '⏸' : '▶'}
+                  label={admin.active ? t('mailboxes.suspend') : t('mailboxes.activate')}
+                  disabled={!online}
+                  onClick={() => {
+                    void api
+                      .updateAdmin(admin.username, { active: !admin.active })
+                      .then(() => list.reload())
+                  }}
+                />
+                <ActionButton
+                  glyph="❌"
+                  label={t('common.delete')}
+                  tone="danger"
+                  disabled={!online}
+                  onClick={() => setDeleting(admin)}
+                />
+              </ActionRow>
+            </CardHead>
+            <MetaRow>
+              {admin.superadmin ? (
+                <MetaChip icon="👑" title={t('admins.superadmin')}>
+                  {t('admins.superadminShort')}
+                </MetaChip>
+              ) : (
+                <>
+                  {admin.domains.slice(0, 3).map((domain) => (
+                    <MetaChip key={domain} icon="🌐" title={t('admins.domains')}>
+                      {domain}
+                    </MetaChip>
+                  ))}
+                  {admin.domains.length > 3 && (
+                    <MetaChip icon="🌐" title={admin.domains.join(', ')}>
+                      {t('common.more', { count: admin.domains.length - 3 })}
+                    </MetaChip>
                   )}
-                </td>
-                <td className="px-3 py-2 text-xs text-slate-400">
-                  {admin.domains.join(', ') || '—'}
-                </td>
-                <td className="px-3 py-2">
-                  {admin.active ? (
-                    <Badge tone="green">{t('common.yes')}</Badge>
-                  ) : (
-                    <Badge tone="red">{t('common.no')}</Badge>
+                  {admin.domains.length === 0 && (
+                    <MetaChip icon="🌐" title={t('admins.domains')}>—</MetaChip>
                   )}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!online}
-                      onClick={() => {
-                        void api
-                          .updateAdmin(admin.username, { active: !admin.active })
-                          .then(() => list.reload())
-                      }}
-                    >
-                      {admin.active ? t('mailboxes.suspend') : t('mailboxes.activate')}
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(admin)}>
-                      {t('common.delete')}
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
-        )}
-      </div>
+                </>
+              )}
+            </MetaRow>
+          </EntityCard>
+        ))}
+      </CardGrid>
+      {!list.loading && list.items.length === 0 && <Empty text={t('common.empty')} />}
       {list.cursor && (
         <Button variant="outline" onClick={() => void list.more()}>{t('common.page')}</Button>
       )}
