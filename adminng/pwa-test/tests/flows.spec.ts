@@ -36,7 +36,7 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     await page.getByRole('button', { name: 'Continue' }).click()
 
     await expect(page.getByRole('link', { name: /Domains/ }).first()).toBeVisible()
-    await expect(page.getByRole('cell', { name: 'example.net' })).toBeVisible()
+    await expect(page.getByRole('listitem').filter({ hasText: 'example.net' })).toBeVisible()
   })
 
   await test.step('the keyboard shortcut opens the search palette', async () => {
@@ -58,15 +58,19 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Address').fill(account)
     await dialog.getByLabel('Password').fill('E2e-password-123')
-    await dialog.getByLabel('Quota (MB)').fill('5')
+    // 5 with the GB multiplier: the card must show the converted quota.
+    await dialog.getByLabel('Quota', { exact: true }).fill('5')
+    await dialog.getByLabel('Quota unit').selectOption('GB')
     await dialog.getByRole('button', { name: 'Create account' }).click()
 
-    await expect(page.getByRole('row', { name: new RegExp(account) })).toBeVisible()
+    const card = page.getByRole('listitem').filter({ hasText: new RegExp(account) })
+    await expect(card).toBeVisible()
+    await expect(card.getByText('5 GB')).toBeVisible()
   })
 
   await test.step('the account is deleted with the 5-second armed confirm', async () => {
-    const row = page.getByRole('row', { name: new RegExp(account) })
-    await row.getByRole('button', { name: 'Delete' }).click()
+    const card = page.getByRole('listitem').filter({ hasText: new RegExp(account) })
+    await card.getByRole('button', { name: 'Delete' }).click()
 
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Administrator password').fill(ALICE_PASSWORD)
@@ -76,7 +80,7 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     await expect(armed).toBeEnabled({ timeout: 10_000 })
     await armed.click() // performs the deletion
 
-    await expect(page.getByRole('row', { name: new RegExp(account) })).toHaveCount(0)
+    await expect(page.getByRole('listitem').filter({ hasText: new RegExp(account) })).toHaveCount(0)
   })
 
   await test.step('the sidebar domain selector scopes the accounts request', async () => {

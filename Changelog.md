@@ -162,6 +162,18 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `APP_CA_CERT` to trust the local CA (manifest preflight + `NODE_EXTRA_CA_CERTS` in Bubblewrap)
   and drops the short-lived `ALLOW_LOCAL_HTTP` escape hatch, its private-host validation and the
   `https`→`http` sed rewrite. **Removed:** `ALLOW_LOCAL_HTTP` — an http origin cannot log in.
+- Changed: **the AdminNG catalogue screens are card-based** (domains, accounts, aliases,
+  administrators, devices): a responsive card grid (1/2/3/4 columns by width), a 3px status
+  accent + ✅/🚫 mark per card, two-tone addresses (local part bold, domain muted), long names
+  that keep the first label and the last two with the full name in the tooltip, stat chips
+  (📬 mailboxes, 🎭 aliases, 💾 quota, 👑 superadmin, 🌐 domains with a +N overflow) and
+  🛠/❌/🎭/⏸ emoji action buttons that are **44×44px below `lg:`** (touch ergonomics,
+  technical-draft §6.1 / WCAG 2.5.5) and compact from `lg:` up; the default Button grows to
+  44px on touch too. Suspended accounts stay in place, red-accented and muted. The quota editor
+  becomes a number + **MB/GB/TB multiplier** (bytes end to end, prefilled in the largest unit
+  that divides evenly) with a "0 = unlimited" hint. The flows/visual specs follow the cards
+  (listitem selectors, the GB-multiplier creation asserts "5 GB" on the card) and visual.spec
+  gains a 44px touch-target gate on the mobile viewport.
 - Added: **AdminNG HTTPS on the LAN (dev port 8084) with a local CA.**
   `adminng/pwa/tls-cert-generate.sh` creates `adminng-ca.crt/.der/.key` and `adminng.crt/.key`
   in the shared `ldata/certs` volume (SAN = LAN IP + hostname + localhost; `mail.crt` untouched).

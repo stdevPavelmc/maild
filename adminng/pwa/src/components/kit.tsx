@@ -257,6 +257,7 @@ export function QuotaInput({
       <div className="flex gap-2">
         <Input
           inputMode="numeric"
+          aria-label={t('mailboxes.quota')}
           aria-describedby={hintId}
           disabled={disabled}
           value={number}

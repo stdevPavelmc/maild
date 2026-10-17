@@ -3,8 +3,9 @@
  *
  * Writes PNGs under `<artifacts>/screens` for every screen, at the desktop
  * (1440x900) and mobile (390x844) breakpoints, in English and Spanish, plus the
- * login/pending screens, the search modal and an editor. It asserts nothing about
- * looks: it produces the material a human or an agent reviews after a change.
+ * login/pending screens, the search modal and an editor. Beyond the PNGs it
+ * asserts exactly one rule — the 44px touch targets on the mobile viewport
+ * (technical-draft §6.1) — everything else is for human/agent review.
  *
  * Run with `./adminng/pwa-test/run.sh visual`.
  */
@@ -77,8 +78,8 @@ test('capture every screen for review', async ({ page, browser }) => {
     await shot(page, 'desktop-mailbox-editor')
     await page.getByRole('dialog').getByRole('button', { name: 'close' }).click()
 
-    const row = page.getByRole('row', { name: /bob@example\.net/ })
-    await row.getByRole('button', { name: 'Delete' }).click()
+    const card = page.getByRole('listitem').filter({ hasText: /bob@example\.net/ })
+    await card.getByRole('button', { name: 'Delete' }).click()
     await expect(page.getByRole('dialog')).toBeVisible()
     await shot(page, 'desktop-confirm-delete')
     await page.getByRole('button', { name: 'Cancel' }).click()
@@ -91,6 +92,32 @@ test('capture every screen for review', async ({ page, browser }) => {
       await page.waitForTimeout(400)
       await shot(page, `mobile-${screen.name}`)
     }
+
+    // The one hard ergonomics rule: every card action button is at least
+    // 44x44px on the mobile viewport (technical-draft §6.1, WCAG 2.5.5).
+    let seen = 0
+    for (const path of ['/domains', '/mailboxes', '/aliases', '/admins']) {
+      await page.goto(path)
+      await expect(page.getByRole('main')).toBeVisible()
+      // The list is async: wait until it settles (a card or the empty state)
+      // before measuring anything.
+      await expect
+        .soft(
+          page.locator('[role="list"] li').first().or(page.getByText('Nothing here yet')),
+          `${path} list settled`,
+        )
+        .toBeVisible({ timeout: 10_000 })
+      const buttons = page.locator('[role="list"] li button')
+      const count = await buttons.count()
+      seen += count
+      for (let i = 0; i < count; i++) {
+        const box = await buttons.nth(i).boundingBox()
+        expect(box, `${path} button ${i} is rendered`).toBeTruthy()
+        expect(box!.width, `${path} button ${i} width`).toBeGreaterThanOrEqual(44)
+        expect(box!.height, `${path} button ${i} height`).toBeGreaterThanOrEqual(44)
+      }
+    }
+    expect(seen, 'the card screens expose action buttons').toBeGreaterThan(0)
 
     await page.goto('/mailboxes')
     await page.getByRole('button', { name: 'New account' }).click()
