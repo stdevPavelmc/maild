@@ -151,15 +151,24 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `platforms;android-36` + `build-tools;36.1.0` that Bubblewrap 1.27 and AGP 8.9 actually use
   (the old 34.0.0 was unused and made every run download 36.1), and keeps the SDK in the
   `maild-adminng-apk-sdk` volume so runtime installs persist.
-- Fixed: `app-generate.sh` now warns when `APP_URL` is not https — a TWA needs a secure origin
-  (service worker + digital asset links), so a LAN `http://192.168.x.y` build only opens as a
-  Custom Tab with a URL bar. Use the TLS ingress URL for a real device.
-- Added: **`ALLOW_LOCAL_HTTP=1`** in `app-generate.sh` — build the APK against a **private**
-  http origin for LAN testing (`10/8`, `172.16/12`, `192.168/16`, `127.0.0.1`, `localhost`).
-  The script prints a prominent warning, refuses public hosts or lookalike names even with the
-  flag, and rewrites Bubblewrap's hardcoded `https` launcher URL and intent filter to `http`
-  (otherwise the app opens `https://…` and fails). Such an APK runs as a Chrome Custom Tab
-  (URL bar, no service worker/offline) — releases must use the HTTPS ingress.
+- Changed: **APK builds are HTTPS-only.** `app-generate.sh` rejects `http://` (a secure origin is
+  required for the service worker, Digital Asset Links and `crypto.randomUUID`), gains
+  `APP_CA_CERT` to trust the local CA (manifest preflight + `NODE_EXTRA_CA_CERTS` in Bubblewrap)
+  and drops the short-lived `ALLOW_LOCAL_HTTP` escape hatch, its private-host validation and the
+  `https`→`http` sed rewrite. **Removed:** `ALLOW_LOCAL_HTTP` — an http origin cannot log in.
+- Added: **AdminNG HTTPS on the LAN (dev port 8084) with a local CA.**
+  `adminng/pwa/tls-cert-generate.sh` creates `adminng-ca.crt/.der/.key` and `adminng.crt/.key`
+  in the shared `ldata/certs` volume (SAN = LAN IP + hostname + localhost; `mail.crt` untouched).
+  nginx serves TLS 1.2/1.3 + HTTP/2 on 8084; the vhost is inactive in the image and only the dev
+  compose file mounts it, so production still terminates TLS at the ingress. The CA is
+  downloadable at `http://<lan-ip>:8083/ca.der` for the Android installer; `bootstrap-dev.sh`
+  generates it idempotently and fixes a root-owned `ldata/certs`.
+- Fixed: nginx `add_header` inheritance — `index.html`, `sw.js` and the hashed assets were served
+  without CSP/X-Frame-Options because their locations declared their own `add_header`. The headers
+  moved to `nginx/snippets/adminng-headers.conf`, included at server level **and** in every
+  location that sets a header; the duplicated asset `Cache-Control` is gone.
+- Fixed: `deviceId()` falls back to an RFC 4122 v4 UUID from `crypto.getRandomValues` when
+  `crypto.randomUUID` is unavailable (plain http / older browsers).
 - Added: **`adminng/pwa/README.md`** — the APK runbook: dev/release keystore generation and
   preservation (backup, permissions, CI secrets, rotation caveat), the `app-generate.sh`
   variable table, the `DOCKER_NETWORK=host` +

@@ -17,7 +17,7 @@ for maintenance jobs.
 | `admin`  | PostfixAdmin web admin UI                         | 8080                      |
 | `mua`    | SnappyMail webmail                                | 8081                      |
 | `api`    | AdminNG API — FastAPI over the catalogue (internal only) | —                  |
-| `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083                      |
+| `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083 (HTTP), 8084 (HTTPS, dev) |
 | `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
 | `cron`   | Scheduled jobs: db backup, traffic resume, SA…    | —                         |
 | `dozzle` | Dev-only live container log viewer                | 8082                      |

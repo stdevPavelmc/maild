@@ -20,10 +20,17 @@ RUN npm run build
 
 FROM nginx:1.27-alpine
 
+# Shared vhost pieces (server headers + locations) live outside conf.d so both
+# the HTTP vhost and the optional HTTPS vhost can include them.
+COPY nginx/snippets/ /etc/nginx/snippets/
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+# Optional TLS listener: shipped but INACTIVE. Only the dev compose file mounts
+# it into conf.d (host port 8084); production keeps terminating TLS at the
+# operator's ingress (AGENTS.md).
+COPY nginx/tls.conf /etc/nginx/tls-available/adminng.conf
 COPY --from=build /app/dist /usr/share/nginx/html
 
-EXPOSE 80
+EXPOSE 80 443
 
 # Alpine's busybox wget: no extra package needed.
 HEALTHCHECK --interval=1m --timeout=5s --start-period=10s --retries=3 \

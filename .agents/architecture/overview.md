@@ -79,7 +79,7 @@ their DB-dependent config stage (`AUTO_PROVISION`, default on). See
 | `ldata/db` | `/var/lib/postgresql/data` | db |
 | `ldata/vmail` | `/home/vmail` | mda, mta, cron |
 | `ldata/spool` | `/var/spool/` | mda, mta, amavis |
-| `ldata/certs` | `/certs` | mda, mta |
+| `ldata/certs` | `/certs` | mda, mta, adminng (read-only TLS certs in dev) |
 | `ldata/clamav` | `/var/lib/clamav` | clamav |
 | `ldata/amavis` | `/var/lib/amavis` | clamav, amavis (quarantine in `virusmails/`) |
 | `ldata/spamassassin` | `/var/lib/spamassassin` | amavis (bayes db), cron (learning) |

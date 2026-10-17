@@ -228,6 +228,7 @@ MAIL_ADMIN_USER="${MAIL_ADMIN_USER:-sysadmin}"
 # and the verification steps match the running stack.
 ADMIN_PORT="8080"
 ADMINNG_PORT="8083"
+ADMINNG_TLS_PORT="8084"
 MUA_PORT="8081"
 
 valid_domain "$TEST_DOMAIN" || die "--domain '$TEST_DOMAIN' is not a valid domain name"
@@ -281,6 +282,21 @@ bind_prep "pavelmc/maild-amavis:develop" "ldata/amavis" \
 bind_prep "pavelmc/maild-amavis:develop" "ldata/clamav" \
 	"chown -R 100:101 /target && chmod 0750 /target"
 ok "amavis TEMPBASE and the clamav volume are in place"
+
+# The AdminNG HTTPS listener (dev port 8084) reads a local CA + leaf from the
+# shared certs volume. A stack that already ran leaves ldata/certs owned by root
+# (mta/mda write mail.crt there as root), so hand it back to the invoking user
+# before generating. Root keeps writing there and nginx reads the keys as root.
+mkdir -p "${SCRIPT_DIR}/ldata/certs"
+if [ ! -w "${SCRIPT_DIR}/ldata/certs" ]; then
+	bind_prep "pavelmc/maild-mta:develop" "ldata/certs" "chown $(id -u):$(id -g) /target"
+fi
+if [ -w "${SCRIPT_DIR}/ldata/certs" ]; then
+	"${SCRIPT_DIR}/adminng/pwa/tls-cert-generate.sh" ||
+		warn "could not generate the AdminNG TLS certificate: HTTPS on :${ADMINNG_TLS_PORT} will be unavailable"
+else
+	warn "ldata/certs is not writable; skipping the AdminNG TLS certificate (run: sudo chown -R $(id -u):$(id -g) ldata/certs)"
+fi
 
 # --------------------------------------------------------------- stack up ----
 step "services"
@@ -838,6 +854,7 @@ step "summary"
 printf '  %s\n' "domains     : ${PROVISIONED_DOMAINS[*]}"
 printf '  %s\n' "admin UI    : http://localhost:${ADMIN_PORT}   (PostfixAdmin)"
 printf '  %s\n' "adminng UI  : http://localhost:${ADMINNG_PORT}   (AdminNG PWA)"
+printf '  %s\n' "adminng TLS : https://localhost:${ADMINNG_TLS_PORT}  (LAN/phone; install ldata/certs/adminng-ca.der first)"
 printf '  %s\n' "webmail     : http://localhost:${MUA_PORT}   (SnappyMail)"
 printf '  %s\n' "credentials : ${CREDS_FILE} (mode 600, git-ignored)"
 printf '\n  %-30s %-34s %s\n' "MAILBOX" "PASSWORD" "POSTFIXADMIN / ROLE"

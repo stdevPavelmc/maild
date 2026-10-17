@@ -100,7 +100,13 @@ services:
     restart: unless-stopped
     # no env_file on purpose: static bundle + same-origin proxy to `api`.
     ports:
-      - "8083:80"  # PWA + /api/v1 proxy - exposed for local access
+      - "8083:80"   # PWA + /api/v1 proxy - plain HTTP (harness, desktop LAN, CA download)
+      - "8084:443"  # HTTPS (dev only) - phone/PWA secure origin, local CA
+    volumes:
+      # The optional TLS vhost (inactive in the image) + the shared certs volume
+      # with adminng.crt/adminng.key issued by adminng/pwa/tls-cert-generate.sh.
+      - ./ldata/certs:/certs:ro
+      - ./adminng/pwa/nginx/tls.conf:/etc/nginx/conf.d/10-tls.conf:ro
     depends_on:
       - api
     networks:

@@ -54,6 +54,8 @@ when you set `AUTO_PROVISION=no`.
 |---------|---------------|
 | Webmail (mua) | http://localhost:8081 |
 | Admin (PostfixAdmin) | http://localhost:8080 |
+| AdminNG PWA | http://localhost:8083 |
+| AdminNG PWA (TLS, dev) | https://localhost:8084 — LAN: `https://<lan-ip>:8084`; import `ldata/certs/adminng-ca.der` on the device first |
 | Log viewer (dozzle) | http://localhost:8082 |
 | PostgreSQL | localhost:5432 — user `maild`, db `mailddb` (+ `contacts`), password = `POSTGRES_PASSWORD` from `env.dev` |
 | SMTP / SMTPS / Submission | localhost:25 / 465 / 587 |

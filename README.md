@@ -144,6 +144,9 @@ superadmins and a full audit trail:
 
 - **Dev:** <http://localhost:8083> · **Production:** `https://adminng.<DEFAULT_DOMAIN>`
   through your ingress (Traefik labels are already in the production compose files).
+- **LAN/phone (dev):** `https://<lan-ip>:8084` with the local CA — install
+  `ldata/certs/adminng-ca.der` on the device first (see
+  [`adminng/pwa/README.md`](adminng/pwa/README.md) §2.1).
 - **First login:** the browser/phone registers a device (`PENDING`); a superadmin approves
   it from the server side:
   `docker compose exec api adminng.py --list-devices` then

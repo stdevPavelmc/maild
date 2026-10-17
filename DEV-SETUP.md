@@ -241,6 +241,9 @@ All services expose debugging ports:
   plugin and the MailD catalogue driver ship with the image, as do the X-Originating-IP header and
   TOTP two-factor plugins (`MUA_PLUGINS`), installed on every boot
 - **Admin Interface:** http://localhost:8080
+- **AdminNG PWA:** http://localhost:8083
+  - LAN/phone (HTTPS, dev): https://<lan-ip>:8084 — install `ldata/certs/adminng-ca.der` on the
+    device first (`bootstrap-dev.sh` generates the local CA; see `adminng/pwa/README.md` §2.1)
 - **Database:** localhost:5432
   - User: `maild`
   - Database: `mailddb`
