@@ -151,6 +151,9 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `platforms;android-36` + `build-tools;36.1.0` that Bubblewrap 1.27 and AGP 8.9 actually use
   (the old 34.0.0 was unused and made every run download 36.1), and keeps the SDK in the
   `maild-adminng-apk-sdk` volume so runtime installs persist.
+- Fixed: `app-generate.sh` now warns when `APP_URL` is not https — a TWA needs a secure origin
+  (service worker + digital asset links), so a LAN `http://192.168.x.y` build only opens as a
+  Custom Tab with a URL bar. Use the TLS ingress URL for a real device.
 - Added: **`adminng/pwa/keystore-generate.sh`** — the missing APK signing-keystore steps. It
   generates a dev/test JKS (mode 0600) and its `.b64` (the `KEYSTORE_BASE64` CI secret), prints
   the exact `app-generate.sh` invocation and the secrets to set, and uses Docker when no JDK is

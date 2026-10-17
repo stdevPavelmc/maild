@@ -59,6 +59,17 @@ STORE_PASSWORD="${STORE_PASSWORD:?set STORE_PASSWORD}"
 
 [ -f "$KEYSTORE" ] || { echo "app-generate: keystore '$KEYSTORE' not found" >&2; exit 1; }
 
+# A Trusted Web Activity only behaves as an app on a secure origin: service
+# workers and the digital-asset-links check need https (or localhost). An http
+# LAN URL still builds, but the phone shows a Custom Tab with a URL bar.
+case "$APP_URL" in
+    https://* | http://localhost* | http://127.0.0.1*) ;;
+    *)
+        echo "app-generate: warning: APP_URL is not https — the TWA needs a secure origin;" >&2
+        echo "             use the TLS ingress URL for a real device (http is a local experiment only)." >&2
+        ;;
+esac
+
 # Docker network for the build and the Bubblewrap run (empty = daemon default).
 # On networks whose IPv4 path to dl.google.com is filtered (the Android SDK
 # repository answers 404 there while IPv6 works), `DOCKER_NETWORK=host` makes the
