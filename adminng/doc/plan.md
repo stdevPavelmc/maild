@@ -446,10 +446,16 @@ is recorded and its follow-up plan exists.
 - The toolchain container runs as root (JDK/SDK/config under `/root`); the script reclaims
   ownership of `node_modules`, `dist`, `android-project` and the APK before and after the run,
   and `npm ci` runs as the invoking user.
-- **Gradle cache:** a named volume (`maild-adminng-apk-gradle`, override with
-  `GRADLE_CACHE_VOLUME`) keeps the wrapper/dependency cache between runs; a cold run downloads
-  ~300 MB and additionally lets AGP fetch build-tools 36.1 (the image's 34.0.0 is only the
-  baseline).
+- **Gradle/SDK caches:** named volumes `maild-adminng-apk-gradle` and `maild-adminng-apk-sdk`
+  (`GRADLE_CACHE_VOLUME` / `ANDROID_SDK_VOLUME`) keep the wrapper/dependencies and the SDK
+  between runs. The image installs `platforms;android-36` + `build-tools;36.1.0` — what
+  Bubblewrap 1.27 pins and AGP 8.9 uses — so a build no longer re-downloads them (the old
+  34.0.0 was never used by Bubblewrap). The SDK volume is seeded from the image on first use;
+  `docker volume rm maild-adminng-apk-sdk` resets it after an image bump.
+- **SDK download robustness:** Google retires the `commandlinetools-…_latest.zip` archives and
+  some CDN edges 404 them (wget exit 8) — the previously pinned 11076708 is one of them. The
+  image now tries the pinned file plus 13114758 / 12700392 / 12266719, each with `wget` **and**
+  `curl` and three attempts, and prints the `DOCKER_NETWORK=host` hint when none works.
 - `VITE_APP_BASE` was **not** reaching the PWA build container (the old `docker run` did not
   pass `APP_URL`); fixed, so the bundled-asset build really points at the deployment.
 - The signed APK is picked up from `android-project/app-release-signed.apk` (the old

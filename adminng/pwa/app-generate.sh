@@ -11,7 +11,7 @@
 #   APP_URL          public base URL, e.g. https://adminng.example.com
 #   APP_NAME         display name (default: MailD AdminNG)
 #   APP_SHORT_NAME   launcher name (default: AdminNG)
-#   APP_PKG          applicationId, e.g. cu.maild.adminng
+#   APP_PKG          applicationId (default: cu.maild.adminng)
 #   VERSION_NAME     versionName (default: package.json version)
 #   VERSION_CODE     versionCode, integer (default: 1)
 #   KEYSTORE         path to the signing keystore (.jks), mounted read-only
@@ -23,6 +23,11 @@
 #   DOCKER_NETWORK   network for docker build/run (default: daemon default).
 #                    On networks whose IPv4 route to dl.google.com is filtered
 #                    the Android SDK/Gradle downloads fail; `host` fixes it.
+#   GRADLE_CACHE_VOLUME, ANDROID_SDK_VOLUME
+#                    named volumes for the Gradle and SDK caches
+#                    (default: maild-adminng-apk-gradle / maild-adminng-apk-sdk).
+#                    The SDK volume is seeded from the image on first use and keeps
+#                    anything Bubblewrap installs later; `docker volume rm` to reset.
 #
 # Output: dist/android/<APP_PKG>-<VERSION_NAME>.apk
 #
@@ -44,7 +49,7 @@ cd "$SCRIPT_DIR"
 APP_URL="${APP_URL:?set APP_URL (the public https URL of the adminng frontend)}"
 APP_NAME="${APP_NAME:-MailD AdminNG}"
 APP_SHORT_NAME="${APP_SHORT_NAME:-AdminNG}"
-APP_PKG="${APP_PKG:?set APP_PKG (the Android applicationId, e.g. cu.maild.adminng)}"
+APP_PKG="${APP_PKG:-cu.maild.adminng}"
 VERSION_NAME="${VERSION_NAME:-$(node -p "require('./package.json').version")}"
 VERSION_CODE="${VERSION_CODE:-1}"
 KEYSTORE="${KEYSTORE:?set KEYSTORE (path to the .jks)}"
@@ -137,6 +142,7 @@ docker run --rm "${NETWORK_ARGS[@]}" \
     -v "$SCRIPT_DIR:/app" \
     -v "$(cd "$(dirname "$KEYSTORE")" && pwd)/$(basename "$KEYSTORE"):/keystore.jks:ro" \
     -v "${GRADLE_CACHE_VOLUME:-maild-adminng-apk-gradle}:/root/.gradle" \
+    -v "${ANDROID_SDK_VOLUME:-maild-adminng-apk-sdk}:/opt/android-sdk" \
     -w /app \
     -e BUBBLEWRAP_KEYSTORE_PASSWORD="$STORE_PASSWORD" \
     -e BUBBLEWRAP_KEY_PASSWORD="$KEY_PASSWORD" \

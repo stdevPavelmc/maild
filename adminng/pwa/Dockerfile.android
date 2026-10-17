@@ -17,14 +17,47 @@ RUN apt-get update \
         openjdk-17-jdk-headless unzip wget curl ca-certificates ca-certificates-java \
     && rm -rf /var/lib/apt/lists/*
 
-# Android command-line tools (pinned; bump together with the Bubblewrap version)
-ARG CMDLINE_TOOLS=commandlinetools-linux-11076708_latest.zip
-RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
-    && wget -q "https://dl.google.com/android/repository/${CMDLINE_TOOLS}" -O /tmp/tools.zip \
-    && unzip -q /tmp/tools.zip -d /tmp/tools \
-    && mv /tmp/tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
-    && rm -rf /tmp/tools /tmp/tools.zip
+# Android command-line tools. Google rotates these "latest" archives and a given
+# file can 404 on some CDN edges (wget then exits 8), so try the pinned version
+# first and fall back through a short list of known-good ones, with wget and curl
+# and a few retries. The build fails with an actionable message if none works.
+ARG CMDLINE_TOOLS=commandlinetools-linux-13114758_latest.zip
+RUN set -eu; \
+    mkdir -p "$ANDROID_HOME/cmdline-tools"; \
+    downloaded=""; \
+    for file in "$CMDLINE_TOOLS" \
+                commandlinetools-linux-13114758_latest.zip \
+                commandlinetools-linux-12700392_latest.zip \
+                commandlinetools-linux-12266719_latest.zip; do \
+        url="https://dl.google.com/android/repository/$file"; \
+        for attempt in 1 2 3; do \
+            if wget -q --tries=1 --timeout=30 "$url" -O /tmp/tools.zip \
+                || curl -fsSL --connect-timeout 30 "$url" -o /tmp/tools.zip; then \
+                if unzip -tq /tmp/tools.zip > /dev/null 2>&1; then \
+                    downloaded="$file"; \
+                    break 2; \
+                fi; \
+            fi; \
+            echo "android tools: $file attempt $attempt failed, retrying..." >&2; \
+            sleep 3; \
+        done; \
+    done; \
+    if [ -z "$downloaded" ]; then \
+        echo "android tools: could not download the command-line tools." >&2; \
+        echo "If this network's IPv4 route to dl.google.com is filtered (404 while IPv6 works)," >&2; \
+        echo "rebuild with DOCKER_NETWORK=host (see adminng/README.md, Android APK)." >&2; \
+        exit 1; \
+    fi; \
+    echo "android tools: using $downloaded"; \
+    unzip -q /tmp/tools.zip -d /tmp/tools; \
+    mv /tmp/tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest"; \
+    rm -rf /tmp/tools /tmp/tools.zip
 
+
+# Bubblewrap 1.27 pins BUILD_TOOLS_VERSION=36.1.0 and the generated TWA project
+# compiles against SDK 36, so those are the packages this image installs; the
+# image's 34.0.0 was unused and forced a runtime download on every build.
+#
 # sdkmanager fetches repository2-3.xml with the JVM, which prefers IPv4. Some
 # networks answer 404 on the IPv4 path to dl.google.com while IPv6 works, so a
 # failed first attempt is retried with IPv6 preferred (and, if that is not
@@ -33,7 +66,7 @@ RUN set -eux; \
     SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"; \
     accept() { yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses > /dev/null; }; \
     install() { "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
-        "platform-tools" "platforms;android-34" "build-tools;34.0.0"; }; \
+        "platform-tools" "platforms;android-36" "build-tools;36.1.0"; }; \
     accept; \
     if install; then exit 0; fi; \
     echo "sdkmanager: default network path failed, retrying over IPv6" >&2; \

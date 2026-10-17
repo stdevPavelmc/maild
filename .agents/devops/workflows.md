@@ -180,8 +180,9 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh   # -> dist/android/<pkg>-
 - The build writes `twa-manifest.json` and drives Bubblewrap's `update` + `build` from inside
   `android-project/`; the signing passwords go through
   `BUBBLEWRAP_KEYSTORE_PASSWORD`/`BUBBLEWRAP_KEY_PASSWORD`.
-- Toolchain: `adminng/pwa/Dockerfile.android` (JDK 17, SDK 34 baseline, Bubblewrap). The Gradle
-  cache is the named volume `maild-adminng-apk-gradle`.
+- Toolchain: `adminng/pwa/Dockerfile.android` (JDK 17, SDK 36 + build-tools 36.1, Bubblewrap).
+  The Gradle and SDK caches are the named volumes `maild-adminng-apk-gradle` /
+  `maild-adminng-apk-sdk`; the SDK volume is seeded from the image and survives runtime installs.
 - If the IPv4 route to `dl.google.com` is filtered (404 while IPv6 works), add
   `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true`.
 - Artifacts are git-ignored (`adminng/pwa/dist/`, `android-project/`, `twa-manifest.json`,

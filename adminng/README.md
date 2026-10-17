@@ -134,8 +134,15 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
 - On networks whose IPv4 route to `dl.google.com` answers 404 (the SDK/Maven/Gradle downloads
   fail), run it as
   `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true ... ./app-generate.sh`.
+- The toolchain image `Dockerfile.android` tries the pinned command-line-tools archive first,
+  retries with `wget` **and** `curl`, then falls back through known-good versions (Google
+  rotates those "latest" files). A first build dying at
+  `wget … commandlinetools…` with exit 8 is that case: update `CMDLINE_TOOLS` in the Dockerfile
+  or use `DOCKER_NETWORK=host`.
 - The toolchain image is `Dockerfile.android` (JDK 17 + Android SDK + Bubblewrap); the Gradle
-  cache lives in the `maild-adminng-apk-gradle` volume (`GRADLE_CACHE_VOLUME` overrides it).
+  and SDK caches live in the `maild-adminng-apk-gradle` / `maild-adminng-apk-sdk` volumes
+  (`GRADLE_CACHE_VOLUME` / `ANDROID_SDK_VOLUME` override them). The SDK volume is seeded from
+  the image on first use; `docker volume rm maild-adminng-apk-sdk` resets it after an image bump.
 - CI: `.github/workflows/android-apk.yml` runs the same script on a tag/release with the
   keystore from repository secrets and attaches the APK.
 

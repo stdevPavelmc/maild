@@ -144,6 +144,13 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   clean). `flows` also stops pressing Ctrl/⌘K before the shell has mounted.
 - Changed: `.github/workflows/pwa-e2e.yml` runs the suite through `adminng/pwa-test/run.sh`
   (no host Node/Playwright install) and uploads the axe reports.
+- Fixed: **`app-generate.sh` no longer dies downloading the Android SDK**: the pinned
+  `commandlinetools-linux-11076708` archive is retired/404 on some CDN edges (wget exit 8). The
+  image now retries with `wget` **and** `curl` and falls back through 13114758 / 12700392 /
+  12266719, and a failed build prints the `DOCKER_NETWORK=host` hint. It also installs the
+  `platforms;android-36` + `build-tools;36.1.0` that Bubblewrap 1.27 and AGP 8.9 actually use
+  (the old 34.0.0 was unused and made every run download 36.1), and keeps the SDK in the
+  `maild-adminng-apk-sdk` volume so runtime installs persist.
 - Added: **`adminng/pwa/keystore-generate.sh`** — the missing APK signing-keystore steps. It
   generates a dev/test JKS (mode 0600) and its `.b64` (the `KEYSTORE_BASE64` CI secret), prints
   the exact `app-generate.sh` invocation and the secrets to set, and uses Docker when no JDK is
