@@ -148,6 +148,9 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
 - CI: `.github/workflows/android-apk.yml` runs the same script on a tag/release with the
   keystore from repository secrets and attaches the APK.
 
+**Full runbook (keystore generation/preservation, the network/IPv6 workaround, troubleshooting):
+[`pwa/README.md`](pwa/README.md).**
+
 ## API (Phase 2: device-bound, two-step auth)
 
 Every request except `GET /health` carries `X-Device-ID` (a UUID the client

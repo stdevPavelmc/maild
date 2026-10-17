@@ -154,6 +154,11 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Fixed: `app-generate.sh` now warns when `APP_URL` is not https — a TWA needs a secure origin
   (service worker + digital asset links), so a LAN `http://192.168.x.y` build only opens as a
   Custom Tab with a URL bar. Use the TLS ingress URL for a real device.
+- Added: **`adminng/pwa/README.md`** — the APK runbook: dev/release keystore generation and
+  preservation (backup, permissions, CI secrets, rotation caveat), the `app-generate.sh`
+  variable table, the `DOCKER_NETWORK=host` +
+  `JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true` workaround for networks whose IPv4
+  route to `dl.google.com` is filtered, caches/volumes, troubleshooting and APK verification.
 - Added: **`adminng/pwa/keystore-generate.sh`** — the missing APK signing-keystore steps. It
   generates a dev/test JKS (mode 0600) and its `.b64` (the `KEYSTORE_BASE64` CI secret), prints
   the exact `app-generate.sh` invocation and the secrets to set, and uses Docker when no JDK is

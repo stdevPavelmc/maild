@@ -188,6 +188,8 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh   # -> dist/android/<pkg>-
 - Artifacts are git-ignored (`adminng/pwa/dist/`, `android-project/`, `twa-manifest.json`,
   `*.keystore*`).
 - CI: `.github/workflows/android-apk.yml` runs the script with the keystore secrets.
+- Full runbook: [`adminng/pwa/README.md`](../../adminng/pwa/README.md) (keystore lifecycle,
+  network/IPv6 workaround, troubleshooting).
 
 ## GitHub Actions CI
 
