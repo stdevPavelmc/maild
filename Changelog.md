@@ -144,6 +144,20 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   clean). `flows` also stops pressing Ctrl/⌘K before the shell has mounted.
 - Changed: `.github/workflows/pwa-e2e.yml` runs the suite through `adminng/pwa-test/run.sh`
   (no host Node/Playwright install) and uploads the axe reports.
+- Fixed/Changed: **AdminNG Phase 4 pipeline executed for real** — the first signed APK
+  (`cu.maild.adminng` 0.1.0, minSdk 24, target 36, `apksigner` v2+v3) was built from this tree.
+  `app-generate.sh` now writes `twa-manifest.json` and drives Bubblewrap's deterministic
+  `update` + `build` (its `init` is interactive even with `--manifest`), runs `build` from
+  inside the project directory, passes the signing passwords through
+  `BUBBLEWRAP_KEYSTORE_PASSWORD`/`BUBBLEWRAP_KEY_PASSWORD`, and picks the *signed* APK. It also
+  fixes `VITE_APP_BASE` not reaching the PWA build container, hands ownership of the bind mount
+  back to the invoking user, and keeps the Gradle cache in a named volume.
+  `Dockerfile.android` pins `JAVA_HOME`, adds `ca-certificates-java`, pre-seeds Bubblewrap's
+  JDK/SDK config, installs an `$ANDROID_HOME/bin/sdkmanager` wrapper (Bubblewrap's SDK check
+  needs that path, and a symlink breaks the launcher) and retries the SDK download over IPv6
+  on networks whose IPv4 route to `dl.google.com` answers 404 (`DOCKER_NETWORK=host` +
+  `JAVA_TOOL_OPTIONS` are documented for that case). `minSdkVersion` is 24 because
+  `androidbrowserhelper` 2.7.4 refuses to merge with 21.
 
 ## 2026-10-17 1.5.1-rc
 - Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**

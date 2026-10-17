@@ -162,6 +162,27 @@ cd adminng/pwa && npm run i18n:check    # en/es parity; also inside `npm run bui
 - CI: `.github/workflows/pwa-e2e.yml`, `workflow_dispatch` only (builds the ten dev images).
 
 
+## AdminNG Android APK (Phase 4)
+
+`adminng/pwa/app-generate.sh` wraps the PWA in a signed TWA APK, fully in Docker:
+
+```bash
+cd adminng/pwa
+APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \
+KEYSTORE=/path/android.keystore KEY_ALIAS=maild-apk \
+KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh   # -> dist/android/<pkg>-<version>.apk
+```
+
+- The build writes `twa-manifest.json` and drives Bubblewrap's `update` + `build` from inside
+  `android-project/`; the signing passwords go through
+  `BUBBLEWRAP_KEYSTORE_PASSWORD`/`BUBBLEWRAP_KEY_PASSWORD`.
+- Toolchain: `adminng/pwa/Dockerfile.android` (JDK 17, SDK 34 baseline, Bubblewrap). The Gradle
+  cache is the named volume `maild-adminng-apk-gradle`.
+- If the IPv4 route to `dl.google.com` is filtered (404 while IPv6 works), add
+  `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true`.
+- Artifacts are git-ignored (`adminng/pwa/dist/`, `android-project/`, `twa-manifest.json`).
+- CI: `.github/workflows/android-apk.yml` runs the script with the keystore secrets.
+
 ## GitHub Actions CI
 
 `.github/workflows/docker-image.yml` runs on `develop`/`main` (push + pull request). It is a

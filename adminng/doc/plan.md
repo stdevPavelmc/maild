@@ -33,7 +33,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
 | 2 — Security model | **validated** | per-task table below; full suite 67 passed / 0 failed |
 | 3 — PWA frontend | **validated** | implemented and built; served at :8083; containerized browser suite (`pwa-test`) 3/3 flows + Lighthouse 97/100/96 + axe clean (see notes) |
-| 4 — APK pipeline | **partial** | script + toolchain image + release workflow implemented; first CI/keystore run pending |
+| 4 — APK pipeline | **partial → validated (pipeline)** | first real signed APK built locally with a throwaway keystore: apksigner v2/v3, `cu.maild.adminng` 0.1.0, minSdk 24; only the operator-keystore CI run and the on-device install remain |
 | 5 — Hardening & decision | **partial** | headers/CSP, docs, 66-check suite done; WebAuthn explicitly deferred (decision recorded) |
 
 ### Phase 0 — task status
@@ -350,8 +350,10 @@ verified on the device at release time.
 
 ## Phase 4 — Android APK pipeline
 
-**Status:** partial — implemented, not executed here (needs Android SDK, network and the signing
-keystore; the first CI run is the validation).
+**Status:** validated (pipeline) — the first real signed APK was produced on 2026-10-17 from
+this tree with a throwaway keystore: `dist/android/cu.maild.adminng-0.1.0.apk`, `apksigner
+verify` OK (v2 + v3), package `cu.maild.adminng`, versionName `0.1.0`, minSdk 24, target 36.
+The remaining legs are the release-keystore run in CI and the install on a physical phone.
 
 **Goal:** a signed APK as an artifact of every release, reproducibly.
 
@@ -409,14 +411,47 @@ is recorded and its follow-up plan exists.
 
 | # | Task | Status | Evidence |
 |---|---|---|---|
-| 1 | `app-generate.sh` (dockerized PWA → signed APK) | **finished** | `adminng/pwa/app-generate.sh` + `Dockerfile.android` (JDK 17, Android SDK 34, Bubblewrap); `bash -n` clean |
-| 2 | GitHub Actions release artifact | **finished** | `.github/workflows/android-apk.yml` (workflow_dispatch + release; keystore from secrets; artifact + release attach) |
+| 1 | `app-generate.sh` (dockerized PWA → signed APK) | **validated** | built `dist/android/cu.maild.adminng-0.1.0.apk` (~0.96 MB) from the live dev stack; `apksigner verify` v2+v3 with the throwaway cert `CN=MailD Test`; `aapt dump badging`: `cu.maild.adminng`, 0.1.0 (1), minSdk 24, target 36 |
+| 2 | GitHub Actions release artifact | **finished** | `.github/workflows/android-apk.yml` (workflow_dispatch + release; keystore from secrets; artifact + release attach); the script it calls is now the one proven above |
 | 3 | Keystore decision + rotation runbook | **partial** | decision: operator-owned keystore stored as repo secret `KEYSTORE_BASE64`; Play Store vs sideload still an operator call |
-| 4 | APK first-run flow | **finished** | the PWA already handles handshake → approval → enrollment/2FA; the APK only adds the server-URL hook (`VITE_APP_BASE`) |
+| 4 | APK first-run flow | **validated (PWA side)** | the TWA loads `APP_URL`, so the PWA's existing handshake → approval → enrollment/2FA flow is what runs on the phone; install/launch still needs a device |
 
-**Phase 4 notes:** the script pipes the keystore answers into Bubblewrap (documented order) —
-re-check against the pinned CLI on the first real run. No APK could be produced here: the
-sandbox has no Android SDK download/keystore, so this phase is deliberately `partial`.
+**Phase 4 notes — what the first real run found (all fixed in the script/image):**
+
+- **Bubblewrap `init` is interactive even with `--manifest`** (domain, URL path, name, package,
+  colors, signing key), so it cannot run unattended. The script now writes `twa-manifest.json`
+  itself and drives the deterministic `update` + `build` pair.
+- **`build` must run from inside the project directory**: it invokes `./gradlew` from the
+  current working directory, not from `--directory`. The manifest and checksum must sit beside
+  it; the script copies the manifest into `android-project/` and `cd`s there.
+- **Signing passwords** go through Bubblewrap's documented
+  `BUBBLEWRAP_KEYSTORE_PASSWORD` / `BUBBLEWRAP_KEY_PASSWORD` variables (the 1.27 prompt order
+  is not the one the old pipe assumed, and it only asks for two passwords).
+- **Bubblewrap needs `$ANDROID_HOME/bin`** (its SDK validation) while the modern command-line
+  tools only ship `cmdline-tools/latest/bin`. A symlink breaks the `sdkmanager` launcher
+  (`ClassNotFoundException`); the image installs a one-line wrapper script instead.
+- **`minSdkVersion 24`**: `com.google.androidbrowserhelper:androidbrowserhelper:2.7.4` refuses
+  to merge with 21.
+- **Bubblewrap's JDK/SDK prompts** are avoided by pre-seeding `/root/.bubblewrap/config.json`
+  with the paths baked into the image.
+- **Network deviation on this host:** the IPv4 route to `dl.google.com` answers 404 (the IPv6
+  route works), so the SDK repo, Maven artifacts and the Gradle distribution could not be
+  fetched by the JVM. The script exposes `DOCKER_NETWORK=host` and passes
+  `JAVA_TOOL_OPTIONS` through; the documented invocation here is
+  `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true ./app-generate.sh`.
+  This is an environment quirk, not a build requirement: healthy networks use the defaults.
+- The toolchain container runs as root (JDK/SDK/config under `/root`); the script reclaims
+  ownership of `node_modules`, `dist`, `android-project` and the APK before and after the run,
+  and `npm ci` runs as the invoking user.
+- **Gradle cache:** a named volume (`maild-adminng-apk-gradle`, override with
+  `GRADLE_CACHE_VOLUME`) keeps the wrapper/dependency cache between runs; a cold run downloads
+  ~300 MB and additionally lets AGP fetch build-tools 36.1 (the image's 34.0.0 is only the
+  baseline).
+- `VITE_APP_BASE` was **not** reaching the PWA build container (the old `docker run` did not
+  pass `APP_URL`); fixed, so the bundled-asset build really points at the deployment.
+- The signed APK is picked up from `android-project/app-release-signed.apk` (the old
+  `find … -name '*.apk' | head -1` could return the *unsigned* intermediate).
+
 
 ### Phase 5 — task status & decisions
 

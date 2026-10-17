@@ -85,6 +85,30 @@ cd adminng/pwa && npm run build           # i18n gate -> tsc --noEmit -> Vite
 - CI: `.github/workflows/pwa-e2e.yml` (manual dispatch) builds the stack and runs the gate.
 
 
+## Android APK (Phase 4)
+
+`adminng/pwa/app-generate.sh` builds the PWA and wraps it in a signed Android APK (Trusted Web
+Activity, Bubblewrap) entirely in Docker — no local Android SDK:
+
+```bash
+cd adminng/pwa
+APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \
+KEYSTORE=/path/to/android.keystore KEY_ALIAS=maild-apk \
+KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
+# -> dist/android/cu.maild.adminng-<version>.apk
+```
+
+- The APK loads `APP_URL`, so it is same-origin with the API and needs no runtime server
+  address; the PWA's handshake → pending → approval → enrollment/2FA flow is what runs on the
+  phone.
+- On networks whose IPv4 route to `dl.google.com` answers 404 (the SDK/Maven/Gradle downloads
+  fail), run it as
+  `DOCKER_NETWORK=host JAVA_TOOL_OPTIONS=-Djava.net.preferIPv6Addresses=true ... ./app-generate.sh`.
+- The toolchain image is `Dockerfile.android` (JDK 17 + Android SDK + Bubblewrap); the Gradle
+  cache lives in the `maild-adminng-apk-gradle` volume (`GRADLE_CACHE_VOLUME` overrides it).
+- CI: `.github/workflows/android-apk.yml` runs the same script on a tag/release with the
+  keystore from repository secrets and attaches the APK.
+
 ## API (Phase 2: device-bound, two-step auth)
 
 Every request except `GET /health` carries `X-Device-ID` (a UUID the client

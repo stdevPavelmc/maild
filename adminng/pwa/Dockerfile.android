@@ -8,11 +8,13 @@ FROM node:22-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive \
     ANDROID_HOME=/opt/android-sdk \
-    ANDROID_SDK_ROOT=/opt/android-sdk
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 \
+    PATH=/usr/lib/jvm/java-17-openjdk-amd64/bin:$PATH
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        openjdk-17-jdk-headless unzip wget ca-certificates \
+        openjdk-17-jdk-headless unzip wget curl ca-certificates ca-certificates-java \
     && rm -rf /var/lib/apt/lists/*
 
 # Android command-line tools (pinned; bump together with the Bubblewrap version)
@@ -23,11 +25,46 @@ RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
     && mv /tmp/tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
     && rm -rf /tmp/tools /tmp/tools.zip
 
-RUN yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null \
-    && "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-        "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+# sdkmanager fetches repository2-3.xml with the JVM, which prefers IPv4. Some
+# networks answer 404 on the IPv4 path to dl.google.com while IPv6 works, so a
+# failed first attempt is retried with IPv6 preferred (and, if that is not
+# available either, with IPv4 forced). Healthy networks never take the retry.
+RUN set -eux; \
+    SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"; \
+    accept() { yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses > /dev/null; }; \
+    install() { "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+        "platform-tools" "platforms;android-34" "build-tools;34.0.0"; }; \
+    accept; \
+    if install; then exit 0; fi; \
+    echo "sdkmanager: default network path failed, retrying over IPv6" >&2; \
+    export JAVA_OPTS="-Djava.net.preferIPv6Addresses=true"; \
+    accept; \
+    if install; then exit 0; fi; \
+    echo "sdkmanager: IPv6 failed too, retrying over IPv4" >&2; \
+    export JAVA_OPTS="-Djava.net.preferIPv4Stack=true"; \
+    accept; \
+    install
+
 
 RUN npm install -g @bubblewrap/cli@latest
+
+# Bubblewrap's SDK validation looks for $ANDROID_HOME/bin (or a legacy tools/)
+# and runs $ANDROID_HOME/bin/sdkmanager. A symlink breaks the launcher's
+# APP_HOME/classpath detection, so provide a tiny wrapper that execs the real
+# command instead.
+RUN mkdir -p "$ANDROID_HOME/bin" \
+    && printf '#!/bin/sh\nexec "%s/cmdline-tools/latest/bin/sdkmanager" "$@"\n' "$ANDROID_HOME" \
+        > "$ANDROID_HOME/bin/sdkmanager" \
+    && chmod +x "$ANDROID_HOME/bin/sdkmanager" \
+    && "$ANDROID_HOME/bin/sdkmanager" --version
+
+# Bubblewrap refuses to run (and offers to download its own JDK/SDK) whenever
+# ~/.bubblewrap/config.json is missing. Point it at the toolchain baked above so
+# init/build are non-interactive.
+RUN mkdir -p /root/.bubblewrap \
+    && printf '{"jdkPath":"%s","androidSdkPath":"%s"}\n' "$JAVA_HOME" "$ANDROID_HOME" \
+        > /root/.bubblewrap/config.json \
+    && cat /root/.bubblewrap/config.json
 
 WORKDIR /app
 
