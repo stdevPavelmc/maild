@@ -4,7 +4,18 @@ import { api, ApiError, type Domain } from '../lib/api'
 import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
 import { useNewSignal, useSearchQuery } from '../lib/useUrlState'
-import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
+import { Empty, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
+import {
+  ActionButton,
+  ActionRow,
+  CardGrid,
+  CardHead,
+  EntityCard,
+  MetaChip,
+  MetaRow,
+  StatusMark,
+  TruncatedName,
+} from '../components/cards'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
@@ -74,50 +85,44 @@ export function DomainsPage({ password }: { password: string }) {
         />
       </form>
 
-      <div className="overflow-x-auto rounded-lg border border-slate-800">
-        <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
-            <tr>
-              <th className="px-3 py-2">{t('nav.domains')}</th>
-              <th className="px-3 py-2">{t('domains.description')}</th>
-              <th className="px-3 py-2">{t('domains.mailboxes')}</th>
-              <th className="px-3 py-2">{t('domains.aliases')}</th>
-              <th className="px-3 py-2">{t('common.active')}</th>
-              <th className="px-3 py-2">{t('common.actions')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {list.items.map((item) => (
-              <tr key={item.domain} className="border-t border-slate-800">
-                <td className="px-3 py-2 font-mono text-xs">{item.domain}</td>
-                <td className="px-3 py-2 text-slate-400">{item.description}</td>
-                <td className="px-3 py-2">{item.mailboxes}</td>
-                <td className="px-3 py-2">{item.aliases}</td>
-                <td className="px-3 py-2">
-                  {item.active ? (
-                    <Badge tone="green">{t('common.yes')}</Badge>
-                  ) : (
-                    <Badge tone="red">{t('common.no')}</Badge>
-                  )}
-                </td>
-                <td className="px-3 py-2">
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setEditing(item)}>
-                      {t('common.edit')}
-                    </Button>
-                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(item)}>
-                      {t('common.delete')}
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
-        )}
-      </div>
+      <CardGrid>
+        {list.items.map((item) => (
+          <EntityCard key={item.domain} status={item.active ? 'active' : 'inactive'}>
+            <CardHead>
+              <div className="flex min-w-0 items-start gap-2">
+                <StatusMark active={item.active} />
+                <TruncatedName name={item.domain} />
+              </div>
+              <ActionRow label={t('common.actions')}>
+                <ActionButton
+                  glyph="🛠"
+                  label={t('common.edit')}
+                  disabled={!online}
+                  onClick={() => setEditing(item)}
+                />
+                <ActionButton
+                  glyph="❌"
+                  label={t('common.delete')}
+                  tone="danger"
+                  disabled={!online}
+                  onClick={() => setDeleting(item)}
+                />
+              </ActionRow>
+            </CardHead>
+            <p
+              className="mt-1 break-all text-sm text-slate-400 line-clamp-2"
+              title={item.description}
+            >
+              {item.description || '—'}
+            </p>
+            <MetaRow>
+              <MetaChip icon="📬" title={t('domains.mailboxes')}>{item.mailboxes}</MetaChip>
+              <MetaChip icon="🎭" title={t('domains.aliases')}>{item.aliases}</MetaChip>
+            </MetaRow>
+          </EntityCard>
+        ))}
+      </CardGrid>
+      {!list.loading && list.items.length === 0 && <Empty text={t('common.empty')} />}
       {list.cursor && (
         <Button variant="outline" onClick={() => void list.more()}>
           {t('common.page')}
