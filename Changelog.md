@@ -162,6 +162,14 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `APP_CA_CERT` to trust the local CA (manifest preflight + `NODE_EXTRA_CA_CERTS` in Bubblewrap)
   and drops the short-lived `ALLOW_LOCAL_HTTP` escape hatch, its private-host validation and the
   `https`→`http` sed rewrite. **Removed:** `ALLOW_LOCAL_HTTP` — an http origin cannot log in.
+- Added: **fan-out aliases** — an alias may now forward to several recipients at once
+  (`bills@ → anna@, bob@, lucy@`). The server already stored comma-separated `goto` and the
+  `?goto=` filter was CSV-aware; what was missing is exposed: the alias card renders each
+  recipient as a chip (+N overflow), the create modal gained a textarea `GotoInput` that accepts
+  newline/comma/space separators with a live chip preview, and a new edit modal changes an
+  existing alias's recipients and active flag (`PUT /aliases/{address}` is now in the PWA
+  client). `test.sh` gained check C2b: a fan-out message delivered to **both** INBOXes
+  (suite now **68 checks**, 68/68 green).
 - Changed: **the AdminNG catalogue screens are card-based** (domains, accounts, aliases,
   administrators, devices): a responsive card grid (1/2/3/4 columns by width), a 3px status
   accent + ✅/🚫 mark per card, two-tone addresses (local part bold, domain muted), long names

@@ -65,7 +65,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (67 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (68 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```
@@ -86,8 +86,8 @@ cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also 
   (`alice`, `bob`, `charlie`, `dylan`, `alice` as domain admin, default aliases), a quota
   fixture on `bob@`, and `test.creds` (mode 0600, git-ignored) with every password.
   Idempotent; refuses to run against a stack built with different secrets.
-- `test.sh` covers: SMTP policy (25/465/587, two open-relay negatives), TLS/AUTH, aliases
-  and plus-addressing, IMAP/POP3 read-back, EICAR/GTUBE/banned-attachment filtering,
+- `test.sh` covers: SMTP policy (25/465/587, two open-relay negatives), TLS/AUTH, aliases,
+  fan-out and plus-addressing, IMAP/POP3 read-back, EICAR/GTUBE/banned-attachment filtering,
   mailbox quota (552 at RCPT, NDR, warnings), Sieve redirect, DKIM and the cron jobs
   (db backup + daily traffic resume).
 

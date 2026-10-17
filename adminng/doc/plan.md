@@ -482,7 +482,7 @@ is recorded and its follow-up plan exists.
 |---|---|---|---|
 | 1 | WebAuthn / passkeys | **deferred (decision)** | TOTP is enforced for superadmins and fully tested; passkeys need a platform-authenticator harness (browser/phone) that this environment cannot provide. Tracked as Phase 6 in the roadmap below. |
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
-| 3 | `test.sh` consolidation | **validated** | 67 checks, 31 unit/integration tests; full **67 passed / 0 failed / 0 skipped** run on 2026-10-17 against the current stack (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
+| 3 | `test.sh` consolidation | **validated** | **68 checks** (67 + the fan-out delivery check), 31 unit/integration tests; full **68 passed / 0 failed / 0 skipped** run against the current stack (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
 | 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** installed as the escape hatch, but each feature now has an explicit port/dead/keep call in the table below. AdminNG is the primary UI for domains/accounts/aliases/admins/devices/logs. |
 

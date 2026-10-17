@@ -107,8 +107,8 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
 ./test.sh --skip-docker    # only wire-level checks (no `docker compose exec` assertions)
 ```
 
-- 67 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
-  aliases and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
+- 68 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
+  aliases, fan-out and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
   DKIM, the deployment domain, the AdminNG catalogue API (login, CRUD, IMAPS login of the
   API-created mailbox, suspension and tenant isolation), the cron jobs (the daily database
   backup, the daily mail traffic resume and the daily Bayes learning) and the SpamAssassin

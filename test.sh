@@ -609,6 +609,28 @@ else
     fi
 fi
 
+# C2b — fan-out alias (goto "alice,bob" lands in both INBOXes; bob is always a
+# provisioned fixture mailbox, second after alice in TEST_USERS)
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "fan-out alias ($DC_NEEDED)"
+else
+    FANOUT="fanout@$DOMAIN"
+    SECONDMAIL="bob@$DOMAIN"
+    sql "INSERT INTO alias (address, goto, domain, active)
+         VALUES ('$FANOUT', '$ADMINMAIL,$SECONDMAIL', '$DOMAIN', true)
+         ON CONFLICT (address) DO UPDATE SET goto = '$ADMINMAIL,$SECONDMAIL', active = true;" \
+        > /dev/null 2>&1
+    F="$(chrono)"
+    swx -s "$SERVER" -p 587 -tls -a PLAIN -au "$ADMINMAIL" -ap "$PASS" \
+        -t "$FANOUT" -f "$ADMINMAIL" --header "Subject: $F"
+    if [ "$SW_RC" -eq 0 ] && wait_msg "$ADMINMAIL" INBOX "$F" && wait_msg "$SECONDMAIL" INBOX "$F" ; then
+        t_ok "a fan-out goto delivers to every recipient (1→N)"
+    else
+        t_fail "fan-out alias delivery (rc=$SW_RC)" ; dump_swaks
+    fi
+    sql "DELETE FROM alias WHERE address = '$FANOUT';" > /dev/null 2>&1
+fi
+
 # C3 — IMAPS (993): login and SEARCH
 if out="$(timeout -k5 30 curl --silent --insecure --user "$ADMINMAIL:$PASS" \
             --url "imaps://$SERVER:993/INBOX" -X 'SEARCH ALL' 2>&1)" &&
