@@ -1,0 +1,34 @@
+# Android packaging toolchain for the AdminNG PWA (Bubblewrap / Trusted Web Activity).
+#
+# Node builds nothing here: app-generate.sh builds the PWA in the nginx image and this
+# image only provides the JDK + Android SDK + Bubblewrap CLI that turn the published
+# manifest into a signed APK. Not part of the runtime stack.
+
+FROM node:22-bookworm
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        openjdk-17-jdk-headless unzip wget ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Android command-line tools (pinned; bump together with the Bubblewrap version)
+ARG CMDLINE_TOOLS=commandlinetools-linux-11076708_latest.zip
+RUN mkdir -p "$ANDROID_HOME/cmdline-tools" \
+    && wget -q "https://dl.google.com/android/repository/${CMDLINE_TOOLS}" -O /tmp/tools.zip \
+    && unzip -q /tmp/tools.zip -d /tmp/tools \
+    && mv /tmp/tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
+    && rm -rf /tmp/tools /tmp/tools.zip
+
+RUN yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null \
+    && "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+        "platform-tools" "platforms;android-34" "build-tools;34.0.0" > /dev/null
+
+RUN npm install -g @bubblewrap/cli@latest
+
+WORKDIR /app
+
+CMD ["bash"]

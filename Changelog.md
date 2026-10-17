@@ -62,6 +62,17 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   and a Dexie read-only cache; destructive confirmation with password re-auth and the
   5-second armed button; offline write blocking; 2-minute privacy shield and 15-minute idle
   purge; complete English + Spanish catalogues.
+- Added: **AdminNG Phase 4 — Android packaging**: `adminng/pwa/app-generate.sh` builds the
+  PWA for the deployment URL and wraps it in a signed Trusted Web Activity APK using
+  Bubblewrap inside Docker (`adminng/pwa/Dockerfile.android`: JDK 17 + Android SDK 34).
+  `.github/workflows/android-apk.yml` runs it on `workflow_dispatch`/releases, takes the
+  keystore from repository secrets and attaches the APK as an artifact/release asset.
+- Security: the `adminng` frontend now sends a strict Content-Security-Policy (self-only
+  scripts/styles/images, no frame embedding) and a Permissions-Policy; the API keeps no CORS
+  (same origin), short-lived JWTs, rotating refresh tokens and the 5-failure lockout.
+- Docs: README and INSTALL gained AdminNG sections (access URLs, `ADMINNG_SECRET_KEY`,
+  server-side device approval); `plan.md` records the Phase 5 decisions — PostfixAdmin stays
+  as the fallback UI for v1 and WebAuthn/passkeys are deferred to a Phase 6 follow-up.
 - Added: **AdminNG Phase 1 — catalogue API** (`adminng/api/`): domain/mailbox/alias/admin
   CRUD with cursor pagination, rapid `GET /search`, quota usage from the Maildir++
   `.maildirsize` accounting (read-only vmail mount, `du` fallback, cache) and multi-tenant

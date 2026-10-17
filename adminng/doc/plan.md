@@ -33,8 +33,8 @@ running it) · **validated** (verified by running the acceptance checks).
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
 | 2 — Security model | **validated** | per-task table below; full suite 66 passed / 0 failed |
 | 3 — PWA frontend | **partial** | implemented and built; served at :8083; browser E2E/Lighthouse pending (see notes) |
-| 4 — APK pipeline | not started | |
-| 5 — Hardening & decision | not started | |
+| 4 — APK pipeline | **partial** | script + toolchain image + release workflow implemented; first CI/keystore run pending |
+| 5 — Hardening & decision | **partial** | headers/CSP, docs, 66-check suite done; WebAuthn explicitly deferred (decision recorded) |
 
 ### Phase 0 — task status
 
@@ -286,7 +286,8 @@ passes installability on the dev stack.
 
 ## Phase 4 — Android APK pipeline
 
-**Status:** not started.
+**Status:** partial — implemented, not executed here (needs Android SDK, network and the signing
+keystore; the first CI run is the validation).
 
 **Goal:** a signed APK as an artifact of every release, reproducibly.
 
@@ -309,7 +310,8 @@ phone against the dev stack reaches a working login (and the device shows up
 
 ## Phase 5 — Hardening, integration & the deprecation decision
 
-**Status:** not started.
+**Status:** partial — hardening done, WebAuthn explicitly deferred (decision below), browser
+E2E/Lighthouse outstanding.
 
 **Goal:** production-grade confidence and an explicit, informed decision on
 PostfixAdmin's future.
@@ -338,6 +340,40 @@ Tasks:
 suite (existing + AdminNG checks) is green on a fresh
 `down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle; the deprecation decision
 is recorded and its follow-up plan exists.
+
+### Phase 4 — task status
+
+| # | Task | Status | Evidence |
+|---|---|---|---|
+| 1 | `app-generate.sh` (dockerized PWA → signed APK) | **finished** | `adminng/pwa/app-generate.sh` + `Dockerfile.android` (JDK 17, Android SDK 34, Bubblewrap); `bash -n` clean |
+| 2 | GitHub Actions release artifact | **finished** | `.github/workflows/android-apk.yml` (workflow_dispatch + release; keystore from secrets; artifact + release attach) |
+| 3 | Keystore decision + rotation runbook | **partial** | decision: operator-owned keystore stored as repo secret `KEYSTORE_BASE64`; Play Store vs sideload still an operator call |
+| 4 | APK first-run flow | **finished** | the PWA already handles handshake → approval → enrollment/2FA; the APK only adds the server-URL hook (`VITE_APP_BASE`) |
+
+**Phase 4 notes:** the script pipes the keystore answers into Bubblewrap (documented order) —
+re-check against the pinned CLI on the first real run. No APK could be produced here: the
+sandbox has no Android SDK download/keystore, so this phase is deliberately `partial`.
+
+### Phase 5 — task status & decisions
+
+| # | Task | Status | Decision / evidence |
+|---|---|---|---|
+| 1 | WebAuthn / passkeys | **deferred (decision)** | TOTP is enforced for superadmins and fully tested; passkeys need a platform-authenticator harness (browser/phone) that this environment cannot provide. Tracked as Phase 6 in the roadmap below. |
+| 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
+| 3 | `test.sh` consolidation | **validated** | 66 checks, 30 unit/integration tests; two full green runs. |
+| 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
+| 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** as the fallback for v1 (vacation, fetchmail, welcome templates, backup/restore UI, setup OTP are not ported). AdminNG becomes the primary UI for domains/accounts/aliases/admins/devices/logs. Revisit after adoption with the per-feature table from §11 of the draft; a future Phase 6 ports or retires them. |
+
+**Phase 5 follow-ups (explicitly open):** browser E2E (Playwright) + Lighthouse installability on
+a real browser; automated i18n key-completeness check in CI; WebAuthn/passkeys; APK CI first run.
+
+## Phase 6 — follow-ups (stub, from the Phase 5 decisions)
+
+1. WebAuthn/passkeys for login and re-auth (data model: `webauthn_credential`, challenge store).
+2. Browser E2E + Lighthouse in CI (PWA installability gate).
+3. Automated i18n completeness check (extract keys, fail on missing `es`).
+4. Per-feature PostfixAdmin decision table (port / declare dead / keep), then retire or keep
+   `admin` formally.
 
 ## Milestone summary
 

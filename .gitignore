@@ -12,3 +12,4 @@ node_modules/
 dist/
 __pycache__/
 *.pyc
+adminng/pwa/android-project/

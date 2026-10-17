@@ -230,6 +230,28 @@ the rollback path are in [`db_upgrade.md`](db_upgrade.md).
 - **Maildir:** compatible with MailAD / Docker-MailAD; per-user maildirs live under a folder
   named after the domain, which eases migrations.
 
+## AdminNG (optional but recommended)
+
+The stack also ships **AdminNG**, a PWA-first admin interface served by the `adminng` container
+and backed by the `api` container (`ADMINNG_DB` holds devices, sessions, TOTP seeds and the
+audit trail). It replaces the everyday PostfixAdmin workflows; PostfixAdmin remains available
+at `mailadmin.<DEFAULT_DOMAIN>` as the fallback (vacation, fetchmail, backup/restore UI).
+
+1. **Set `ADMINNG_SECRET_KEY`** in `.env` (`openssl rand -hex 32`). It signs the AdminNG JWTs
+   and encrypts the TOTP seeds; the stack refuses to start without it. Rotating it invalidates
+   sessions and enrolled authenticators.
+2. `docker compose up -d` exposes it at `https://adminng.<DEFAULT_DOMAIN>` (Traefik) — or the
+   dev stack at <http://localhost:8083>.
+3. **Approve the first device from the server side** (there is no silent auto-approval):
+   `docker compose exec api adminng.py --list-devices` then
+   `docker compose exec api adminng.py --approve-device '<uuid>'`. The device ID is shown on
+   the client's lock screen; verify the requester before approving.
+4. The first superadmin login requires TOTP enrollment (QR + code). Domain admins without an
+   enrolled authenticator sign in with their password (TOTP is mandatory for superadmins).
+
+Daily backups now include the AdminNG database (`maild_adminng_*.sql.gz`). Full details:
+`adminng/README.md`, `adminng/doc/technical-draft.md`, `adminng/doc/plan.md`.
+
 ## Bonus: GitLab & Traefik
 
 There is a sample `.gitlab-ci.yml` and `env.sample_gitlab` in the repo; the GitLab flow uses

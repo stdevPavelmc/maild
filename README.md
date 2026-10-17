@@ -136,6 +136,26 @@ mailboxes a real quota for them to show up in the report.
 The installation, the first-boot provisioning, the first login, DKIM and the manual fallback
 (`AUTO_PROVISION=no`) are all documented in **[INSTALL.md](./INSTALL.md)**.
 
+# AdminNG — the next-generation admin interface (PWA)
+
+MailD also ships **AdminNG**, a PWA-first administration UI (domains, accounts, aliases,
+administrators, devices and audit logs) with a zero-trust device model, mandatory TOTP for
+superadmins and a full audit trail:
+
+- **Dev:** <http://localhost:8083> · **Production:** `https://adminng.<DEFAULT_DOMAIN>`
+  through your ingress (Traefik labels are already in the production compose files).
+- **First login:** the browser/phone registers a device (`PENDING`); a superadmin approves
+  it from the server side:
+  `docker compose exec api adminng.py --list-devices` then
+  `--approve-device '<uuid>'`. Afterwards the superadmin enrolls an authenticator (QR) on
+  the first login. The Android APK is built by `adminng/pwa/app-generate.sh` (see
+  `adminng/README.md`).
+- **New mandatory variable:** `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption,
+  `openssl rand -hex 32`). Rotating it invalidates sessions and enrolled TOTP seeds.
+- Design and roadmap: `adminng/doc/technical-draft.md` and `adminng/doc/plan.md`;
+  operator how-to: `adminng/README.md`. PostfixAdmin (`mailadmin.<domain>`) stays as the
+  fallback UI.
+
 # Contributing.
 
 There are many ways to contribute:
