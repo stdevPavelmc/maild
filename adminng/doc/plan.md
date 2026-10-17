@@ -32,7 +32,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | 0 — Scaffolding & wiring | **validated** (CI pending remote run) | per-task table below |
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
 | 2 — Security model | **validated** | per-task table below; full suite 66 passed / 0 failed |
-| 3 — PWA frontend | not started | |
+| 3 — PWA frontend | **partial** | implemented and built; served at :8083; browser E2E/Lighthouse pending (see notes) |
 | 4 — APK pipeline | not started | |
 | 5 — Hardening & decision | not started | |
 
@@ -119,6 +119,31 @@ running it) · **validated** (verified by running the acceptance checks).
 - **Backup credentials:** `~/.pgpass` needs one line per database; the script now writes both
   (catalogue + adminng) — the first attempt failed with `fe_sendauth: no password supplied`.
 - **WebAuthn/passkeys** remain Phase 5; TOTP is the enforced second factor for now.
+
+### Phase 3 — task status
+
+| # | Task | Status | Evidence |
+|---|---|---|---|
+| 1 | Shell layouts (sidebar / bottom tabs / FAB) | **finished** | `components/Shell.tsx`; responsive at the 640 px breakpoint |
+| 2 | Screens & flows (login, 2FA, enrollment QR, pending lock, editors, armed confirm, devices, logs) | **finished** | pages under `src/pages/`; destructive flows use the password re-auth + 5 s armed button |
+| 3 | Onboarding "server URL" — APK only | **finished** | the web build is same-origin (`VITE_API_BASE` hook exists for the APK build) |
+| 4 | Rapid search (Ctrl/⌘K) | **validated** (API) | modal calls `GET /search`; navigation prefills the list query |
+| 5 | Offline rules | **finished** | `vite-plugin-pwa` (CacheFirst shell / NetworkOnly API), offline banner + disabled writes, Dexie log cache |
+| 6 | Backgrounding (2 min shield / 15 min purge) | **finished** | `store/AuthContext.tsx` (visibilitychange + activity timers) |
+| 7 | Virtualized lists | **finished** | `@tanstack/react-virtual` in the logs screen; tables are cursor-paginated |
+| 8 | i18n en + es | **partial** | full EN/ES catalogues; the automated key-completeness check is still pending (CI step) |
+| 9 | Settings (language, device, about) | **finished** | `pages/Settings.tsx` |
+
+**Phase 3 notes**
+
+- `npm run build` (`tsc --noEmit` + Vite) passes inside the image; the served shell,
+  deep links (`/domains`, `/logs`) and the manifest were verified through the nginx proxy.
+- Browser end-to-end (Playwright/Lighthouse) is **not** available in this environment:
+  installability and the visual flows must be checked on a real browser before release.
+- The automated i18n completeness check is a Phase-5 CI item (extract keys to JSON or a
+  scripted comparison); both catalogues are complete by review today.
+- Session storage is `localStorage` (device id + token pair); the PKCE/WebAuthn upgrade is
+  the Phase-5 credential work.
 
 ## Phase 0 — Scaffolding & wiring
 
@@ -223,7 +248,7 @@ archives.
 
 ## Phase 3 — PWA frontend
 
-**Status:** not started.
+**Status:** partial — implemented and building; browser E2E/Lighthouse pending.
 
 **Goal:** the complete AdminNG experience against the finished API — the
 everyday admin work is fully doable from a phone.

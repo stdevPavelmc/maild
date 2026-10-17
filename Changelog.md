@@ -54,6 +54,14 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `maild_backup_*.sql.gz` (the catalogue) and `maild_adminng_*.sql.gz` (device approvals,
   sessions, TOTP seeds, audit trail) — with the same validation and 15-day retention, and
   reports both in the notification mail.
+- Added: **AdminNG Phase 3 — the PWA** (`adminng/pwa/`): device onboarding lock screen with
+  the copyable ID and polling; password → TOTP enrollment (QR/otpauth) → 2FA login;
+  responsive shell (desktop sidebar, mobile bottom tabs + FAB); domains/accounts/aliases/
+  admins CRUD with drawers; in-situ alias tags in the account editor; rapid search
+  (Ctrl/⌘K); devices panel with armed approve/revoke; virtualized audit log with filters
+  and a Dexie read-only cache; destructive confirmation with password re-auth and the
+  5-second armed button; offline write blocking; 2-minute privacy shield and 15-minute idle
+  purge; complete English + Spanish catalogues.
 - Added: **AdminNG Phase 1 — catalogue API** (`adminng/api/`): domain/mailbox/alias/admin
   CRUD with cursor pagination, rapid `GET /search`, quota usage from the Maildir++
   `.maildirsize` accounting (read-only vmail mount, `du` fallback, cache) and multi-tenant
