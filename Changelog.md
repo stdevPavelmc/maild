@@ -134,7 +134,7 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   is absent from all production compose files; it mounts `test.creds` read-only, `ldata/e2e` as
   `/artifacts` and the docker socket, because device approval stays out of band through
   `adminng.py --approve-device` in the `api` container. New specs: `superadmin` (TOTP enrollment
-  + devices panel authorize/revoke through the UI), `visual` (22 PNGs, desktop/mobile, EN/ES)
+  + devices panel authorize/revoke through the UI), `visual` (21 PNGs, desktop/mobile, EN/ES)
   and `a11y` (axe WCAG 2.1 A/AA). `flows` now also asserts the real Ctrl/⌘K search palette.
 - Fixed: the **devices panel and the admins table never paginated** — both consumed `usePaged`
   without passing the cursor or rendering "Load more", so only the first page was reachable.
@@ -144,6 +144,10 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   clean). `flows` also stops pressing Ctrl/⌘K before the shell has mounted.
 - Changed: `.github/workflows/pwa-e2e.yml` runs the suite through `adminng/pwa-test/run.sh`
   (no host Node/Playwright install) and uploads the axe reports.
+- Docs: `plan.md` Phase 5 records the full `./test.sh` run (67/67) and the Phase 6 table now
+  decides PostfixAdmin's remaining features one by one — vacation is the only port (Phase 7),
+  fetchmail/welcome templates/backup-restore UI/setup OTP are declared dead with their existing
+  replacements named, and the password-scheme migration stays a separate stack-wide item.
 - Fixed/Changed: **AdminNG Phase 4 pipeline executed for real** — the first signed APK
   (`cu.maild.adminng` 0.1.0, minSdk 24, target 36, `apksigner` v2+v3) was built from this tree.
   `app-generate.sh` now writes `twa-manifest.json` and drives Bubblewrap's deterministic

@@ -34,7 +34,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | 2 — Security model | **validated** | per-task table below; full suite 67 passed / 0 failed |
 | 3 — PWA frontend | **validated** | implemented and built; served at :8083; containerized browser suite (`pwa-test`) 3/3 flows + Lighthouse 97/100/96 + axe clean (see notes) |
 | 4 — APK pipeline | **partial → validated (pipeline)** | first real signed APK built locally with a throwaway keystore: apksigner v2/v3, `cu.maild.adminng` 0.1.0, minSdk 24; only the operator-keystore CI run and the on-device install remain |
-| 5 — Hardening & decision | **partial** | headers/CSP, docs, 66-check suite done; WebAuthn explicitly deferred (decision recorded) |
+| 5 — Hardening & decision | **partial** | headers/CSP + docs; full `test.sh` 67/67 green, containerized browser + a11y gates, per-feature PostfixAdmin table recorded; WebAuthn deferred, fresh-cycle run and APK CI run still open |
 
 ### Phase 0 — task status
 
@@ -154,7 +154,7 @@ running it) · **validated** (verified by running the acceptance checks).
   re-auth + the 5 s armed button.
 - Lighthouse 12: performance 97, accessibility 100, best-practices 96; SEO is reported only (63)
   because `public/robots.txt` disallows crawling a private admin panel on purpose.
-- `visual.spec.ts` (desktop 1440×900 + mobile 390×844, EN/ES, ~22 PNGs in `ldata/e2e/screens/`)
+- `visual.spec.ts` (desktop 1440×900 + mobile 390×844, EN/ES, 21 PNGs in `ldata/e2e/screens/`)
   and `a11y.spec.ts` (axe-core WCAG 2.1 A/AA, JSON per screen in `ldata/e2e/a11y/`) are the
   review tools for UI/UX work; the first audit run drove three fixes below.
 - Accessibility fixes found by the audits: secondary text moved from `slate-500` to `slate-400`
@@ -335,7 +335,7 @@ cd adminng/pwa && npm run i18n:check
 #   -> Lighthouse: performance >= 0.85, accessibility >= 0.9, best-practices >= 0.9
 
 # Review tools (artifacts under ldata/e2e/)
-./adminng/pwa-test/run.sh visual    # 22 PNGs: desktop 1440x900 + mobile 390x844, EN/ES
+./adminng/pwa-test/run.sh visual    # 21 PNGs: desktop 1440x900 + mobile 390x844, EN/ES
 ./adminng/pwa-test/run.sh a11y      # axe WCAG 2.1 A/AA per screen (fails on serious/critical)
 ./adminng/pwa-test/run.sh shell     # interactive shell inside the harness image
 
@@ -376,8 +376,11 @@ phone against the dev stack reaches a working login (and the device shows up
 
 ## Phase 5 — Hardening, integration & the deprecation decision
 
-**Status:** partial — hardening done, WebAuthn explicitly deferred (decision below); the browser
-E2E + Lighthouse gate is now containerized (`pwa-test`) and green.
+**Status:** partial — hardening done; the browser E2E/Lighthouse and accessibility gates are
+containerized (`pwa-test`) and green, the full `./test.sh` suite passes (67/67), and the
+per-feature PostfixAdmin decision table is recorded below. Open: WebAuthn (deliberately
+deferred), the fresh `down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle, and the first APK
+build with the operator keystore.
 
 **Goal:** production-grade confidence and an explicit, informed decision on
 PostfixAdmin's future.
@@ -459,24 +462,53 @@ is recorded and its follow-up plan exists.
 |---|---|---|---|
 | 1 | WebAuthn / passkeys | **deferred (decision)** | TOTP is enforced for superadmins and fully tested; passkeys need a platform-authenticator harness (browser/phone) that this environment cannot provide. Tracked as Phase 6 in the roadmap below. |
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
-| 3 | `test.sh` consolidation | **validated** | 67 checks, 31 unit/integration tests; full green runs. |
+| 3 | `test.sh` consolidation | **validated** | 67 checks, 31 unit/integration tests; full **67 passed / 0 failed / 0 skipped** run on 2026-10-17 against the current stack (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
-| 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** as the fallback for v1 (vacation, fetchmail, welcome templates, backup/restore UI, setup OTP are not ported). AdminNG becomes the primary UI for domains/accounts/aliases/admins/devices/logs. Revisit after adoption with the per-feature table from §11 of the draft; a future Phase 6 ports or retires them. |
+| 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** installed as the escape hatch, but each feature now has an explicit port/dead/keep call in the table below. AdminNG is the primary UI for domains/accounts/aliases/admins/devices/logs. |
 
-**Phase 5 follow-ups (explicitly open):** WebAuthn/passkeys; APK CI first run; per-feature
-PostfixAdmin decision table. Closed here: browser E2E + Lighthouse installability (dev-only
-`pwa-test` service, `run.sh verify`), automated i18n key-completeness check (inside `npm run
-build`, so the image build and CI gate it), and the axe accessibility audit (`run.sh a11y`).
+**Phase 5 follow-ups (explicitly open):** WebAuthn/passkeys; APK CI first run with the operator
+keystore; fresh-cycle `test.sh` run. Closed here: browser E2E + Lighthouse installability
+(dev-only `pwa-test` service, `run.sh verify`), automated i18n key-completeness check (inside
+`npm run build`, so the image build and CI gate it), the axe accessibility audit (`run.sh a11y`)
+and the per-feature PostfixAdmin decision table (below).
 
-## Phase 6 — follow-ups (stub, from the Phase 5 decisions)
+## Phase 6 — follow-ups & the PostfixAdmin decision table
 
 1. WebAuthn/passkeys for login and re-auth (data model: `webauthn_credential`, challenge store).
 2. ~~Browser E2E + Lighthouse in CI~~ — done in Phase 3: `adminng/pwa-test` + `run.sh verify`,
    wired into `.github/workflows/pwa-e2e.yml`; the a11y run publishes its JSON reports.
 3. Automated i18n completeness check — done: `npm run i18n:check` runs inside `npm run build`,
    which is the frontend image build (and the CI gate).
-4. Per-feature PostfixAdmin decision table (port / declare dead / keep), then retire or keep
-   `admin` formally.
+4. Per-feature PostfixAdmin decision table — **recorded below**; the remaining work is the
+   Phase-7 implementation of the "port" rows.
+5. WebAuthn/passkey login and re-auth (Phase 6.1) — design: `webauthn_credential` table
+   (credential id, public key, sign count, transports, device binding), a challenge store in
+   the `adminng` DB and `py_webauthn` on the API; the PWA calls `navigator.credentials.*` for
+   login **and** the re-auth step, falling back to the password when unavailable.
+
+### Phase 6 table — the PostfixAdmin feature decisions
+
+Basis: the feature list in §11.2 of the technical draft, the deployment's fixtures and cron
+jobs, and the fact that AdminNG already owns the catalogue. There is no usage telemetry; every
+"keep" is a *provisional* call to revisit after adoption, and every "dead" is backed by an
+existing replacement in this repository.
+
+| # | PostfixAdmin feature | Where it lives today | Decision | Rationale / next step |
+|---|---|---|---|---|
+| 1 | Domain / account / alias / admin CRUD, quota display | `admin` (PostfixAdmin) | **AdminNG is primary; PostfixAdmin stays as escape hatch** | AdminNG has write-compatible CRUD, tenant scoping, quota usage and an audit trail. Keep `admin` running until operators have migrated; no further feature work there |
+| 2 | Vacation auto-reply | `admin` (`vacation` table) + Dovecot Sieve | **Port (Phase 7)** | Add a "vacation" section to the account editor that writes a managed Sieve script (or the vacation table) and a per-user toggle. Medium effort, no architectural blocker; until then users configure it in PostfixAdmin |
+| 3 | Fetchmail integration | `admin` (`fetchmail` table) + cron | **Declare dead** (revisit only on operator request) | Upstream fetchmail is maintenance-only and most providers require OAuth2; a modern replacement is a different feature, not a port. Document the decision so nobody assumes parity |
+| 4 | Welcome / vacation mail templates | `admin` config keys | **Declare dead → fixed templates + docs** | AdminNG never sends welcome mail (only `bootstrap-dev.sh`/seeding creates mailboxes). Keep the templates as documentation, drop the editable UI |
+| 5 | Backup / restore UI | `admin` dump/restore pages | **Declare dead** | `cron/scripts/backup_db.sh` produces validated dumps of both databases with retention, and `db_upgrade.md` documents restore. A web restore button is a destructive surface with no operational need |
+| 6 | Setup OTP (`POSTFIXADMIN_SETUP_PASSWORD`) | `admin` entrypoint | **Declare dead** | The admin entrypoint generates and prints its own OTP per boot; AdminNG bootstraps devices through the audited `adminng.py` CLI. The variable is already ignored by the entrypoint |
+| 7 | Password scheme (md5crypt) | catalogue (`mailbox.password`) | **Keep for v1; separate stack-wide migration** | PostfixAdmin, Dovecot and AdminNG must switch schemes together (ARGON2/BLF-CRYPT). Tracked in §11.1; out of scope for the deprecation itself |
+| 8 | Alias domains | not present in this deployment's catalogue/API | **Not applicable** | No `alias_domain` usage in the schema, seeder or API; do not add it for parity's sake |
+
+**Consequence for `admin`:** it remains in the stack as the escape hatch for rows 2–6 (with row 2
+being the only one the roadmap intends to port). A future Phase 7 implements vacation in AdminNG;
+after that, `admin` can be dropped from the default compose profile with a one-line change and
+the docs updated.
+
 
 ## Milestone summary
 
