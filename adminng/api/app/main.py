@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from . import settings
 from .errors import install_error_handlers
-from .routers import admins, aliases, auth, domains, mailboxes, search
+from .routers import admins, aliases, auth, devices, domains, logs, mailboxes, search
 
 app = FastAPI(
     title="MailD AdminNG API",
@@ -30,7 +30,16 @@ app = FastAPI(
 
 install_error_handlers(app)
 
-for _router in (auth.router, domains.router, mailboxes.router, aliases.router, admins.router, search.router):
+for _router in (
+    auth.router,
+    devices.router,
+    domains.router,
+    mailboxes.router,
+    aliases.router,
+    admins.router,
+    search.router,
+    logs.router,
+):
     app.include_router(_router, prefix="/api/v1")
 
 

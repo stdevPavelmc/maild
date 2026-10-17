@@ -1,12 +1,25 @@
 """Administrator CRUD — superadmin only (scope, not data, is the privilege)."""
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
-from .. import catalogue
-from ..auth import Principal, require_superadmin
+from .. import audit, catalogue
+from ..auth import Principal, require_reauth, require_superadmin
 from ..models import AdminCreate, AdminOut, AdminUpdate, Page
 
 router = APIRouter(prefix="/admins", tags=["admins"])
+
+
+def _audit(request, principal, action, username):
+    audit.record(
+        actor=principal.username,
+        action=action,
+        device_id=principal.device_id,
+        entity_type="admin",
+        entity_id=username,
+        domain=None,
+        ip=audit.client_ip(request),
+        endpoint=f"{request.method} {request.url.path}",
+    )
 
 
 @router.get("", response_model=Page, summary="List administrators")
@@ -19,8 +32,14 @@ def list_admins(
 
 
 @router.post("", response_model=AdminOut, status_code=201, summary="Create an administrator")
-def create_admin(payload: AdminCreate, principal: Principal = Depends(require_superadmin)) -> dict:
-    return catalogue.create_admin(principal, payload.model_dump())
+def create_admin(
+    payload: AdminCreate,
+    request: Request,
+    principal: Principal = Depends(require_superadmin),
+) -> dict:
+    created = catalogue.create_admin(principal, payload.model_dump())
+    _audit(request, principal, "ADMIN_CREATE", created["username"])
+    return created
 
 
 @router.get("/{username}", response_model=AdminOut, summary="Get one administrator")
@@ -30,12 +49,22 @@ def get_admin(username: str, principal: Principal = Depends(require_superadmin))
 
 @router.put("/{username}", response_model=AdminOut, summary="Update an administrator")
 def update_admin(
-    username: str, payload: AdminUpdate, principal: Principal = Depends(require_superadmin)
+    username: str,
+    payload: AdminUpdate,
+    request: Request,
+    principal: Principal = Depends(require_superadmin),
 ) -> dict:
-    return catalogue.update_admin(principal, username, payload.model_dump())
+    updated = catalogue.update_admin(principal, username, payload.model_dump())
+    _audit(request, principal, "ADMIN_UPDATE", updated["username"])
+    return updated
 
 
-@router.delete("/{username}", status_code=204, summary="Delete an administrator")
-def delete_admin(username: str, principal: Principal = Depends(require_superadmin)) -> Response:
+@router.delete("/{username}", status_code=204, summary="Delete an administrator (re-auth)")
+def delete_admin(
+    username: str,
+    request: Request,
+    principal: Principal = Depends(require_reauth),
+) -> Response:
     catalogue.delete_admin(principal, username)
+    _audit(request, principal, "ADMIN_DELETE", username)
     return Response(status_code=204)

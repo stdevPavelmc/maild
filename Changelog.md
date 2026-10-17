@@ -33,6 +33,27 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Changed: `db/ensure_databases.sh` now also ensures `POSTGRES_DB` unconditionally and skips
   duplicate entries in its list (previously it exited early when `POSTGRES_EXTRA_DB` was
   empty).
+- Added: **AdminNG Phase 2 — device trust, TOTP, re-auth and audit** (`adminng/api/`):
+  `X-Device-ID` is mandatory everywhere (handshake → PENDING → APPROVED/REVOKED, with
+  revocation destroying the device's sessions); two-step login (`login-step1`/`login-step2`
+  with a device-bound access JWT and an opaque refresh token whose SHA-256 is stored);
+  TOTP enrollment and verification (RFC 6238, ±1 step, replay-protected, seeds encrypted at
+  rest); `/auth/refresh` rotates the jti and rejects reuse; `POST /auth/reauth-confirm`
+  mints the 30-second `X-Security-Validation-Token` that every destructive route now
+  requires (`403 OPERATION_NOT_VERIFIED` otherwise); `GET /logs` exposes the audit trail
+  with tenant scoping; 5 failed logins per username+IP lock that key out for 15 minutes.
+  New CLI verbs `--add-device` / `--approve-device` / `--revoke-device` / `--totp-reset`;
+  `bootstrap-dev.sh` pre-approves a well-known dev device (written as `adminng.device=` in
+  `test.creds`).
+- Changed: **`ADMINNG_SECRET_KEY` is now mandatory** (the four compose files carry a
+  `${ADMINNG_SECRET_KEY:?}` guard): it signs the AdminNG JWTs and encrypts the TOTP seeds.
+  Generate one with `openssl rand -hex 32`; rotating it invalidates live sessions and
+  enrolled TOTP seeds (admins re-enroll). Migration `003_phase2.sql` retires the Phase-1
+  sessions (they were not device-bound).
+- Changed: `cron/scripts/backup_db.sh` now writes **two** archives per run —
+  `maild_backup_*.sql.gz` (the catalogue) and `maild_adminng_*.sql.gz` (device approvals,
+  sessions, TOTP seeds, audit trail) — with the same validation and 15-day retention, and
+  reports both in the notification mail.
 - Added: **AdminNG Phase 1 — catalogue API** (`adminng/api/`): domain/mailbox/alias/admin
   CRUD with cursor pagination, rapid `GET /search`, quota usage from the Maildir++
   `.maildirsize` accounting (read-only vmail mount, `du` fallback, cache) and multi-tenant

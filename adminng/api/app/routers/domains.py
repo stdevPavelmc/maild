@@ -1,9 +1,9 @@
-"""Domain CRUD over the PostfixAdmin catalogue."""
+"""Domain CRUD over the PostfixAdmin catalogue (destructive deletes need re-auth)."""
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
-from .. import catalogue
-from ..auth import Principal, get_principal
+from .. import audit, catalogue
+from ..auth import Principal, get_principal, require_reauth
 from ..models import DomainCreate, DomainCreated, DomainOut, DomainUpdate, Page
 
 router = APIRouter(prefix="/domains", tags=["domains"])
@@ -21,6 +21,20 @@ RESTART_ADVISORY = {
 }
 
 
+def _audit(request, principal, action, entity_id, domain, **details):
+    audit.record(
+        actor=principal.username,
+        action=action,
+        device_id=principal.device_id,
+        entity_type="domain",
+        entity_id=entity_id,
+        domain=domain,
+        ip=audit.client_ip(request),
+        endpoint=f"{request.method} {request.url.path}",
+        **details,
+    )
+
+
 @router.get("", response_model=Page, summary="List domains (cursor-paginated)")
 def list_domains(
     q: str | None = None,
@@ -33,10 +47,13 @@ def list_domains(
 
 @router.post("", response_model=DomainCreated, status_code=201, summary="Create a domain")
 def create_domain(
-    payload: DomainCreate, principal: Principal = Depends(get_principal)
+    payload: DomainCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
 ) -> dict:
     created = catalogue.create_domain(principal, payload.model_dump())
     created["advisories"] = [RESTART_ADVISORY]
+    _audit(request, principal, "DOMAIN_CREATE", created["domain"], created["domain"])
     return created
 
 
@@ -47,16 +64,26 @@ def get_domain(domain: str, principal: Principal = Depends(get_principal)) -> di
 
 @router.put("/{domain}", response_model=DomainOut, summary="Update a domain")
 def update_domain(
-    domain: str, payload: DomainUpdate, principal: Principal = Depends(get_principal)
+    domain: str,
+    payload: DomainUpdate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
 ) -> dict:
-    return catalogue.update_domain(principal, domain.lower(), payload.model_dump())
+    updated = catalogue.update_domain(principal, domain.lower(), payload.model_dump())
+    _audit(request, principal, "DOMAIN_UPDATE", updated["domain"], updated["domain"])
+    return updated
 
 
 @router.delete(
     "/{domain}",
     status_code=204,
-    summary="Delete a domain (cascades to its mailboxes, aliases and scopes)",
+    summary="Delete a domain (re-auth; cascades to its mailboxes/aliases/scopes)",
 )
-def delete_domain(domain: str, principal: Principal = Depends(get_principal)) -> Response:
+def delete_domain(
+    domain: str,
+    request: Request,
+    principal: Principal = Depends(require_reauth),
+) -> Response:
     catalogue.delete_domain(principal, domain.lower())
+    _audit(request, principal, "DOMAIN_DELETE", domain.lower(), domain.lower())
     return Response(status_code=204)

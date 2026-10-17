@@ -51,7 +51,20 @@ ADMINNG_TOTP_REQUIRED = os.environ.get("ADMINNG_TOTP_REQUIRED", "superadmin")
 ADMINNG_SEARCH_LIMIT = _int("ADMINNG_SEARCH_LIMIT", 20)
 ADMINNG_QUOTA_CACHE_TTL = _int("ADMINNG_QUOTA_CACHE_TTL", 300)
 
-# Read-only mail storage root (Maildir++ .maildirsize lives under it).
+# --- Auth / device trust (Phase 2) ---------------------------------------------
+# Shared secret for JWT signing and TOTP-secret encryption. Mandatory: the api
+# refuses to start without it (compose passes it with a `${ADMINNG_SECRET_KEY:?}`
+# guard, so `compose config` fails fast when it is missing).
+ADMINNG_SECRET_KEY = os.environ.get("ADMINNG_SECRET_KEY", "")
+ADMINNG_TOTP_ISSUER = os.environ.get("ADMINNG_TOTP_ISSUER", "MailD AdminNG")
+ADMINNG_TOTP_DIGITS = _int("ADMINNG_TOTP_DIGITS", 6)
+ADMINNG_TOTP_STEP = _int("ADMINNG_TOTP_STEP", 30)
+ADMINNG_FLOW_TTL = _int("ADMINNG_FLOW_TTL", 300)        # login-step1 -> step2
+ADMINNG_ENROLL_TTL = _int("ADMINNG_ENROLL_TTL", 600)    # TOTP enrollment window
+ADMINNG_LOGIN_MAX_FAILURES = _int("ADMINNG_LOGIN_MAX_FAILURES", 5)
+ADMINNG_LOCKOUT_SECONDS = _int("ADMINNG_LOCKOUT_SECONDS", 900)
+ADMINNG_DEVICE_NAME_MAX = _int("ADMINNG_DEVICE_NAME_MAX", 120)
+
 VMAIL_ROOT = os.environ.get("VMAIL_ROOT", "/home/vmail")
 
 # Migrations shipped in the image next to the app package.

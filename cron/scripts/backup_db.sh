@@ -28,6 +28,10 @@ set -o pipefail
 # Configuration
 BACKUP_DIR="/backups/db"
 BACKUP_RETENTION_DAYS=15
+# AdminNG's own database (devices, sessions, TOTP, audit): created by the db image
+# on every boot, used by the api. Defaulted here because the cron image bakes no
+# ADMINNG_* variables of its own.
+: "${ADMINNG_DB:=adminng}"
 # An empty dump compressed is ~20 bytes and a real mailddb dump is tens of KB, so anything
 # below this is not a backup (overridable from the environment).
 BACKUP_MIN_BYTES="${BACKUP_MIN_BYTES:-1024}"
@@ -65,8 +69,12 @@ fail() {
 # Start backup
 log "=== Starting PostgreSQL backup ==="
 
-# Setup the postgres credentials & secure it
-echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
+# Setup the postgres credentials & secure it. One line per database: libpq matches
+# host:port:database:user, so the AdminNG dump needs its own entry to get a password.
+{
+    echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
+    [ -n "${ADMINNG_DB:-}" ] && echo "$POSTGRES_HOST:5432:$ADMINNG_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
+} > ~/.pgpass
 chmod 0600 ~/.pgpass
 
 # pg_dump refuses to dump a server newer than itself and prints nothing on stdout, so check
@@ -171,10 +179,87 @@ if [ "${BACKUP_STATUS}" = "SUCCESS" ]; then
     log "Backup completed successfully: ${BACKUP_FILE} (${BACKUP_SIZE}, ${BACKUP_BYTES} bytes, ${BACKUP_TABLES} tables)"
 fi
 
+# --- AdminNG database (devices, sessions, TOTP seeds, audit trail) ------------
+# A second archive with the same treatment. A failure here does NOT delete the
+# catalogue archive, but the run is marked FAILED: a backup without the device
+# approvals and the audit trail would silently lose adminng state.
+ADMINNG_BACKUP_FILE="${BACKUP_DIR}/maild_adminng_${DATE}.sql.gz"
+ADMINNG_STATUS="SKIPPED"
+ADMINNG_BYTES=0
+ADMINNG_SIZE="n/a"
+ADMINNG_TABLES=0
+ADMINNG_FAIL=""
+
+if [ "${BACKUP_STATUS}" = "SUCCESS" ] && [ -n "${ADMINNG_DB:-}" ]; then
+    log "Backing up AdminNG database: ${ADMINNG_DB}"
+
+    ADMINNG_ERR=$(mktemp)
+    pg_dump -h ${POSTGRES_HOST} \
+            -U ${POSTGRES_USER} \
+            -d "${ADMINNG_DB}" \
+            -w \
+            --no-owner \
+            --no-acl \
+            2> ${ADMINNG_ERR} \
+        | gzip > "${ADMINNG_BACKUP_FILE}" 2>> ${LOG_FILE}
+
+    PIPE_RC=("${PIPESTATUS[@]}")
+    ADMINNG_DUMP_RC="${PIPE_RC[0]:-1}"
+    ADMINNG_GZIP_RC="${PIPE_RC[1]:-1}"
+
+    if [ -s "${ADMINNG_ERR}" ]; then
+        log "pg_dump (${ADMINNG_DB}) reported:"
+        sed 's/^/    /' ${ADMINNG_ERR} | tee -a ${LOG_FILE} > /dev/null
+    fi
+    rm -f ${ADMINNG_ERR}
+
+    if [ "${ADMINNG_DUMP_RC}" -ne 0 ]; then
+        ADMINNG_STATUS="FAILED" ; ADMINNG_FAIL="pg_dump exited with ${ADMINNG_DUMP_RC}"
+    elif [ "${ADMINNG_GZIP_RC}" -ne 0 ]; then
+        ADMINNG_STATUS="FAILED" ; ADMINNG_FAIL="gzip exited with ${ADMINNG_GZIP_RC}"
+    else
+        ADMINNG_BYTES=$(stat -c %s "${ADMINNG_BACKUP_FILE}" 2>/dev/null || echo 0)
+        ADMINNG_SIZE=$(du -h "${ADMINNG_BACKUP_FILE}" | cut -f1)
+        if [ "${ADMINNG_BYTES}" -lt "${BACKUP_MIN_BYTES}" ]; then
+            ADMINNG_STATUS="FAILED" ; ADMINNG_FAIL="archive is only ${ADMINNG_BYTES} bytes"
+        elif ! gzip -t "${ADMINNG_BACKUP_FILE}" 2>> ${LOG_FILE}; then
+            ADMINNG_STATUS="FAILED" ; ADMINNG_FAIL="gzip -t failed"
+        else
+            ADMINNG_MARKERS=$(zcat "${ADMINNG_BACKUP_FILE}" | awk '
+                /^-- PostgreSQL database dump$/          { header = 1 }
+                /^-- PostgreSQL database dump complete$/ { trailer = 1 }
+                /^CREATE TABLE /                         { tables++ }
+                END { printf "%d %d %d", header, trailer, tables+0 }')
+            ADMINNG_HEADER="${ADMINNG_MARKERS%% *}"
+            ADMINNG_REST="${ADMINNG_MARKERS#* }"
+            ADMINNG_TRAILER="${ADMINNG_REST%% *}"
+            ADMINNG_TABLES="${ADMINNG_REST##* }"
+            if [ "${ADMINNG_HEADER}" != "1" ] || [ "${ADMINNG_TRAILER}" != "1" ]; then
+                ADMINNG_STATUS="FAILED"
+                ADMINNG_FAIL="payload is not a complete SQL dump (header=${ADMINNG_HEADER}, trailer=${ADMINNG_TRAILER})"
+            else
+                ADMINNG_STATUS="SUCCESS"
+            fi
+        fi
+    fi
+
+    if [ "${ADMINNG_STATUS}" = "FAILED" ]; then
+        rm -f "${ADMINNG_BACKUP_FILE}"
+        log "ERROR: AdminNG backup FAILED: ${ADMINNG_FAIL}"
+    else
+        log "AdminNG backup completed: ${ADMINNG_BACKUP_FILE} (${ADMINNG_SIZE}, ${ADMINNG_BYTES} bytes, ${ADMINNG_TABLES} tables)"
+    fi
+fi
+
+if [ "${ADMINNG_STATUS}" = "FAILED" ]; then
+    BACKUP_STATUS="FAILED"
+    FAIL_REASON="the AdminNG database dump failed: ${ADMINNG_FAIL} (the catalogue archive was kept)"
+fi
+
 # Clean up old backups (keep only last 15 days)
 log "Cleaning up old backups (keeping last ${BACKUP_RETENTION_DAYS} days)..."
 
-OLD_BACKUPS=$(find ${BACKUP_DIR} -name "maild_backup_*.sql.gz" -type f -mtime +${BACKUP_RETENTION_DAYS})
+OLD_BACKUPS=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f -mtime +${BACKUP_RETENTION_DAYS})
 
 if [ -n "$OLD_BACKUPS" ]; then
     echo "$OLD_BACKUPS" | while read -r old_file; do
@@ -186,7 +271,7 @@ else
 fi
 
 # Count current backups
-BACKUP_COUNT=$(find ${BACKUP_DIR} -name "maild_backup_*.sql.gz" -type f | wc -l)
+BACKUP_COUNT=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f | wc -l)
 log "Current backup count: ${BACKUP_COUNT}"
 
 # Calculate total backup size
@@ -195,7 +280,7 @@ log "Total backup storage used: ${TOTAL_SIZE}"
 
 # List recent backups
 log "Recent backups:"
-find ${BACKUP_DIR} -name "maild_backup_*.sql.gz" -type f -mtime -${BACKUP_RETENTION_DAYS} -exec ls -lh {} \; | \
+find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f -mtime -${BACKUP_RETENTION_DAYS} -exec ls -lh {} \; | \
     awk '{print $9, "(" $5 ")"}' | tee -a ${LOG_FILE}
 
 log "=== Backup process completed ==="
@@ -221,19 +306,23 @@ Host: ${POSTGRES_HOST}
 Backup File: ${BACKUP_FILE}
 Backup Size: ${BACKUP_SIZE} (${BACKUP_BYTES} bytes, ${BACKUP_TABLES} tables)
 
+AdminNG database: ${ADMINNG_DB:-adminng} (${ADMINNG_STATUS})
+AdminNG File: ${ADMINNG_BACKUP_FILE}
+AdminNG Size: ${ADMINNG_SIZE} (${ADMINNG_BYTES} bytes, ${ADMINNG_TABLES} tables)
+
 Retention Policy: ${BACKUP_RETENTION_DAYS} days
 Current Backup Count: ${BACKUP_COUNT}
 Total Storage Used: ${TOTAL_SIZE}
 
 Recent Backups:
-$(find ${BACKUP_DIR} -name "maild_backup_*.sql.gz" -type f -mtime -7 -printf "%TY-%Tm-%Td %TH:%TM %f (%s bytes)\n" | sort -r)
+$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f -mtime -7 -printf "%TY-%Tm-%Td %TH:%TM %f (%s bytes)\n" | sort -r)
 
 Log file: ${LOG_FILE}
 
 $(if [ "${BACKUP_STATUS}" = "FAILED" ]; then
     echo "ACTION REQUIRED: Please investigate the backup failure immediately!"
     echo "Reason: ${FAIL_REASON}"
-    echo "The unusable archive was deleted, so there is NO backup of today."
+    echo "The failed archive was deleted; any other archive listed above is still valid."
     echo "Check the log file for detailed error messages."
 else
     echo "No action required. Backup completed successfully."

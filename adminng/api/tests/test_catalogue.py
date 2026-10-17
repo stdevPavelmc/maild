@@ -32,7 +32,8 @@ from app.md5crypt import hash_password, is_md5crypt, verify_password
 DOMAIN = "adminng-selftest.test"
 MAILBOX = f"e2e@{DOMAIN}"
 PASSWORD = "self-test-secret"
-SUPER = Principal("selftest", True, [])
+DEVICE = "00000000-0000-4000-8000-000000000001"
+SUPER = Principal("selftest", True, [], DEVICE)
 
 
 def _wipe() -> None:
@@ -154,7 +155,7 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(catalogue.get_domain(SUPER, DOMAIN)["aliases"], 1)
 
     def test_04_tenant_scope_is_enforced(self):
-        outsider = Principal("outsider", False, ["other.test"])
+        outsider = Principal("outsider", False, ["other.test"], DEVICE)
         with self.assertRaises(ApiError) as ctx:
             catalogue.get_mailbox(outsider, MAILBOX)
         self.assertEqual(ctx.exception.status_code, 403)
@@ -163,7 +164,7 @@ class CatalogueTests(unittest.TestCase):
         with self.assertRaises(ApiError):
             catalogue.list_mailboxes(outsider, DOMAIN, None, None, 50, None)
 
-        scoped = Principal("scoped", False, [DOMAIN])
+        scoped = Principal("scoped", False, [DOMAIN], DEVICE)
         self.assertEqual(catalogue.get_mailbox(scoped, MAILBOX)["username"], MAILBOX)
 
     def test_05_duplicates_conflict(self):
@@ -183,7 +184,7 @@ class CatalogueTests(unittest.TestCase):
     def test_06_search_is_tenant_scoped(self):
         hits = catalogue.search(SUPER, "e2e", 20)
         self.assertTrue(any(hit["id"] == MAILBOX for hit in hits["results"]))
-        outsider = Principal("outsider", False, ["other.test"])
+        outsider = Principal("outsider", False, ["other.test"], DEVICE)
         self.assertEqual(catalogue.search(outsider, "e2e", 20)["results"], [])
 
     def test_07_mailbox_delete_revokes_and_recounts(self):

@@ -85,6 +85,7 @@ services:
       # explicit on every DB consumer (see the note on the db service): the guard
       # makes a missing password fail at `compose config`.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      ADMINNG_SECRET_KEY: ${ADMINNG_SECRET_KEY:?set ADMINNG_SECRET_KEY in .env}
     # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
       - .env

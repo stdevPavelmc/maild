@@ -1,12 +1,25 @@
 """Alias CRUD. `?goto=<mailbox>` backs the user editor's alias tags."""
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
-from .. import catalogue
-from ..auth import Principal, get_principal
+from .. import audit, catalogue
+from ..auth import Principal, get_principal, require_reauth
 from ..models import AliasCreate, AliasOut, AliasUpdate, Page
 
 router = APIRouter(prefix="/aliases", tags=["aliases"])
+
+
+def _audit(request, principal, action, address, domain):
+    audit.record(
+        actor=principal.username,
+        action=action,
+        device_id=principal.device_id,
+        entity_type="alias",
+        entity_id=address,
+        domain=domain,
+        ip=audit.client_ip(request),
+        endpoint=f"{request.method} {request.url.path}",
+    )
 
 
 @router.get("", response_model=Page, summary="List aliases (cursor-paginated)")
@@ -24,8 +37,14 @@ def list_aliases(
 
 
 @router.post("", response_model=AliasOut, status_code=201, summary="Create an alias")
-def create_alias(payload: AliasCreate, principal: Principal = Depends(get_principal)) -> dict:
-    return catalogue.create_alias(principal, payload.model_dump())
+def create_alias(
+    payload: AliasCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
+) -> dict:
+    created = catalogue.create_alias(principal, payload.model_dump())
+    _audit(request, principal, "ALIAS_CREATE", created["address"], created["domain"])
+    return created
 
 
 @router.get("/{address}", response_model=AliasOut, summary="Get one alias")
@@ -35,12 +54,23 @@ def get_alias(address: str, principal: Principal = Depends(get_principal)) -> di
 
 @router.put("/{address}", response_model=AliasOut, summary="Update an alias")
 def update_alias(
-    address: str, payload: AliasUpdate, principal: Principal = Depends(get_principal)
+    address: str,
+    payload: AliasUpdate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
 ) -> dict:
-    return catalogue.update_alias(principal, address, payload.model_dump())
+    updated = catalogue.update_alias(principal, address, payload.model_dump())
+    _audit(request, principal, "ALIAS_UPDATE", updated["address"], updated["domain"])
+    return updated
 
 
-@router.delete("/{address}", status_code=204, summary="Delete an alias")
-def delete_alias(address: str, principal: Principal = Depends(get_principal)) -> Response:
+@router.delete("/{address}", status_code=204, summary="Delete an alias (re-auth)")
+def delete_alias(
+    address: str,
+    request: Request,
+    principal: Principal = Depends(require_reauth),
+) -> Response:
+    alias = catalogue.get_alias(principal, address)
     catalogue.delete_alias(principal, address)
+    _audit(request, principal, "ALIAS_DELETE", address, alias["domain"])
     return Response(status_code=204)

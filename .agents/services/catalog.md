@@ -147,6 +147,15 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   Dovecot's auth cache can hold a superseded result for up to a minute after a suspend or
   password change (`doveadm auth cache flush` in the mda clears it) — same caveat as
   PostfixAdmin.
+- Phase 2 adds the zero-trust device gate (`/device/handshake`, `/device/status`,
+  `/admin/devices`), two-step login (`/auth/login-step1|step2`), TOTP enrollment
+  (`/auth/totp-enroll|confirm`, RFC 6238, secrets encrypted with
+  `ADMINNG_SECRET_KEY`), refresh rotation, the 30-second re-auth token required by
+  every destructive route (`POST /auth/reauth-confirm`) and the audit trail
+  (`GET /logs`). Lockout: 5 failures per username+IP → 429 for 15 minutes.
+- `ADMINNG_SECRET_KEY` is **mandatory** (compose `${ADMINNG_SECRET_KEY:?}` guard):
+  it signs the JWTs and encrypts the TOTP seeds; rotating it invalidates sessions
+  and enrolled seeds (admins re-enroll).
 - Ships the `adminng.py` CLI (`--list-devices`, `--approve-device`, `--revoke-device`,
   `--totp-reset`) — the server-side device-authorization path (`adminng/README.md`).
 - HEALTHCHECK: `GET /health`, 200 only when the adminng database answers.
@@ -234,6 +243,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   resolute it is ≥ the catalogue server, so the PGDG repository, keyring and `curl` the jammy image
   needed are gone. `backup_db.sh` still refuses to dump when the client is older than the server
   (it mails a CRITICAL with the `PG_CLIENT_MAJOR` remedy instead of keeping an empty archive).
+- `backup_db.sh` writes **two** archives per run: `maild_backup_*.sql.gz` (the catalogue) and
+  `maild_adminng_*.sql.gz` (AdminNG: device approvals, sessions, TOTP seeds, audit trail —
+  `ADMINNG_DB`, defaulted in the script). Both get the same size/gzip/trailer validation and the
+  same 15-day retention; a failed AdminNG dump keeps the catalogue archive but marks the run FAILED.
 - `pflogsumm` (1.1.14) lives in `/usr/bin` on resolute, so `resume.sh` resolves it from `PATH`;
   SpamAssassin 4.0.2 provides the `sa-learn` the Bayes job uses. The `cron/spamassassin/` file is a
   reference copy of Debian's `/etc/cron.daily/spamassassin` that the image never installs (the

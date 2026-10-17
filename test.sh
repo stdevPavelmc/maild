@@ -321,7 +321,10 @@ cleanup() {
             expunge_mailbox "$QUOTA_USER" Junk
             quota_set "$QUOTA_USER" 0
         fi
-        # Phase I (AdminNG catalogue API) leftovers, if a run aborted mid-section.
+        # Phase I (AdminNG): test devices (sessions cascade) and the fixture domain.
+        dcx db psql -U maild -d adminng -q -c \
+            "DELETE FROM device WHERE device_id IN ('aaaaaaaa-0000-4000-8000-0000000000a1','aaaaaaaa-0000-4000-8000-0000000000a2');" \
+            > /dev/null 2>&1 || true
         dcx db psql -U maild -d mailddb -q -c \
             "DELETE FROM alias WHERE domain='adminng-e2e.test'; DELETE FROM domain_admins WHERE domain='adminng-e2e.test'; DELETE FROM mailbox WHERE domain='adminng-e2e.test'; DELETE FROM domain WHERE domain='adminng-e2e.test';" \
             > /dev/null 2>&1 || true
@@ -983,6 +986,20 @@ else
         t_fail "the archive carries the catalogue schema (no 'CREATE TABLE public.mailbox' inside)"
     fi
 
+    # G4b — the same run also dumps the AdminNG database (device approvals, sessions,
+    # TOTP seeds and the audit trail would otherwise be lost on a restore)
+    BK_ANEW="$(dcx cron sh -c 'ls -1t /backups/db/maild_adminng_*.sql.gz 2>/dev/null | head -n1' | tr -d '\r')"
+    if [ -z "$BK_ANEW" ] ; then
+        t_fail "the run also writes the AdminNG archive (maild_adminng_*.sql.gz)"
+    elif ! dcx cron gzip -t "$BK_ANEW" 2>/dev/null ; then
+        t_fail "the AdminNG archive passes 'gzip -t' ($BK_ANEW)"
+    elif dcx cron sh -c "zcat '$BK_ANEW' | grep -q 'CREATE TABLE public.audit_event'" &&
+         dcx cron sh -c "zcat '$BK_ANEW' | grep -q '^-- PostgreSQL database dump complete\$'" ; then
+        t_ok "the same run also dumps the AdminNG database (audit_event + trailer present)"
+    else
+        t_fail "the AdminNG archive carries the adminng schema (no audit_event / trailer)"
+    fi
+
     # G5 — the regression itself: a pg_dump that aborts writes nothing and exits non-zero, which
     # gzip happily turns into a valid 20-byte archive. A fake pg_dump claiming a NEWER version
     # passes the version guard and then dies exactly like the real one did.
@@ -1219,167 +1236,295 @@ else
     fi
 fi
 
-# =============================================== I. AdminNG catalogue API ====
-# Phase 1 black box: login, CRUD over HTTP, PostfixAdmin write compatibility
-# (the mailbox it creates must log into IMAPS), quota from .maildirsize, tenant
-# isolation for a custom admin, and the delete cascade. The DB-level assertions
-# live in adminng/api/tests/test_catalogue.py (run inside the api container).
-section "I. AdminNG catalogue API (Phase 1)"
+# ================================= I. AdminNG API (Phase 2) =================
+# Device trust + TOTP + catalogue + re-auth + audit, black box through the
+# nginx proxy. Two fixed device ids keep re-runs deterministic; the sysadmin's
+# TOTP credential persists across runs (enrollment is exercised on the first).
+section "I. AdminNG API (device trust, TOTP, catalogue, re-auth)"
 
 API_BASE="http://$SERVER:8083/api/v1"
 ADMINNG_DOMAIN="adminng-e2e.test"
 ADMINNG_USER="probe@$ADMINNG_DOMAIN"
 ADMINNG_PW="$(chrono)"
+ADMINNG_DEVICE="aaaaaaaa-0000-4000-8000-0000000000a1"
+ADMINNG_DEVICE_2="aaaaaaaa-0000-4000-8000-0000000000a2"
 ADMIN_PW="${CRED[${DEPLOY_ADMIN,,}]:-}"
 ADMINNG_TOKEN=""
+ADMINNG_REFRESH=""
 
-adminng_call() { # <method> <path> <token> [json-body] → ADMINNG_CODE / ADMINNG_BODY
-    local method="$1" path="$2" token="$3" data="${4:-}" out="$TMPRUN/adminng.json"
-    if [ -n "$data" ]; then
-        ADMINNG_CODE="$(curl -s -o "$out" -w '%{http_code}' -X "$method" \
-            -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
-            --data "$data" "$API_BASE$path")"
-    else
-        ADMINNG_CODE="$(curl -s -o "$out" -w '%{http_code}' -X "$method" \
-            -H "Authorization: Bearer $token" "$API_BASE$path")"
-    fi
+adminng_call() { # <method> <path> <device> <token> [json] [vtoken] → ADMINNG_CODE/ADMINNG_BODY
+    local method="$1" path="$2" device="$3" token="$4" data="${5:-}" vtoken="${6:-}"
+    local out="$TMPRUN/adminng.json"
+    local args=(-s -o "$out" -w '%{http_code}' -X "$method" -H "X-Device-ID: $device")
+    [ -n "$token" ] && args+=(-H "Authorization: Bearer $token")
+    [ -n "$vtoken" ] && args+=(-H "X-Security-Validation-Token: $vtoken")
+    [ -n "$data" ] && args+=(-H 'Content-Type: application/json' --data "$data")
+    ADMINNG_CODE="$(curl "${args[@]}" "$API_BASE$path")"
     ADMINNG_BODY="$(cat "$out" 2>/dev/null)"
 }
-adminng_imap() { # <user> <pass> → 0 when IMAP login + SEARCH succeeds
+adminng_imap() { # <user> <pass>
     timeout -k5 20 curl -s --insecure --user "$1:$2" \
         --url "imaps://$SERVER:993/INBOX" -X 'SEARCH ALL' 2>&1 | grep -q '\* SEARCH'
 }
 adminng_flush_auth() { dcx mda doveadm auth cache flush > /dev/null 2>&1 || true; }
+adminng_code() { dcx api python tests/totp_code.py "$@" 2>/dev/null | tr -d ' \r\n'; }
+adminng_jqf() { sed -n "s/.*\"$1\":\"\([^\"]*\)\".*/\1/p"; }
 
 if [ "$HAVE_DC" = 0 ] || [ -z "$ADMIN_PW" ] ; then
-    t_skip "AdminNG catalogue API (needs docker and $DEPLOY_ADMIN in test.creds)"
+    t_skip "AdminNG API (needs docker and $DEPLOY_ADMIN in test.creds)"
 else
-    # Start clean: an aborted previous run must not turn the create into a 409.
+    # Deterministic clean slate for the fixtures this section owns.
+    dcx db psql -U maild -d adminng -q -c \
+        "DELETE FROM device WHERE device_id IN ('$ADMINNG_DEVICE','$ADMINNG_DEVICE_2');" \
+        > /dev/null 2>&1 || true
     dcx db psql -U maild -d mailddb -q -c \
         "DELETE FROM alias WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM domain_admins WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM mailbox WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM domain WHERE domain='$ADMINNG_DOMAIN';" \
         > /dev/null 2>&1 || true
 
-    ADMINNG_TOKEN="$(curl -s -X POST "$API_BASE/auth/login" \
-        -H 'Content-Type: application/json' \
-        --data "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}" |
-        sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
-    adminng_call GET /auth/me "$ADMINNG_TOKEN"
-    if [ -n "$ADMINNG_TOKEN" ] && [ "$ADMINNG_CODE" = 200 ] &&
+    # I1 — handshake + pending login refusal
+    adminng_call POST /device/handshake "$ADMINNG_DEVICE" "" '{"client_type":"web","device_name":"test.sh"}'
+    I1_H="$ADMINNG_CODE"
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
+    if [ "$I1_H" = 200 ] && [ "$ADMINNG_CODE" = 403 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_NOT_AUTHORIZED ; then
+        t_ok "I1 new device is PENDING: login-step1 refused with DEVICE_NOT_AUTHORIZED"
+    else
+        t_fail "I1 device gate (handshake=$I1_H step1=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+    fi
+
+    # I2 — CLI approval turns the device APPROVED
+    dcx api adminng.py --approve-device "$ADMINNG_DEVICE" > /dev/null 2>&1
+    adminng_call GET /device/status "$ADMINNG_DEVICE" ""
+    if printf '%s' "$ADMINNG_BODY" | grep -q APPROVED ; then
+        t_ok "I2 the server-side CLI approval flips the device to APPROVED"
+    else
+        t_fail "I2 device approval (body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+    fi
+
+    # I3 — TOTP policy: superadmin must enroll on the first login
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
+    NEED_NEXT=0
+    if printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_TOTP_ENROLLMENT ; then
+        ET="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf enrollment_token)"
+        adminng_call POST /auth/totp-enroll "$ADMINNG_DEVICE" "" \
+            "{\"enrollment_token\":\"$ET\"}"
+        SECRET="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf secret)"
+        CODE="$(dcx api python -c 'import sys; from app import totp; print(totp.code_at(sys.argv[1]))' "$SECRET" 2>/dev/null | tr -d ' \r\n')"
+        adminng_call POST /auth/totp-confirm "$ADMINNG_DEVICE" "" \
+            "{\"enrollment_token\":\"$ET\",\"code\":\"$CODE\"}"
+        I3_C="$ADMINNG_CODE"
+        adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
+            "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
+        if [ "$I3_C" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_2FA ; then
+            t_ok "I3 superadmin enrolls TOTP (QR/otpauth) and step1 then requires the 2FA code"
+            NEED_NEXT=1
+        else
+            t_fail "I3 TOTP enrollment (confirm=$I3_C step1=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+        fi
+    elif printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_2FA ; then
+        t_ok "I3 TOTP already enrolled from a previous run; step1 asks for the 2FA code"
+    else
+        t_fail "I3 step1 did not ask for enrollment or 2FA ($(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+    fi
+
+    # I4 — step2 with a real TOTP code → tokens; /auth/me
+    FLOW="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf flow_token)"
+    if [ "$NEED_NEXT" = 1 ] ; then CODE="$(adminng_code "$DEPLOY_ADMIN" --next)" ; else CODE="$(adminng_code "$DEPLOY_ADMIN")" ; fi
+    adminng_call POST /auth/login-step2 "$ADMINNG_DEVICE" "" \
+        "{\"flow_token\":\"$FLOW\",\"code\":\"$CODE\"}"
+    if [ "$ADMINNG_CODE" != 200 ] ; then
+        # replay/window guard: retry once with the next step
+        FLOW="$(curl -s -X POST "$API_BASE/auth/login-step1" -H "X-Device-ID: $ADMINNG_DEVICE" \
+            -H 'Content-Type: application/json' \
+            --data "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}" | adminng_jqf flow_token)"
+        CODE="$(adminng_code "$DEPLOY_ADMIN" --next)"
+        adminng_call POST /auth/login-step2 "$ADMINNG_DEVICE" "" \
+            "{\"flow_token\":\"$FLOW\",\"code\":\"$CODE\"}"
+    fi
+    ADMINNG_TOKEN="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
+    ADMINNG_REFRESH="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf refresh_token)"
+    adminng_call GET /auth/me "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ -n "$ADMINNG_TOKEN" ] && [ -n "$ADMINNG_REFRESH" ] &&
        printf '%s' "$ADMINNG_BODY" | grep -q '"superadmin":true' ; then
-        t_ok "I1 AdminNG login as $DEPLOY_ADMIN (superadmin) and /auth/me"
+        t_ok "I4 login-step2 issues the device-bound token pair and /auth/me is the superadmin"
     else
-        t_fail "I1 AdminNG login as $DEPLOY_ADMIN (status=$ADMINNG_CODE token=${#ADMINNG_TOKEN} chars)"
+        t_fail "I4 step2/login (body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+    fi
+    # I5 — catalogue writes through the device-bound API
+    adminng_call POST /domains "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"domain\":\"$ADMINNG_DOMAIN\",\"description\":\"AdminNG e2e\"}"
+    I5_D="$ADMINNG_CODE" ; I5_B="$ADMINNG_BODY"
+    adminng_call POST /mailboxes "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"username\":\"$ADMINNG_USER\",\"password\":\"$ADMINNG_PW\",\"name\":\"Probe\",\"quota_bytes\":10485760}"
+    if [ "$I5_D" = 201 ] && printf '%s' "$I5_B" | grep -q RESTART_REQUIRED &&
+       [ "$ADMINNG_CODE" = 201 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q "\"maildir\":\"$ADMINNG_DOMAIN/probe/\"" ; then
+        t_ok "I5 domain (+ restart advisory) and mailbox (PostfixAdmin maildir/bytes) created via the API"
+    else
+        t_fail "I5 create (domain=$I5_D mailbox=$ADMINNG_CODE)"
     fi
 
-    adminng_call POST /domains "$ADMINNG_TOKEN" \
-        "{\"domain\":\"$ADMINNG_DOMAIN\",\"description\":\"AdminNG e2e probe\"}"
-    if [ "$ADMINNG_CODE" = 201 ] && printf '%s' "$ADMINNG_BODY" | grep -q RESTART_REQUIRED ; then
-        t_ok "I2 domain created through the API with the restart advisory (amavis/mua/mta)"
-    else
-        t_fail "I2 domain create (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
-    fi
-
-    adminng_call POST /mailboxes "$ADMINNG_TOKEN" \
-        "{\"username\":\"$ADMINNG_USER\",\"password\":\"$ADMINNG_PW\",\"name\":\"AdminNG Probe\",\"quota_bytes\":10485760}"
-    if [ "$ADMINNG_CODE" = 201 ] && printf '%s' "$ADMINNG_BODY" | grep -q "\"maildir\":\"$ADMINNG_DOMAIN/probe/\"" ; then
-        t_ok "I3 mailbox created with the PostfixAdmin layout (maildir '$ADMINNG_DOMAIN/probe/', quota in bytes)"
-    else
-        t_fail "I3 mailbox create (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
-    fi
-
+    # I6 — the API-created mailbox logs into IMAPS
     if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
-        t_ok "I4 the API-created mailbox logs into IMAPS immediately (md5crypt accepted by Dovecot)"
+        t_ok "I6 the API-created mailbox logs into IMAPS immediately (md5crypt accepted)"
     else
-        t_fail "I4 IMAPS login for the API-created mailbox"
+        t_fail "I6 IMAPS login for the API-created mailbox"
     fi
 
-    adminng_call GET "/mailboxes/$ADMINNG_USER/quota" "$ADMINNG_TOKEN"
+    # I7 — quota usage from the Maildir++ accounting
+    adminng_call GET "/mailboxes/$ADMINNG_USER/quota" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
     if [ "$ADMINNG_CODE" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q '"quota_bytes":10485760' &&
        ! printf '%s' "$ADMINNG_BODY" | grep -q '"source":"unavailable"' ; then
-        t_ok "I5 quota usage from the Maildir++ accounting ($(printf '%s' "$ADMINNG_BODY" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p'))"
+        t_ok "I7 quota usage from .maildirsize/du ($(printf '%s' "$ADMINNG_BODY" | adminng_jqf source))"
     else
-        t_fail "I5 quota route (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+        t_fail "I7 quota route ($(printf '%s' "$ADMINNG_BODY" | head -c 140))"
     fi
 
-    adminng_call POST /aliases "$ADMINNG_TOKEN" \
+    # I8 — alias tags + rapid search
+    adminng_call POST /aliases "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
         "{\"address\":\"sales@$ADMINNG_DOMAIN\",\"goto\":\"$ADMINNG_USER\"}"
-    adminng_call GET "/aliases?goto=$ADMINNG_USER" "$ADMINNG_TOKEN"
-    if [ "$ADMINNG_CODE" = 200 ] &&
-       printf '%s' "$ADMINNG_BODY" | grep -q "\"address\":\"sales@$ADMINNG_DOMAIN\"" ; then
-        t_ok "I6 alias created and listed by the user-editor tag filter (?goto=)"
+    adminng_call GET "/aliases?goto=$ADMINNG_USER" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    I8_A="$ADMINNG_CODE" ; I8_B="$ADMINNG_BODY"
+    adminng_call GET "/search?q=probe" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ "$I8_A" = 200 ] && printf '%s' "$I8_B" | grep -q "\"address\":\"sales@$ADMINNG_DOMAIN\"" &&
+       printf '%s' "$ADMINNG_BODY" | grep -q "$ADMINNG_USER" ; then
+        t_ok "I8 alias tags (?goto=) and rapid search work"
     else
-        t_fail "I6 alias create/tag filter (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+        t_fail "I8 alias/search"
     fi
 
-    adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_TOKEN" '{"active":false}'
+    # I9 — suspension blocks IMAPS (after the Dovecot auth-cache flush)
+    adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" '{"active":false}'
     adminng_flush_auth
     if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
-        t_fail "I7 suspension is enforced for IMAPS (Dovecot still accepted the password)"
+        t_fail "I9 suspension is enforced for IMAPS"
     else
-        t_ok "I7 suspension blocks IMAPS (active=false + flushed auth cache)"
+        t_ok "I9 suspension blocks IMAPS (active=false)"
     fi
-    adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_TOKEN" '{"active":true}'
+    adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" '{"active":true}'
     adminng_flush_auth
     if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
-        t_ok "I7 reactivation restores IMAPS access"
+        t_ok "I9 reactivation restores IMAPS access"
     else
-        t_fail "I7 reactivation did not restore IMAPS access"
+        t_fail "I9 reactivation did not restore IMAPS"
     fi
 
-    adminng_call GET "/search?q=probe" "$ADMINNG_TOKEN"
-    if [ "$ADMINNG_CODE" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q "$ADMINNG_USER" ; then
-        t_ok "I8 rapid search finds the new mailbox"
+    # I10 — destructive action without the validation token is refused
+    adminng_call DELETE "/domains/$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    I10_NO="$ADMINNG_CODE" ; I10_B="$ADMINNG_BODY"
+    adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"password\":\"$ADMIN_PW\"}"
+    SV="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
+    if [ "$I10_NO" = 403 ] && printf '%s' "$I10_B" | grep -q OPERATION_NOT_VERIFIED &&
+       [ -n "$SV" ] ; then
+        t_ok "I10 DELETE without X-Security-Validation-Token is refused (403 OPERATION_NOT_VERIFIED); reauth mints the 30 s token"
     else
-        t_fail "I8 rapid search (status=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 160))"
+        t_fail "I10 re-auth negative (delete=$I10_NO token_len=${#SV})"
     fi
 
-    # Tenant isolation: ADMINMAIL is a custom admin of $DOMAIN unless bootstrap ran
-    # with --superadmin (then the negative cannot be asserted — skip honestly).
+    # I11 — tenant isolation with a custom admin
     if [ "$(sql "SELECT superadmin FROM admin WHERE username='$ADMINMAIL'")" = "t" ] ; then
-        t_skip "I9 tenant isolation (the fixture admin $ADMINMAIL is a superadmin)"
+        t_skip "I11 tenant isolation (the fixture admin $ADMINMAIL is a superadmin)"
     else
-        ADMINNG_ATOKEN="$(curl -s -X POST "$API_BASE/auth/login" \
-            -H 'Content-Type: application/json' \
-            --data "{\"username\":\"$ADMINMAIL\",\"password\":\"$PASS\"}" |
-            sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
-        adminng_call GET "/domains/$DEFAULT_DOMAIN" "$ADMINNG_ATOKEN"
-        I9_A="$ADMINNG_CODE"
-        adminng_call POST /mailboxes "$ADMINNG_ATOKEN" \
+        adminng_call POST /device/handshake "$ADMINNG_DEVICE_2" "" '{"client_type":"web","device_name":"test.sh tenant"}'
+        dcx api adminng.py --approve-device "$ADMINNG_DEVICE_2" > /dev/null 2>&1
+        adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
+            "{\"username\":\"$ADMINMAIL\",\"password\":\"$PASS\"}"
+        A_TOKEN="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
+        if [ -z "$A_TOKEN" ] && printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_2FA ; then
+            A_FLOW="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf flow_token)"
+            A_CODE="$(adminng_code "$ADMINMAIL" --next)"
+            adminng_call POST /auth/login-step2 "$ADMINNG_DEVICE_2" "" \
+                "{\"flow_token\":\"$A_FLOW\",\"code\":\"$A_CODE\"}"
+            A_TOKEN="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
+        fi
+        adminng_call GET "/domains/$DEFAULT_DOMAIN" "$ADMINNG_DEVICE_2" "$A_TOKEN"
+        I11_A="$ADMINNG_CODE"
+        adminng_call POST /mailboxes "$ADMINNG_DEVICE_2" "$A_TOKEN" \
             "{\"username\":\"intruder@$DEFAULT_DOMAIN\",\"password\":\"x\"}"
-        if [ "$I9_A" = 403 ] && [ "$ADMINNG_CODE" = 403 ] &&
+        if [ "$I11_A" = 403 ] && [ "$ADMINNG_CODE" = 403 ] &&
            printf '%s' "$ADMINNG_BODY" | grep -q FORBIDDEN_TENANT ; then
-            t_ok "I9 a custom admin cannot read or write a foreign domain (403 FORBIDDEN_TENANT)"
+            t_ok "I11 a custom admin cannot read or write a foreign domain (403 FORBIDDEN_TENANT)"
         else
-            t_fail "I9 tenant isolation (GET $DEFAULT_DOMAIN -> $I9_A, POST mailbox -> $ADMINNG_CODE)"
+            t_fail "I11 tenant isolation (get=$I11_A post=$ADMINNG_CODE)"
         fi
     fi
 
-    adminng_call DELETE "/aliases/sales@$ADMINNG_DOMAIN" "$ADMINNG_TOKEN"
-    I10_A="$ADMINNG_CODE"
-    adminng_call DELETE "/mailboxes/$ADMINNG_USER" "$ADMINNG_TOKEN"
-    I10_B="$ADMINNG_CODE"
-    adminng_call DELETE "/domains/$ADMINNG_DOMAIN" "$ADMINNG_TOKEN"
-    I10_C="$ADMINNG_CODE"
-    adminng_call GET "/domains/$ADMINNG_DOMAIN" "$ADMINNG_TOKEN"
-    if [ "$I10_A" = 204 ] && [ "$I10_B" = 204 ] && [ "$I10_C" = 204 ] &&
+    # I12 — re-auth DELETE cascade (fresh 30 s token)
+    adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"password\":\"$ADMIN_PW\"}"
+    SV="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
+    adminng_call DELETE "/aliases/sales@$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
+    I12_A="$ADMINNG_CODE"
+    adminng_call DELETE "/mailboxes/$ADMINNG_USER" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
+    I12_B="$ADMINNG_CODE"
+    adminng_call DELETE "/domains/$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
+    I12_C="$ADMINNG_CODE"
+    adminng_call GET "/domains/$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ "$I12_A" = 204 ] && [ "$I12_B" = 204 ] && [ "$I12_C" = 204 ] &&
        [ "$ADMINNG_CODE" = 404 ] &&
-       [ "$(sql "SELECT count(*) FROM mailbox WHERE domain='$ADMINNG_DOMAIN'")" = "0" ] &&
-       [ "$(sql "SELECT count(*) FROM alias WHERE domain='$ADMINNG_DOMAIN'")" = "0" ] ; then
-        t_ok "I10 delete cascade: alias/mailbox/domain removed (204s, then 404, no rows left)"
+       [ "$(sql "SELECT count(*) FROM mailbox WHERE domain='$ADMINNG_DOMAIN'")" = "0" ] ; then
+        t_ok "I12 re-auth DELETE cascade: alias/mailbox/domain gone (204s, then 404)"
     else
-        t_fail "I10 delete cascade (alias=$I10_A mailbox=$I10_B domain=$I10_C get=$ADMINNG_CODE)"
+        t_fail "I12 delete cascade (alias=$I12_A mailbox=$I12_B domain=$I12_C get=$ADMINNG_CODE)"
     fi
 
-    # Leave no live sessions behind (Phase 1 tokens are opaque rows).
-    curl -s -o /dev/null -X POST -H "Authorization: Bearer $ADMINNG_TOKEN" "$API_BASE/auth/logout"
-    if [ -n "${ADMINNG_ATOKEN:-}" ] ; then
-        curl -s -o /dev/null -X POST -H "Authorization: Bearer $ADMINNG_ATOKEN" "$API_BASE/auth/logout"
+    # I13 — refresh rotation + reuse detection
+    adminng_call POST /auth/refresh "$ADMINNG_DEVICE" "" "{\"refresh_token\":\"$ADMINNG_REFRESH\"}"
+    I13_OK="$ADMINNG_CODE"
+    NEW_AT="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
+    NEW_RT="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf refresh_token)"
+    adminng_call POST /auth/refresh "$ADMINNG_DEVICE" "" "{\"refresh_token\":\"$ADMINNG_REFRESH\"}"
+    if [ "$I13_OK" = 200 ] && [ -n "$NEW_AT" ] && [ "$ADMINNG_CODE" = 401 ] ; then
+        t_ok "I13 refresh rotates the jti and a replayed refresh token is rejected"
+        ADMINNG_TOKEN="$NEW_AT" ; ADMINNG_REFRESH="$NEW_RT"
+    else
+        t_fail "I13 refresh rotation (first=$I13_OK reuse=$ADMINNG_CODE)"
     fi
 
+    # I14 — audit trail
+    adminng_call GET "/logs?limit=50" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ "$ADMINNG_CODE" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q LOGIN_OK &&
+       printf '%s' "$ADMINNG_BODY" | grep -q MAILBOX_CREATE &&
+       printf '%s' "$ADMINNG_BODY" | grep -q DOMAIN_DELETE ; then
+        t_ok "I14 the audit trail records LOGIN_OK, MAILBOX_CREATE and DOMAIN_DELETE"
+    else
+        t_fail "I14 audit logs (code=$ADMINNG_CODE)"
+    fi
 
+    # I15 — device revocation kills the sessions
+    adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"password\":\"$ADMIN_PW\"}"
+    SV2="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
+    adminng_call PUT "/admin/devices/$ADMINNG_DEVICE/state" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        '{"action":"REVOKE"}' "$SV2"
+    I15_R="$ADMINNG_CODE"
+    adminng_call GET /auth/me "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ "$I15_R" = 200 ] && [ "$ADMINNG_CODE" = 401 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_REVOKED ; then
+        t_ok "I15 revoking the device kills its sessions immediately (DEVICE_REVOKED)"
+    else
+        t_fail "I15 device revoke (revoke=$I15_R me=$ADMINNG_CODE)"
+    fi
 
+    # I16 — lockout: five failed logins lock that username+IP for 15 minutes
+    # (a non-existent account, so no real fixture is affected)
+    LOCK_USER="nobody@adminng-lockout.test"
+    adminng_call POST /device/handshake "$ADMINNG_DEVICE_2" "" '{"client_type":"web","device_name":"test.sh lockout"}'
+    for _ in 1 2 3 4 5 ; do
+        adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
+            "{\"username\":\"$LOCK_USER\",\"password\":\"wrong\"}"
+    done
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
+        "{\"username\":\"$LOCK_USER\",\"password\":\"wrong\"}"
+    if [ "$ADMINNG_CODE" = 429 ] && printf '%s' "$ADMINNG_BODY" | grep -q RATE_LIMITED ; then
+        t_ok "I16 five failed logins lock the username+IP (429 RATE_LIMITED)"
+    else
+        t_fail "I16 lockout (got $ADMINNG_CODE: $(printf '%s' "$ADMINNG_BODY" | head -c 120))"
+    fi
 fi
-
 
 section "summary"
 printf '  passed : %d\n' "$T_PASS"

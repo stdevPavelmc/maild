@@ -339,11 +339,10 @@ self-approve safely. The full how-to lives in `adminng/README.md`.
 
 ### 4.4 Sessions & tokens
 
-**Phase 1 (implemented):** tokens are opaque and DB-backed — `POST /auth/login`
-verifies the catalogue `admin` row and mints a random token whose **SHA-256**
-is stored as `session.jti` — so the catalogue API can be exercised before the
-device model exists. The design below (JWT pair, jti rotation, device binding)
-is the Phase-2 target; the `Principal` dependency surface stays the same.
+**Phase 2 (implemented):** `login-step1`/`login-step2` issue a signed access JWT
+(device-bound, 10 min) plus an opaque refresh token (only its SHA-256 is stored);
+`/auth/refresh` rotates the jti (a replayed token is rejected) and the idle purge
+applies. Phase 1's plain bearer endpoint is gone.
 
 - **Access token:** JWT (PyJWT), `ADMINNG_ACCESS_TTL` (default 600 s), claims:
   `username`, `device_id`, `role` (`superadmin` | `domain_admin` + assigned

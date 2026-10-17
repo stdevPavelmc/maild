@@ -83,6 +83,22 @@ def cmd_set_state(device_id: str, state: str) -> int:
     return 0
 
 
+def cmd_add_device(device_id: str) -> int:
+    """Register a device row from the server side (PENDING), idempotently."""
+    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO device (device_id, client_type, device_name, state) "
+            "VALUES (%s, 'cli', 'registered via CLI', 'PENDING') "
+            "ON CONFLICT (device_id) DO NOTHING",
+            (device_id,),
+        )
+        cur.execute("SELECT device_id, state FROM device WHERE device_id = %s", (device_id,))
+        row = cur.fetchone()
+        conn.commit()
+    print(f"{row['device_id']} -> {row['state']} (registered)")
+    return 0
+
+
 def cmd_totp_reset(username: str) -> int:
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM totp_credential WHERE username = %s", (username,))
@@ -108,6 +124,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="list registered devices and their authorization state",
     )
     group.add_argument(
+        "--add-device",
+        metavar="DEVICE_ID",
+        help="register a device (PENDING) from the server side, idempotently",
+    )
+    group.add_argument(
         "--approve-device",
         metavar="DEVICE_ID",
         help="authorize a PENDING device (the first-device bootstrap)",
@@ -130,6 +151,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.list_devices:
             return cmd_list_devices()
+        if args.add_device:
+            return cmd_add_device(args.add_device)
         if args.approve_device:
             return cmd_set_state(args.approve_device, "APPROVED")
         if args.revoke_device:

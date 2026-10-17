@@ -31,7 +31,7 @@ running it) · **validated** (verified by running the acceptance checks).
 |---|---|---|
 | 0 — Scaffolding & wiring | **validated** (CI pending remote run) | per-task table below |
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
-| 2 — Security model | not started | |
+| 2 — Security model | **validated** | per-task table below; full suite 66 passed / 0 failed |
 | 3 — PWA frontend | not started | |
 | 4 — APK pipeline | not started | |
 | 5 — Hardening & decision | not started | |
@@ -90,6 +90,35 @@ running it) · **validated** (verified by running the acceptance checks).
 - The self-test is copied into the api image (small) so
   `docker compose exec api python tests/test_catalogue.py` runs anywhere;
   `adminng/api/.dockerignore` no longer excludes `tests/`.
+
+### Phase 2 — task status
+
+| # | Task | Status | Evidence |
+|---|---|---|---|
+| 1 | Device middleware, lifecycle, handshake/status | **validated** | `test.sh` I1/I2/I15 (PENDING refusal → CLI approve → revoke kills sessions); `tests/test_devices.py` 5 tests |
+| 2 | Two-step login, TOTP enrollment, token pair, jti rotation, idle purge | **validated** | I3/I4/I13; `tests/test_totp.py` (RFC 6238 vectors + replay), `tests/test_tokens.py`, `tests/test_crypto.py` |
+| 3 | Re-auth token + enforcement on destructive routes | **validated** | I10 (403 `OPERATION_NOT_VERIFIED` without the header) and I12 (204 with it) |
+| 4 | `adminng.py` CLI (`--add-device`, `--approve-device`, `--revoke-device`, `--totp-reset`) | **validated** | I2 + `bootstrap-dev.sh` pre-approves the dev device |
+| 5 | Audit trail + `GET /logs` (tenant-scoped) | **validated** | I14 (LOGIN_OK, MAILBOX_CREATE, DOMAIN_DELETE); logs include device id and IP |
+| 6 | Rate limiting + lockout | **validated** | I16 (5 failures → 429) and `tests/test_ratelimit.py` |
+| 7 | `backup_db.sh` also dumps the `adminng` DB | **validated** | G3/G4/G4b: two archives, gzip/trailer/schema checked, same retention |
+| 8 | `bootstrap-dev.sh` self-approval + `test.creds` | **validated** | the dev device is added/approved by the CLI and written as `adminng.device=` |
+
+**Phase 2 deviations / notes**
+
+- **`ADMINNG_SECRET_KEY` is now mandatory** (compose `${ADMINNG_SECRET_KEY:?}` guard, all four
+  files). It signs the JWTs and encrypts the TOTP seeds; rotating it invalidates sessions and
+  enrolled seeds. Existing deployments must add it before `up`.
+- **Migration `003_phase2.sql` retires Phase-1 sessions** (`device_id IS NULL`): the previous
+  plain bearer tokens die with the deploy.
+- **TOTP policy:** superadmins must enroll (`ADMINNG_TOTP_REQUIRED=superadmin`); a custom admin
+  without an enrolled credential authenticates in step 1 alone. Replay protection refuses a
+  used time step, so the test helper prints the *next* step right after enrollment.
+- **Lockout is in-process** (single replica, MailD's deployment shape), keyed by
+  username+IP — another user behind the same NAT is unaffected.
+- **Backup credentials:** `~/.pgpass` needs one line per database; the script now writes both
+  (catalogue + adminng) — the first attempt failed with `fe_sendauth: no password supplied`.
+- **WebAuthn/passkeys** remain Phase 5; TOTP is the enforced second factor for now.
 
 ## Phase 0 — Scaffolding & wiring
 
@@ -158,7 +187,7 @@ black-box checks.
 
 ## Phase 2 — Auth, device trust, TOTP, re-auth, audit
 
-**Status:** not started.
+**Status:** validated (30 unit tests; full `test.sh` 66 passed / 0 failed).
 
 **Goal:** the security model of §4 lands completely; devices gate everything.
 

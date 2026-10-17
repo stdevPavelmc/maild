@@ -56,7 +56,7 @@ stages:
     # the image defaults apply. compose needs the file present to resolve the
     # env_file list, so the template is always dumped.
     - cat env.sample_gitlab > .env
-    - env | grep -E '^(DEFAULT_DOMAIN|MAIL_ADMIN_USER|POSTGRES_PASSWORD|MAIL_ADMIN_PASSWORD|MUA_ADMIN_USER|MUA_ADMIN_PASSWORD|AUTO_PROVISION|PROVISION_VERSION|PROVISION_WAIT_TIMEOUT|PROVISION_FORCE)=' >> .env || true
+    - env | grep -E '^(DEFAULT_DOMAIN|MAIL_ADMIN_USER|POSTGRES_PASSWORD|ADMINNG_SECRET_KEY|MAIL_ADMIN_PASSWORD|MUA_ADMIN_USER|MUA_ADMIN_PASSWORD|AUTO_PROVISION|PROVISION_VERSION|PROVISION_WAIT_TIMEOUT|PROVISION_FORCE)=' >> .env || true
 
 ## Rules (defaults live in the Dockerfiles now, so no vars/*.env paths)
 .rule_db:

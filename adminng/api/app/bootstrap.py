@@ -22,6 +22,13 @@ def main() -> int:
         format="api: %(levelname)s - %(message)s",
         stream=sys.stderr,
     )
+    if not settings.ADMINNG_SECRET_KEY:
+        log.error(
+            "FATAL - ADMINNG_SECRET_KEY is not set: it signs the JWTs and encrypts "
+            "TOTP seeds. Set it in the operator env file (env.dev / .env), e.g. "
+            "`openssl rand -hex 32`."
+        )
+        return 2
     log.info(
         "waiting for PostgreSQL (catalogue=%s, adminng=%s)",
         settings.POSTGRES_DB,

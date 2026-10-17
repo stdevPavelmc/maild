@@ -513,6 +513,24 @@ mv "$creds_tmp" "$CREDS_FILE"
 chmod 600 "$CREDS_FILE"
 ok "$CREDS_FILE written ($(stat -c '%a' "$CREDS_FILE"), ${#ADDRESSES[@]} mailboxes, ${#NEW_PASSWORDS[@]} new password(s))"
 
+# --- AdminNG dev device -------------------------------------------------------
+# Pre-approve one well-known device so tooling (curl, test.sh, the docs) can drive
+# the API without a manual CLI approval. Browsers/phones generate their own UUID
+# and still need a superadmin to approve them (adminng/README.md).
+ADMINNG_DEV_DEVICE="00000000-0000-4000-8000-0000000000d1"
+if timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py --add-device "$ADMINNG_DEV_DEVICE" > /dev/null 2>&1; then
+	timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py --approve-device "$ADMINNG_DEV_DEVICE" > /dev/null 2>&1 || true
+	if ! grep -q '^adminng\.device=' "$CREDS_FILE" 2>/dev/null; then
+		{
+			printf '\n# AdminNG dev device (pre-approved by bootstrap-dev.sh; no TOTP enrolled)\n'
+			printf 'adminng.device=%s\n' "$ADMINNG_DEV_DEVICE"
+		} >> "$CREDS_FILE"
+	fi
+	ok "AdminNG dev device pre-approved: $ADMINNG_DEV_DEVICE"
+else
+	warn "could not pre-approve the AdminNG dev device (is the api container healthy?)"
+fi
+
 # --------------------------------------------------------------- hashing -----
 step "password hashes (MD5-CRYPT, the scheme Dovecot verifies)"
 
@@ -819,6 +837,7 @@ PROVISIONED_DOMAINS=("$TEST_DOMAIN")
 step "summary"
 printf '  %s\n' "domains     : ${PROVISIONED_DOMAINS[*]}"
 printf '  %s\n' "admin UI    : http://localhost:${ADMIN_PORT}   (PostfixAdmin)"
+printf '  %s\n' "adminng UI  : http://localhost:${ADMINNG_PORT}   (AdminNG PWA)"
 printf '  %s\n' "webmail     : http://localhost:${MUA_PORT}   (SnappyMail)"
 printf '  %s\n' "credentials : ${CREDS_FILE} (mode 600, git-ignored)"
 printf '\n  %-30s %-34s %s\n' "MAILBOX" "PASSWORD" "POSTFIXADMIN / ROLE"

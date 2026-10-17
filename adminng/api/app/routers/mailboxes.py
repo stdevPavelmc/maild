@@ -1,12 +1,26 @@
-"""Mailbox (user) CRUD, quota usage and the user's alias tags."""
+"""Mailbox (user) CRUD, quota usage and alias tags (deletes need re-auth)."""
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
-from .. import catalogue, quota
-from ..auth import Principal, get_principal
+from .. import audit, catalogue, quota
+from ..auth import Principal, get_principal, require_reauth
 from ..models import MailboxCreate, MailboxOut, MailboxUpdate, Page, QuotaStatus
 
 router = APIRouter(prefix="/mailboxes", tags=["mailboxes"])
+
+
+def _audit(request, principal, action, username, domain, **details):
+    audit.record(
+        actor=principal.username,
+        action=action,
+        device_id=principal.device_id,
+        entity_type="mailbox",
+        entity_id=username,
+        domain=domain,
+        ip=audit.client_ip(request),
+        endpoint=f"{request.method} {request.url.path}",
+        **details,
+    )
 
 
 @router.get("", response_model=Page, summary="List mailboxes (cursor-paginated)")
@@ -25,9 +39,14 @@ def list_mailboxes(
 
 @router.post("", response_model=MailboxOut, status_code=201, summary="Create a mailbox")
 def create_mailbox(
-    payload: MailboxCreate, principal: Principal = Depends(get_principal)
+    payload: MailboxCreate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
 ) -> dict:
-    return catalogue.create_mailbox(principal, payload.model_dump())
+    created = catalogue.create_mailbox(principal, payload.model_dump())
+    _audit(request, principal, "MAILBOX_CREATE", created["username"], created["domain"],
+           quota_bytes=created["quota_bytes"])
+    return created
 
 
 @router.get("/{username}", response_model=MailboxOut, summary="Get one mailbox")
@@ -37,23 +56,39 @@ def get_mailbox(username: str, principal: Principal = Depends(get_principal)) ->
 
 @router.put("/{username}", response_model=MailboxOut, summary="Update a mailbox")
 def update_mailbox(
-    username: str, payload: MailboxUpdate, principal: Principal = Depends(get_principal)
+    username: str,
+    payload: MailboxUpdate,
+    request: Request,
+    principal: Principal = Depends(get_principal),
 ) -> dict:
     updated = catalogue.update_mailbox(principal, username, payload.model_dump())
     if payload.quota_bytes is not None:
         quota.invalidate(updated["domain"], updated["local_part"])
+    _audit(
+        request,
+        principal,
+        "MAILBOX_UPDATE",
+        updated["username"],
+        updated["domain"],
+        changed=sorted(k for k, v in payload.model_dump().items() if v is not None),
+    )
     return updated
 
 
 @router.delete(
     "/{username}",
     status_code=204,
-    summary="Delete a mailbox (its sessions are revoked; the maildir stays)",
+    summary="Delete a mailbox (re-auth; sessions revoked, maildir stays)",
 )
-def delete_mailbox(username: str, principal: Principal = Depends(get_principal)) -> Response:
+def delete_mailbox(
+    username: str,
+    request: Request,
+    principal: Principal = Depends(require_reauth),
+) -> Response:
+    mailbox = catalogue.get_mailbox(principal, username)
     catalogue.delete_mailbox(principal, username)
-    local_part, _, domain = username.rpartition("@")
-    quota.invalidate(domain, local_part)
+    quota.invalidate(mailbox["domain"], mailbox["local_part"])
+    _audit(request, principal, "MAILBOX_DELETE", username, mailbox["domain"])
     return Response(status_code=204)
 
 

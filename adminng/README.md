@@ -51,30 +51,38 @@ docker compose --env-file env.dev -f docker-compose-dev.yml up -d db api adminng
 `db` container from `ADMINNG_DB`, default `adminng`). `adminng` has no environment
 of its own: it is a static bundle plus the `/api/v1/` proxy.
 
-## API (Phase 1: catalogue CRUD)
+## API (Phase 2: device-bound, two-step auth)
 
-Everything is served under `/api/v1/` (same-origin through `adminng`). Phase 1
-uses plain bearer auth — the device gate + TOTP arrive in Phase 2:
+Every request except `GET /health` carries `X-Device-ID` (a UUID the client
+generates once and stores). A fresh device is `PENDING` and only a superadmin
+can approve it — from the CLI (`adminng.py --approve-device`) or the devices
+panel. Then:
 
-```bash
-TOKEN=$(curl -s -X POST localhost:8083/api/v1/auth/login \
-  -H 'Content-Type: application/json' \
-  -d '{"username":"sysadmin@maild.cu","password":"<password>"}' |
-  sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
-curl -s -H "Authorization: Bearer $TOKEN" localhost:8083/api/v1/domains
+```
+POST /api/v1/device/handshake            # register (PENDING)
+POST /api/v1/auth/login-step1            # password → REQUIRES_TOTP_ENROLLMENT | REQUIRES_2FA
+POST /api/v1/auth/totp-enroll|confirm    # QR/otpauth + code (superadmins must enroll)
+POST /api/v1/auth/login-step2            # TOTP code → access JWT (10 min) + refresh token
+POST /api/v1/auth/refresh                # rotate the refresh jti
+POST /api/v1/auth/reauth-confirm         # password → X-Security-Validation-Token (30 s)
 ```
 
-Routes: `/auth/login|logout|me`, `/domains`, `/mailboxes` (plus `/{u}/quota`),
-`/aliases` (with `?goto=<mailbox>` for the user editor's tags), `/admins`
-(superadmin only) and `/search`. Interactive docs: `/api/v1/docs`. Catalogue
-writes are PostfixAdmin-compatible (md5crypt, maildir layout, quota bytes) and
-suspending/deleting an account revokes its sessions.
+Catalogue routes (`/domains`, `/mailboxes` + `/{u}/quota`, `/aliases`,
+`/admins`, `/search`) require the Bearer access token; **deletes additionally
+require the `X-Security-Validation-Token`** header (else
+`403 OPERATION_NOT_VERIFIED`). `GET /logs` reads the audit trail. Interactive
+docs: `/api/v1/docs`.
+
+Dev fixtures: `bootstrap-dev.sh` pre-approves the device
+`00000000-0000-4000-8000-0000000000d1` and writes it to `test.creds` as
+`adminng.device=<uuid>`; the first superadmin login must enroll TOTP (the
+`sysadmin` credential persists across test runs).
 
 The catalogue self-test runs inside the container:
 
 ```bash
 docker compose --env-file env.dev -f docker-compose-dev.yml \
-  exec -T api python tests/test_catalogue.py
+  exec -T api python -m unittest discover -s tests -v
 ```
 
 
