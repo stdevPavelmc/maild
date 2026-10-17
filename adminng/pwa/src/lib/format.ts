@@ -17,6 +17,18 @@ export const UNIT_BYTES: Record<QuotaUnit, number> = {
 }
 
 /**
+ * Split an alias "forwards to" value into recipients: one per line, or comma /
+ * space separated (blank entries dropped, duplicates kept in order). The API
+ * stores them comma-separated; the editor and the card chips share this.
+ */
+export function splitForwardsTo(value: string): string[] {
+  return (value || '')
+    .split(/[\s,]+/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+}
+
+/**
  * "1 GB", "300 MB", "2 TB"… or null when there is no limit (the caller renders
  * its localized "Unlimited"). Below 1 MB the quota is meaningless, so it clamps
  * to 1 MB instead of showing a confusing "0 MB".

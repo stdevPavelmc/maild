@@ -8,11 +8,84 @@ import {
   type ReactNode,
   type Ref,
   type SelectHTMLAttributes,
+  type TextareaHTMLAttributes,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/utils'
-import { QUOTA_UNITS, quotaToBytes, quotaValueFromBytes, type QuotaUnit } from '../lib/format'
+import { QUOTA_UNITS, quotaToBytes, quotaValueFromBytes, splitForwardsTo, type QuotaUnit } from '../lib/format'
 import { Button } from './ui/button'
+
+/** Textarea styled like the kit Input (the alias "forwards to" editor). */
+export function TextArea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return (
+    <textarea
+      {...props}
+      className={cn(
+        'w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 font-mono text-xs text-slate-100',
+        'placeholder:text-slate-400 focus:border-blue-500 focus:outline-none disabled:opacity-50',
+        props.className,
+      )}
+    />
+  )
+}
+
+/**
+ * An alias "forwards to" editor: a textarea (one recipient per line, or comma /
+ * space separated) with a live chip preview underneath. Fan-out aliases are
+ * plain data: `goto` is stored comma-separated, each recipient is a chip on the
+ * alias card, and the create/edit modals share this component.
+ */
+export function GotoInput({
+  value,
+  onCommit,
+  disabled,
+}: {
+  value: string
+  onCommit: (value: string) => void
+  disabled?: boolean
+}) {
+  const { t } = useTranslation()
+  const [text, setText] = useState(value)
+
+  // Keep the editor in sync when it is reopened for another alias.
+  useEffect(() => {
+    setText(value)
+  }, [value])
+
+  const recipients = splitForwardsTo(text)
+
+  return (
+    <div>
+      <TextArea
+        rows={3}
+        value={text}
+        disabled={disabled}
+        placeholder="anna@example.com, bob@example.com"
+        onChange={(event) => setText(event.target.value)}
+        onBlur={() => onCommit(recipients.join(','))}
+      />
+      <p className="mt-1 text-xs text-slate-400">{t('mailboxes.aliasForwardsHelp')}</p>
+      {recipients.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {recipients.slice(0, 8).map((recipient) => (
+            <span
+              key={recipient}
+              className="inline-flex items-center gap-1.5 rounded-md bg-slate-800/60 px-2 py-1 font-mono text-[11px] text-slate-300"
+            >
+              <span aria-hidden="true">🎭</span>
+              <span className="break-all">{recipient}</span>
+            </span>
+          ))}
+          {recipients.length > 8 && (
+            <span className="inline-flex items-center rounded-md bg-slate-800/60 px-2 py-1 text-xs text-slate-300">
+              {t('common.more', { count: recipients.length - 8 })}
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
   return (

@@ -356,6 +356,8 @@ export const api = {
     request<Page<Alias>>(`/aliases${qs(params)}`),
   createAlias: (body: { address: string; goto: string }) =>
     request<Alias>('/aliases', { method: 'POST', body }),
+  updateAlias: (address: string, body: { goto?: string; active?: boolean }) =>
+    request<Alias>(`/aliases/${encodeURIComponent(address)}`, { method: 'PUT', body }),
   deleteAlias: (address: string, vtoken: string) =>
     request<void>(`/aliases/${encodeURIComponent(address)}`, { method: 'DELETE', vtoken }),
 

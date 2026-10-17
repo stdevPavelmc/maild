@@ -5,7 +5,7 @@ import { useOnline } from '../lib/online'
 import { useSelectedDomain } from '../lib/selectedDomain'
 import { usePaged } from '../lib/usePaged'
 import { useNewSignal, useSearchQuery } from '../lib/useUrlState'
-import { Empty, ErrorBanner, Field, Input, Modal, SectionHeader } from '../components/kit'
+import { Empty, ErrorBanner, Field, GotoInput, Input, Modal, SectionHeader, Toggle } from '../components/kit'
 import {
   ActionButton,
   ActionRow,
@@ -17,6 +17,7 @@ import {
   MetaRow,
   StatusMark,
 } from '../components/cards'
+import { splitForwardsTo } from '../lib/format'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
@@ -38,6 +39,7 @@ export function AliasesPage({ password }: { password: string }) {
   const [goto, setGoto] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Alias | null>(null)
+  const [editing, setEditing] = useState<Alias | null>(null)
 
   const list = usePaged<Alias>(
     (cursor) => api.listAliases({ domain: scope || undefined, q: query || undefined, cursor }),
@@ -85,6 +87,12 @@ export function AliasesPage({ password }: { password: string }) {
               </div>
               <ActionRow label={t('common.actions')}>
                 <ActionButton
+                  glyph="🛠"
+                  label={t('common.edit')}
+                  disabled={!online}
+                  onClick={() => setEditing(alias)}
+                />
+                <ActionButton
                   glyph="❌"
                   label={t('common.delete')}
                   tone="danger"
@@ -98,6 +106,18 @@ export function AliasesPage({ password }: { password: string }) {
               {alias.goto}
             </p>
             <MetaRow>
+              {splitForwardsTo(alias.goto)
+                .slice(0, 4)
+                .map((goto) => (
+                  <MetaChip key={goto} icon="🎭" title={t('aliases.goto')}>
+                    {goto}
+                  </MetaChip>
+                ))}
+              {splitForwardsTo(alias.goto).length > 4 && (
+                <MetaChip icon="🎭" title={splitForwardsTo(alias.goto).join(', ')}>
+                  {t('common.more', { count: splitForwardsTo(alias.goto).length - 4 })}
+                </MetaChip>
+              )}
               <MetaChip icon="🌐" title={t('domain.select')}>{alias.domain}</MetaChip>
               {alias.created && (
                 <MetaChip icon="🗓" title={t('common.created')}>{alias.created.slice(0, 10)}</MetaChip>
@@ -125,8 +145,45 @@ export function AliasesPage({ password }: { password: string }) {
           <Input value={address} onChange={(event) => setAddress(event.target.value)} placeholder="sales@example.com" />
         </Field>
         <Field label={t('aliases.goto')}>
-          <Input value={goto} onChange={(event) => setGoto(event.target.value)} placeholder="user@example.com" />
+          <GotoInput
+            value={goto}
+            disabled={!online}
+            onCommit={(value) => setGoto(value)}
+          />
         </Field>
+      </Modal>
+
+      <Modal
+        open={Boolean(editing)}
+        title={editing?.address ?? ''}
+        onClose={() => setEditing(null)}
+        footer={<Button variant="outline" onClick={() => setEditing(null)}>{t('common.close')}</Button>}
+      >
+        {editing && (
+          <>
+            <Field label={t('aliases.goto')}>
+              <GotoInput
+                value={editing.goto}
+                disabled={!online}
+                onCommit={(value) => {
+                  void api
+                    .updateAlias(editing.address, { goto: value })
+                    .then(() => list.reload())
+                }}
+              />
+            </Field>
+            <Toggle
+              checked={editing.active}
+              label={t('common.active')}
+              disabled={!online}
+              onChange={(value) => {
+                void api
+                  .updateAlias(editing.address, { active: value })
+                  .then(() => list.reload())
+              }}
+            />
+          </>
+        )}
       </Modal>
 
       <ConfirmDelete

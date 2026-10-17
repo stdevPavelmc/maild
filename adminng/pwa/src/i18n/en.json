@@ -107,6 +107,7 @@
     "used": "Used",
     "quotaHint": "0 = unlimited",
     "quotaUnit": "Quota unit",
+    "aliasForwardsHelp": "One per line, or comma / space separated — fan-out is supported.",
     "create": "Create account",
     "aliases": "Forwarding aliases",
     "addAlias": "Add alias",
