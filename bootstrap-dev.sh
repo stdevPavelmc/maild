@@ -520,10 +520,10 @@ ok "$CREDS_FILE written ($(stat -c '%a' "$CREDS_FILE"), ${#ADDRESSES[@]} mailbox
 ADMINNG_DEV_DEVICE="00000000-0000-4000-8000-0000000000d1"
 if timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py --add-device "$ADMINNG_DEV_DEVICE" > /dev/null 2>&1; then
 	timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py --approve-device "$ADMINNG_DEV_DEVICE" > /dev/null 2>&1 || true
-	if ! grep -q '^adminng\.device=' "$CREDS_FILE" 2>/dev/null; then
+	if ! grep -q '^# AdminNG dev device' "$CREDS_FILE" 2>/dev/null; then
 		{
 			printf '\n# AdminNG dev device (pre-approved by bootstrap-dev.sh; no TOTP enrolled)\n'
-			printf 'adminng.device=%s\n' "$ADMINNG_DEV_DEVICE"
+			printf '# adminng.device=%s\n' "$ADMINNG_DEV_DEVICE"
 		} >> "$CREDS_FILE"
 	fi
 	ok "AdminNG dev device pre-approved: $ADMINNG_DEV_DEVICE"

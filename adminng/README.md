@@ -111,6 +111,9 @@ docker compose exec api adminng.py --revoke-device 'DE793C1A-4F82-411B-9A74-5F11
 
 # Unlock an administrator that lost its TOTP authenticator
 docker compose exec api adminng.py --totp-reset 'admin@example.com'
+
+# Clear a login lockout (5 failed attempts) — testing/ops aid
+docker compose exec api adminng.py --reset-ratelimit 'admin@example.com'
 ```
 
 > **`--add-device` does not authorize anything:** it only *registers* a row in the

@@ -63,7 +63,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (66 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (67 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```

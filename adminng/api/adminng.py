@@ -102,6 +102,16 @@ def cmd_add_device(device_id: str) -> int:
     return 0
 
 
+def cmd_reset_ratelimit(username: str) -> int:
+    """Clear a login lockout (testing/ops aid): every rate_limit row for the user."""
+    from app import ratelimit
+
+    removed = ratelimit.reset(username)
+    label = "entry" if removed == 1 else "entries"
+    print(f"rate limit for {username}: {removed} {label} cleared")
+    return 0
+
+
 def cmd_totp_reset(username: str) -> int:
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM totp_credential WHERE username = %s", (username,))
@@ -142,6 +152,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="revoke a device and destroy every session bound to it",
     )
     group.add_argument(
+        "--reset-ratelimit",
+        metavar="USERNAME",
+        help="clear the login rate limit/lockout for a username (testing aid)",
+    )
+    group.add_argument(
         "--totp-reset",
         metavar="USERNAME",
         help="delete a TOTP credential so the next login re-enrolls",
@@ -160,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_set_state(args.approve_device, "APPROVED")
         if args.revoke_device:
             return cmd_set_state(args.revoke_device, "REVOKED")
+        if args.reset_ratelimit:
+            return cmd_reset_ratelimit(args.reset_ratelimit)
         if args.totp_reset:
             return cmd_totp_reset(args.totp_reset)
     except psycopg.errors.InvalidTextRepresentation:

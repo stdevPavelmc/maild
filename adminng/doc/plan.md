@@ -31,7 +31,7 @@ running it) · **validated** (verified by running the acceptance checks).
 |---|---|---|
 | 0 — Scaffolding & wiring | **validated** (CI pending remote run) | per-task table below |
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
-| 2 — Security model | **validated** | per-task table below; full suite 66 passed / 0 failed |
+| 2 — Security model | **validated** | per-task table below; full suite 67 passed / 0 failed |
 | 3 — PWA frontend | **partial** | implemented and built; served at :8083; browser E2E/Lighthouse pending (see notes) |
 | 4 — APK pipeline | **partial** | script + toolchain image + release workflow implemented; first CI/keystore run pending |
 | 5 — Hardening & decision | **partial** | headers/CSP, docs, 66-check suite done; WebAuthn explicitly deferred (decision recorded) |
@@ -100,7 +100,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | 3 | Re-auth token + enforcement on destructive routes | **validated** | I10 (403 `OPERATION_NOT_VERIFIED` without the header) and I12 (204 with it) |
 | 4 | `adminng.py` CLI (`--add-device`, `--approve-device`, `--revoke-device`, `--totp-reset`) | **validated** | I2 + `bootstrap-dev.sh` pre-approves the dev device |
 | 5 | Audit trail + `GET /logs` (tenant-scoped) | **validated** | I14 (LOGIN_OK, MAILBOX_CREATE, DOMAIN_DELETE); logs include device id and IP |
-| 6 | Rate limiting + lockout | **validated** | I16 (5 failures → 429) and `tests/test_ratelimit.py` |
+| 6 | Rate limiting + lockout | **validated** | I16 (5 failures → 429), I17 (`--reset-ratelimit` clears it) and `tests/test_ratelimit.py`; state is persisted in the `adminng` DB (migration 004) |
 | 7 | `backup_db.sh` also dumps the `adminng` DB | **validated** | G3/G4/G4b: two archives, gzip/trailer/schema checked, same retention |
 | 8 | `bootstrap-dev.sh` self-approval + `test.creds` | **validated** | the dev device is added/approved by the CLI and written as `adminng.device=` |
 
@@ -114,8 +114,9 @@ running it) · **validated** (verified by running the acceptance checks).
 - **TOTP policy:** superadmins must enroll (`ADMINNG_TOTP_REQUIRED=superadmin`); a custom admin
   without an enrolled credential authenticates in step 1 alone. Replay protection refuses a
   used time step, so the test helper prints the *next* step right after enrollment.
-- **Lockout is in-process** (single replica, MailD's deployment shape), keyed by
-  username+IP — another user behind the same NAT is unaffected.
+- **Lockout is persisted** in the `adminng` database (`rate_limit`, migration 004), keyed by
+  username+IP — it survives api restarts, is shared by replicas, another user behind the same
+  NAT is unaffected, and `adminng.py --reset-ratelimit <user>` clears it from another process.
 - **Backup credentials:** `~/.pgpass` needs one line per database; the script now writes both
   (catalogue + adminng) — the first attempt failed with `fe_sendauth: no password supplied`.
 - **WebAuthn/passkeys** remain Phase 5; TOTP is the enforced second factor for now.
@@ -212,7 +213,7 @@ black-box checks.
 
 ## Phase 2 — Auth, device trust, TOTP, re-auth, audit
 
-**Status:** validated (30 unit tests; full `test.sh` 66 passed / 0 failed).
+**Status:** validated (30 unit tests; full `test.sh` 67 passed / 0 failed).
 
 **Goal:** the security model of §4 lands completely; devices gate everything.
 
@@ -360,7 +361,7 @@ sandbox has no Android SDK download/keystore, so this phase is deliberately `par
 |---|---|---|---|
 | 1 | WebAuthn / passkeys | **deferred (decision)** | TOTP is enforced for superadmins and fully tested; passkeys need a platform-authenticator harness (browser/phone) that this environment cannot provide. Tracked as Phase 6 in the roadmap below. |
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
-| 3 | `test.sh` consolidation | **validated** | 66 checks, 30 unit/integration tests; two full green runs. |
+| 3 | `test.sh` consolidation | **validated** | 67 checks, 31 unit/integration tests; full green runs. |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
 | 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** as the fallback for v1 (vacation, fetchmail, welcome templates, backup/restore UI, setup OTP are not ported). AdminNG becomes the primary UI for domains/accounts/aliases/admins/devices/logs. Revisit after adoption with the per-feature table from §11 of the draft; a future Phase 6 ports or retires them. |
 

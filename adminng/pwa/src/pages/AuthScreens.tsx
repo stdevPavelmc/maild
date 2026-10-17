@@ -11,11 +11,13 @@ function ErrorText({ code }: { code: string | null }) {
   const text =
     code === 'wrong'
       ? t('login.wrong')
-      : code === 'RATE_LIMITED'
-        ? 'RATE_LIMITED'
-        : code === 'revoked'
-          ? t('device.revoked')
-          : t('login.network')
+      : code === 'badCode'
+        ? t('login.badCode')
+        : code === 'RATE_LIMITED'
+          ? 'RATE_LIMITED'
+          : code === 'revoked'
+            ? t('device.revoked')
+            : t('login.network')
   return <ErrorBanner message={text} />
 }
 

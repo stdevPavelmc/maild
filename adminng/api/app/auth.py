@@ -428,10 +428,13 @@ def enroll_confirm(enroll_token: str, code: str, ip: str | None) -> dict:
     if not ok:
         raise ApiError(401, "TOTP_INVALID", "the code does not match the secret")
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+        # Enrollment proves possession but is not a login: leave the enrollment step
+        # usable exactly once so the login that follows immediately (same 30 s
+        # window) is not rejected as a replay. That login then consumes the step.
         cur.execute(
             "UPDATE totp_credential SET confirmed = true, last_used_step = %s "
             "WHERE username = %s",
-            (step, username),
+            (max(step - 1, 0), username),
         )
         conn.commit()
     audit.record(

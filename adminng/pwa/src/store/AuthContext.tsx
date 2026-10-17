@@ -56,6 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [shielded, setShielded] = useState(false)
   const [enrollment, setEnrollment] = useState<{ secret: string; otpauth_uri: string } | null>(null)
   const flow = useRef<{ token: string; kind: '2fa' | 'enroll' } | null>(null)
+  const credentials = useRef<{ username: string; password: string } | null>(null)
   const device = deviceId()
 
   const guard = useCallback((error: unknown) => {
@@ -142,6 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (username: string, password: string) => {
     setBusy(true)
     setLoginError(null)
+    credentials.current = { username, password }
     try {
       const result = await api.loginStep1(username, password)
       if (result.session_state === 'REQUIRES_TOTP_ENROLLMENT') {
@@ -156,6 +158,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         saveTokens({ access: result.access_token, refresh: result.refresh_token })
         setUser(result.user)
         setDeviceState('APPROVED')
+        credentials.current = null
         setPhase('ready')
       }
     } catch (error) {
@@ -186,10 +189,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const result = await api.loginStep2(flow.current.token, code)
         saveTokens({ access: result.access_token, refresh: result.refresh_token })
         setUser(result.user)
+        credentials.current = null
         setPhase('ready')
       } catch (error) {
         guard(error)
-        setLoginError(error instanceof ApiError && error.code === 'TOTP_INVALID' ? 'wrong' : 'network')
+        setLoginError(
+          error instanceof ApiError && error.code === 'TOTP_INVALID' ? 'badCode' : 'network',
+        )
       } finally {
         setBusy(false)
       }
@@ -197,20 +203,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [guard],
   )
 
-  const enroll = useCallback(async (code: string) => {
-    if (!flow.current || flow.current.kind !== 'enroll') return
-    setBusy(true)
-    setLoginError(null)
-    try {
-      await api.totpConfirm(flow.current.token, code)
-      setEnrollment(null)
-      setPhase('login')
-    } catch {
-      setLoginError('wrong')
-    } finally {
-      setBusy(false)
-    }
-  }, [])
+  const enroll = useCallback(
+    async (code: string) => {
+      if (!flow.current || flow.current.kind !== 'enroll') return
+      setBusy(true)
+      setLoginError(null)
+      try {
+        await api.totpConfirm(flow.current.token, code)
+        setEnrollment(null)
+        // Continue straight into the 2FA step with the credentials we still hold,
+        // so the user does not retype them (and the code they just used can be the
+        // one they confirm with, thanks to the enrollment step allowance).
+        const saved = credentials.current
+        if (saved) await login(saved.username, saved.password)
+        else setPhase('login')
+      } catch (error) {
+        setLoginError(
+          error instanceof ApiError && error.code === 'TOTP_INVALID' ? 'badCode' : 'wrong',
+        )
+      } finally {
+        setBusy(false)
+      }
+    },
+    [login],
+  )
 
   const deviceStatus = useCallback(async () => {
     try {
@@ -239,6 +255,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(async () => {
     const tokens = loadTokens()
     saveTokens(null)
+    credentials.current = null
     setUser(null)
     setShielded(false)
     if (tokens) {

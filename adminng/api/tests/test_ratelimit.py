@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Login rate-limit / lockout unit tests (technical-draft §4.6)."""
+"""Login rate-limit / lockout tests against the adminng database (migration 004)."""
 
 import unittest
 
@@ -7,15 +7,19 @@ from app import ratelimit, settings
 from app.errors import ApiError
 
 USER = "ratelimit@example.net"
+OTHER = "ratelimit-other@example.net"
 IP = "192.0.2.10"
+OTHER_IP = "192.0.2.99"
 
 
 class RateLimitTests(unittest.TestCase):
     def setUp(self):
-        ratelimit.success(USER, IP)
+        ratelimit.reset(USER)
+        ratelimit.reset(OTHER)
 
     def tearDown(self):
-        ratelimit.success(USER, IP)
+        ratelimit.reset(USER)
+        ratelimit.reset(OTHER)
 
     def test_lockout_after_max_failures(self):
         for attempt in range(settings.ADMINNG_LOGIN_MAX_FAILURES - 1):
@@ -36,11 +40,20 @@ class RateLimitTests(unittest.TestCase):
         for _ in range(settings.ADMINNG_LOGIN_MAX_FAILURES):
             ratelimit.failure(USER, IP)
         # Another username from the same IP is unaffected (no NAT-wide lockout)…
-        ratelimit.check("other@example.net", IP)
+        ratelimit.check(OTHER, IP)
         # …and the same username from another IP is unaffected too.
-        ratelimit.check(USER, "192.0.2.99")
+        ratelimit.check(USER, OTHER_IP)
         with self.assertRaises(ApiError):
             ratelimit.check(USER, IP)
+
+    def test_reset_clears_the_lockout(self):
+        for _ in range(settings.ADMINNG_LOGIN_MAX_FAILURES):
+            ratelimit.failure(USER, IP)
+        with self.assertRaises(ApiError):
+            ratelimit.check(USER, IP)
+        removed = ratelimit.reset(USER)
+        self.assertGreaterEqual(removed, 1)
+        ratelimit.check(USER, IP)  # unlocked
 
 
 if __name__ == "__main__":

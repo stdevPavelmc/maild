@@ -73,6 +73,24 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Docs: README and INSTALL gained AdminNG sections (access URLs, `ADMINNG_SECRET_KEY`,
   server-side device approval); `plan.md` records the Phase 5 decisions — PostfixAdmin stays
   as the fallback UI for v1 and WebAuthn/passkeys are deferred to a Phase 6 follow-up.
+- Added: `adminng.py --reset-ratelimit <username>` (testing/ops aid) and **persistent login
+  rate limiting**: the counters now live in the `adminng` database (migration
+  `004_rate_limit.sql`) instead of the api process memory, so they survive restarts, are
+  shared by every replica and can be cleared from another process. Still keyed by
+  username+IP: 5 failures → 15-minute lockout, cleared by a successful login; expired rows
+  are discarded on the next check and entries idle for a day are pruned.
+- Fixed: **a valid TOTP code was rejected right after enrollment** (`invalid or already used
+  code`). `totp-confirm` stored the enrollment time-step as `last_used_step`, so the login
+  that followed within the same 30-second window submitted the same step and tripped the
+  replay guard. Enrollment now leaves the step usable exactly once (the successful login
+  consumes it), the PWA continues straight into the 2FA prompt with the credentials it still
+  holds instead of sending the user back to the form, and a rejected code shows a precise
+  "invalid or already used code — wait for the next one" message instead of "invalid
+  credentials". Regression covered by `tests/test_totp_enroll.py` and `test.sh` I4 (which now
+  logs in with the *current* code).
+- Fixed: the AdminNG dev-device note appended to `test.creds` by `bootstrap-dev.sh` was parsed
+  as a mailbox credential by `test.sh` (`adminng.device` SASL failures aborted the quota fill
+  loop). It is now written as a comment, and `test.sh` ignores credential keys without an `@`.
 - Added: **AdminNG Phase 1 — catalogue API** (`adminng/api/`): domain/mailbox/alias/admin
   CRUD with cursor pagination, rapid `GET /search`, quota usage from the Maildir++
   `.maildirsize` accounting (read-only vmail mount, `du` fallback, cache) and multi-tenant

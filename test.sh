@@ -128,6 +128,9 @@ load_creds() {
     while IFS= read -r line || [ -n "$line" ]; do
         case "$line" in ''|'#'*) continue ;; esac
         key="${line%%=*}"
+        # Credentials are mailbox addresses; skip metadata lines (e.g. the AdminNG
+        # dev-device note) so they never reach the SMTP/IMAP loops.
+        case "$key" in *@*) ;; *) continue ;; esac
         CRED["${key,,}"]="${line#*=}"
     done < "$CREDS_FILE"
 }
@@ -322,6 +325,7 @@ cleanup() {
             quota_set "$QUOTA_USER" 0
         fi
         # Phase I (AdminNG): test devices (sessions cascade) and the fixture domain.
+        dcx api adminng.py --reset-ratelimit 'nobody@adminng-lockout.test' > /dev/null 2>&1 || true
         dcx db psql -U maild -d adminng -q -c \
             "DELETE FROM device WHERE device_id IN ('aaaaaaaa-0000-4000-8000-0000000000a1','aaaaaaaa-0000-4000-8000-0000000000a2');" \
             > /dev/null 2>&1 || true
@@ -1331,7 +1335,9 @@ else
 
     # I4 — step2 with a real TOTP code → tokens; /auth/me
     FLOW="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf flow_token)"
-    if [ "$NEED_NEXT" = 1 ] ; then CODE="$(adminng_code "$DEPLOY_ADMIN" --next)" ; else CODE="$(adminng_code "$DEPLOY_ADMIN")" ; fi
+    # The enrollment step is allowed once for the login that follows, so the current
+    # code must verify here (a retry with the next step covers a 30 s window edge).
+    CODE="$(adminng_code "$DEPLOY_ADMIN")"
     adminng_call POST /auth/login-step2 "$ADMINNG_DEVICE" "" \
         "{\"flow_token\":\"$FLOW\",\"code\":\"$CODE\"}"
     if [ "$ADMINNG_CODE" != 200 ] ; then
@@ -1523,6 +1529,19 @@ else
         t_ok "I16 five failed logins lock the username+IP (429 RATE_LIMITED)"
     else
         t_fail "I16 lockout (got $ADMINNG_CODE: $(printf '%s' "$ADMINNG_BODY" | head -c 120))"
+    fi
+
+    # I17 — adminng.py --reset-ratelimit lifts the lockout (testing/ops aid)
+    if dcx api adminng.py --reset-ratelimit "$LOCK_USER" > /dev/null 2>&1 ; then
+        adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
+            "{\"username\":\"$LOCK_USER\",\"password\":\"wrong\"}"
+        if [ "$ADMINNG_CODE" = 401 ] ; then
+            t_ok "I17 --reset-ratelimit clears the lockout (429 -> 401 on the next try)"
+        else
+            t_fail "I17 --reset-ratelimit did not clear the lockout (got $ADMINNG_CODE)"
+        fi
+    else
+        t_fail "I17 --reset-ratelimit command failed"
     fi
 fi
 

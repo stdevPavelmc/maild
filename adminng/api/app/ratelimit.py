@@ -1,61 +1,98 @@
-"""In-process login rate limiting and lockout (technical-draft §4.6).
+"""Persistent login rate limiting and lockout (technical-draft §4.6).
 
-MailD runs a single api replica, so an in-memory counter is honest and simple;
-every lockout is also written to the audit trail. The key is username+IP, so
-one noisy source cannot lock an admin out from a different network.
+The state lives in the `adminng` database (`rate_limit`, migration 004) instead of
+process memory, so it survives restarts, is shared by every api replica and can be
+cleared from another process with `adminng.py --reset-ratelimit <username>`.
+
+Key = username + IP: five failures lock that pair for
+`ADMINNG_LOCKOUT_SECONDS`, while another user behind the same NAT (or the same
+user from another network) is unaffected. A successful login clears the counter;
+an expired lockout is discarded on the next check.
 """
 
-import time
-
 from . import settings
+from .db import connect
 from .errors import ApiError
 
-_FAILURES: dict[str, list[float]] = {}
-_LOCKED_UNTIL: dict[str, float] = {}
 
-
-def _key(username: str, ip: str | None) -> str:
-    return f"{username.strip().lower()}|{ip or '-'}"
+def _key(username: str, ip: str | None) -> tuple[str, str]:
+    return username.strip().lower()[:255], (ip or "-")[:64]
 
 
 def check(username: str, ip: str | None) -> None:
-    """Raise 429 while the key is locked out."""
-    key = _key(username, ip)
-    now = time.time()
-    until = _LOCKED_UNTIL.get(key)
-    if until is None:
-        return
-    if until > now:
-        retry = int(until - now)
-        raise ApiError(
-            429,
-            "RATE_LIMITED",
-            f"too many failed attempts, retry in {retry}s",
-            retry_after=retry,
+    """Raise 429 while the username+IP pair is locked out."""
+    user, addr = _key(username, ip)
+    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT locked_until, "
+            "EXTRACT(EPOCH FROM (locked_until - now()))::int AS retry_after "
+            "FROM rate_limit WHERE username = %s AND ip = %s",
+            (user, addr),
         )
-    _LOCKED_UNTIL.pop(key, None)
-    _FAILURES.pop(key, None)
+        row = cur.fetchone()
+        if row is None or row["locked_until"] is None:
+            return
+        if row["retry_after"] and row["retry_after"] > 0:
+            raise ApiError(
+                429,
+                "RATE_LIMITED",
+                f"too many failed attempts, retry in {row['retry_after']}s",
+                retry_after=row["retry_after"],
+            )
+        # The lockout expired: start from a clean slate.
+        cur.execute("DELETE FROM rate_limit WHERE username = %s AND ip = %s", (user, addr))
+        conn.commit()
 
 
 def failure(username: str, ip: str | None) -> bool:
-    """Record a failed attempt; True when this attempt triggered a lockout."""
-    key = _key(username, ip)
-    now = time.time()
-    attempts = [
-        stamp
-        for stamp in _FAILURES.get(key, [])
-        if now - stamp < settings.ADMINNG_LOCKOUT_SECONDS
-    ]
-    attempts.append(now)
-    if len(attempts) >= settings.ADMINNG_LOGIN_MAX_FAILURES:
-        _LOCKED_UNTIL[key] = now + settings.ADMINNG_LOCKOUT_SECONDS
-        _FAILURES.pop(key, None)
-        return True
-    _FAILURES[key] = attempts
-    return False
+    """Record a failed attempt; True when this attempt triggered the lockout."""
+    user, addr = _key(username, ip)
+    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO rate_limit (username, ip, failures, updated_at)
+            VALUES (%s, %s, 1, now())
+            ON CONFLICT (username, ip) DO UPDATE
+               SET failures = rate_limit.failures + 1,
+                   updated_at = now()
+            RETURNING failures
+            """,
+            (user, addr),
+        )
+        failures = cur.fetchone()["failures"]
+        locked = failures >= settings.ADMINNG_LOGIN_MAX_FAILURES
+        if locked:
+            cur.execute(
+                "UPDATE rate_limit "
+                "SET failures = 0, "
+                "    locked_until = now() + make_interval(secs => %s), "
+                "    updated_at = now() "
+                "WHERE username = %s AND ip = %s",
+                (settings.ADMINNG_LOCKOUT_SECONDS, user, addr),
+            )
+        # Bound the table: entries that have not moved in a day are irrelevant.
+        cur.execute("DELETE FROM rate_limit WHERE updated_at < now() - interval '1 day'")
+        conn.commit()
+    return locked
 
 
 def success(username: str, ip: str | None) -> None:
-    key = _key(username, ip)
-    _FAILURES.pop(key, None)
-    _LOCKED_UNTIL.pop(key, None)
+    """A correct login clears the counter for this username+IP."""
+    user, addr = _key(username, ip)
+    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM rate_limit WHERE username = %s AND ip = %s", (user, addr))
+        conn.commit()
+
+
+def reset(username: str) -> int:
+    """Clear every rate-limit row for a username (all IPs). Returns rows removed.
+
+    Used by `adminng.py --reset-ratelimit` (testing/ops): it lifts the lockout
+    immediately, no waiting for the 15-minute window.
+    """
+    user = username.strip().lower()
+    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM rate_limit WHERE username = %s", (user,))
+        removed = cur.rowcount
+        conn.commit()
+    return removed
