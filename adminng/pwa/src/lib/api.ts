@@ -158,10 +158,25 @@ export class ApiError extends Error {
   }
 }
 
+// crypto.randomUUID() is secure-context only: it is undefined over plain http
+// and in older browsers. crypto.getRandomValues() is available everywhere, so
+// build an RFC 4122 v4 UUID from it instead of crashing the first login (the
+// dev nginx also serves plain HTTP on 8083; the phone should use 8084 + the
+// local CA, but a direct browser visit must not break the app).
+function randomUuid(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40 // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80 // variant 10x
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+
 export function deviceId(): string {
   let id = localStorage.getItem(DEVICE_KEY)
   if (!id) {
-    id = crypto.randomUUID()
+    id = randomUuid()
     localStorage.setItem(DEVICE_KEY, id)
   }
   return id
