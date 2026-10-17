@@ -10,7 +10,8 @@ RUN apt-get update && \
         curl \
         wget \
         bind9-host  \
-        libpq-dev
+        libpq-dev && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN docker-php-ext-install pdo pdo_pgsql && \
     docker-php-source delete
