@@ -3,7 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { api, type Device } from '../lib/api'
 import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
-import { Badge, ErrorBanner, SectionHeader } from '../components/kit'
+import { ErrorBanner, SectionHeader } from '../components/kit'
+import { ActionButton, ActionRow, CardGrid, CardHead, EntityCard } from '../components/cards'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
@@ -19,41 +20,56 @@ export function DevicesPage({ password }: { password: string }) {
     await Promise.all([pending.reload(), approved.reload()])
   }
 
-  const row = (device: Device, kind: 'APPROVE' | 'REVOKE') => (
-    <li key={device.device_id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 py-2 text-sm">
-      <div className="min-w-0">
-        <p className="truncate">
-          {device.device_name || device.client_type} <Badge tone={device.authorization_state === 'APPROVED' ? 'green' : 'amber'}>{device.authorization_state}</Badge>
-        </p>
-        <p className="truncate font-mono text-[11px] text-slate-400">{device.device_id}</p>
-        <p className="text-xs text-slate-400">
-          {t('devices.user')}: {device.associated_user || '—'} · {t('devices.lastSeen')}: {new Date(device.last_seen).toLocaleString()}
-          {device.last_ip ? ` · ${device.last_ip}` : ''}
-        </p>
-      </div>
-      <div className="flex gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            void navigator.clipboard.writeText(device.device_id)
-            setCopied(device.device_id)
-            window.setTimeout(() => setCopied(null), 1500)
-          }}
-        >
-          {copied === device.device_id ? '✓' : t('device.copy')}
-        </Button>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!online}
-          className={kind === 'REVOKE' ? 'border-red-800 text-red-300' : ''}
-          onClick={() => setAction({ device, kind })}
-        >
-          {kind === 'APPROVE' ? t('devices.approve') : t('devices.revoke')}
-        </Button>
-      </div>
-    </li>
+  const card = (device: Device, kind: 'APPROVE' | 'REVOKE') => (
+    <EntityCard
+      key={device.device_id}
+      status={device.authorization_state === 'APPROVED' ? 'active' : 'pending'}
+    >
+      <CardHead>
+        <div className="flex min-w-0 items-start gap-2">
+          <span aria-hidden="true" className="shrink-0 text-xl leading-none lg:text-base">
+            📱
+          </span>
+          <div className="min-w-0">
+            <p
+              className="break-all font-semibold leading-snug text-slate-100 line-clamp-1"
+              title={device.device_name || device.client_type}
+            >
+              {device.device_name || device.client_type}
+            </p>
+            <p
+              className="mt-0.5 truncate font-mono text-[11px] text-slate-400"
+              title={device.device_id}
+            >
+              {device.device_id}
+            </p>
+          </div>
+        </div>
+        <ActionRow label={t('common.actions')}>
+          <ActionButton
+            glyph={copied === device.device_id ? '✓' : '📋'}
+            label={t('device.copy')}
+            onClick={() => {
+              void navigator.clipboard.writeText(device.device_id)
+              setCopied(device.device_id)
+              window.setTimeout(() => setCopied(null), 1500)
+            }}
+          />
+          <ActionButton
+            glyph={kind === 'APPROVE' ? '✅' : '⛔'}
+            label={kind === 'APPROVE' ? t('devices.approve') : t('devices.revoke')}
+            tone={kind === 'REVOKE' ? 'danger' : 'default'}
+            disabled={!online}
+            onClick={() => setAction({ device, kind })}
+          />
+        </ActionRow>
+      </CardHead>
+      <p className="mt-2 text-xs text-slate-400">
+        {t('devices.user')}: {device.associated_user || '—'} · {t('devices.lastSeen')}:{' '}
+        {new Date(device.last_seen).toLocaleString()}
+        {device.last_ip ? ` · ${device.last_ip}` : ''}
+      </p>
+    </EntityCard>
   )
 
   return (
@@ -65,10 +81,10 @@ export function DevicesPage({ password }: { password: string }) {
         <h3 className="mb-2 text-sm font-medium text-amber-300">
           ⚠️ {t('devices.pending')} ({pending.items.length})
         </h3>
-        <ul>{pending.items.map((device) => row(device, 'APPROVE'))}</ul>
+        <CardGrid>{pending.items.map((device) => card(device, 'APPROVE'))}</CardGrid>
         {pending.items.length === 0 && <p className="text-xs text-slate-400">{t('devices.none')}</p>}
         {pending.cursor && (
-          <Button variant="outline" size="sm" onClick={() => void pending.more()}>{t('common.page')}</Button>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => void pending.more()}>{t('common.page')}</Button>
         )}
       </section>
 
@@ -76,10 +92,10 @@ export function DevicesPage({ password }: { password: string }) {
         <h3 className="mb-2 text-sm font-medium text-slate-300">
           ✓ {t('devices.active')} ({approved.items.length})
         </h3>
-        <ul>{approved.items.map((device) => row(device, 'REVOKE'))}</ul>
+        <CardGrid>{approved.items.map((device) => card(device, 'REVOKE'))}</CardGrid>
         {approved.items.length === 0 && <p className="text-xs text-slate-400">{t('devices.none')}</p>}
         {approved.cursor && (
-          <Button variant="outline" size="sm" onClick={() => void approved.more()}>{t('common.page')}</Button>
+          <Button variant="outline" size="sm" className="mt-3" onClick={() => void approved.more()}>{t('common.page')}</Button>
         )}
       </section>
 
