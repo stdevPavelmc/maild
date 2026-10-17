@@ -18,6 +18,7 @@ for maintenance jobs.
 | `mua`    | SnappyMail webmail                                | 8081                      |
 | `api`    | AdminNG API — FastAPI over the catalogue (internal only) | —                  |
 | `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083                      |
+| `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
 | `cron`   | Scheduled jobs: db backup, traffic resume, SA…    | —                         |
 | `dozzle` | Dev-only live container log viewer                | 8082                      |
 
@@ -45,7 +46,8 @@ for maintenance jobs.
   strict copies of `docker-compose.yml` and must be **chain-updated in the same commit** —
   only the `image:` lines differ (GitLab uses `${IMG_<SVC>}:${TAG}`, wired by
   `.gitlab-ci.yml`). `compose-dockerhub.yml` no longer exists: `docker-compose.yml` *is* the
-  Docker Hub file. Images are always named `maild-<svc>:<tag>`; `dozzle` is dev-only.
+  Docker Hub file. Images are always named `maild-<svc>:<tag>`; `dozzle` and `pwa-test`
+  are dev-only.
 - **Production HTTP is proxied.** `admin` (`mailadmin.${DEFAULT_DOMAIN}`) and `mua`
   (`webmail.${DEFAULT_DOMAIN}`) carry Traefik labels on every production compose file, and
   the stack terminates **no** TLS for them. The operator must supply an ingress controller
@@ -68,11 +70,15 @@ for maintenance jobs.
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```
 
-AdminNG frontend gates (stack must be running):
+AdminNG frontend gates (stack must be running; the harness image carries Playwright +
+Chromium and Lighthouse, no host install needed):
 
 ```bash
 cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also runs in `npm run build`)
-cd adminng/e2e && npm run verify         # Playwright flows + Lighthouse budget (needs node_modules/Chromium)
+./adminng/pwa-test/run.sh verify         # Playwright flows + installability + Lighthouse budget
+./adminng/pwa-test/run.sh superadmin     # TOTP enrollment + devices panel (UI approval)
+./adminng/pwa-test/run.sh visual         # PNG screenshots (desktop/mobile, EN/ES) in ldata/e2e/screens
+./adminng/pwa-test/run.sh a11y           # axe-core WCAG 2.1 A/AA reports in ldata/e2e/a11y
 ```
 
 - `bootstrap-dev.sh` provisions: `ldata/` dirs, self-signed certs, and the test fixtures —

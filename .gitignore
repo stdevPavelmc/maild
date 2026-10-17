@@ -14,6 +14,6 @@ __pycache__/
 *.pyc
 adminng/pwa/android-project/
 
-# AdminNG browser suite artifacts
-adminng/e2e/test-results/
-adminng/e2e/playwright-report/
+# AdminNG browser suite artifacts (dev-only service pwa-test)
+adminng/pwa-test/test-results/
+adminng/pwa-test/playwright-report/

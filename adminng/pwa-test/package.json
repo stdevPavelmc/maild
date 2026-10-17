@@ -1,0 +1,18 @@
+{
+  "name": "maild-adminng-pwa-test",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AdminNG browser test harness: Playwright flows + Lighthouse budget (dev-only service pwa-test)",
+  "scripts": {
+    "test": "playwright test",
+    "lighthouse": "node lighthouse.mjs",
+    "verify": "npm run test && npm run lighthouse",
+    "visual": "PWA_TEST_ALL=1 playwright test tests/visual.spec.ts",
+    "a11y": "PWA_TEST_ALL=1 playwright test tests/a11y.spec.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.64.1",
+    "lighthouse": "12.8.2"
+  }
+}

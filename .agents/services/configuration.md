@@ -93,7 +93,7 @@ dump), `MTA_DEBUG`, `MDA_DEBUG_INIT/AUTH/AUTH_PASSWORD/MAIL/SSL`, `MUA_DEBUG`,
 Production and its variants are kept in lock-step. The dependency chain is:
 
 ```
-docker-compose-dev.yml   (dev source; dozzle lives only here; env_file: env.dev)
+docker-compose-dev.yml   (dev source; dozzle + pwa-test live only here; env_file: env.dev)
         │  mirror perdurable changes up
         ▼
 docker-compose.yml       (production source of truth, derived from -dev; env_file: .env)

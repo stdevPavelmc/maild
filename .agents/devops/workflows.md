@@ -125,26 +125,42 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ## AdminNG browser suite (Playwright + Lighthouse)
 
-The PWA has its own gates; they need the dev stack up and a Playwright Chromium:
+The PWA has its own gates. They run in the dev-only `pwa-test` container
+(`adminng/pwa-test/`), which carries the pinned Playwright + Chromium and Lighthouse, so
+neither the host nor CI needs Node, a browser or `npx playwright install`:
 
 ```bash
-cd adminng/pwa && npm run i18n:check          # en/es parity; also inside `npm run build`
-cd adminng/e2e && npm ci                      # once
-npx playwright install chromium               # once (~120 MB, no root needed)
-cd adminng/e2e && npm run verify              # flows + Lighthouse budget
+./adminng/pwa-test/run.sh verify        # flows + installability + Lighthouse budget (the gate)
+./adminng/pwa-test/run.sh flows         # one spec (flows | installable | superadmin)
+./adminng/pwa-test/run.sh superadmin    # TOTP enrollment + devices panel (approve/revoke via UI)
+./adminng/pwa-test/run.sh a11y          # axe-core WCAG 2.1 A/AA audit, JSON per screen
+./adminng/pwa-test/run.sh visual        # PNG screenshots: desktop/mobile, EN/ES
+./adminng/pwa-test/run.sh lighthouse
+./adminng/pwa-test/run.sh shell         # interactive shell inside the harness image
+cd adminng/pwa && npm run i18n:check    # en/es parity; also inside `npm run build`
 ```
 
-- `tests/flows.spec.ts` (one context, stepped): pending device → `adminng.py --approve-device`
-  → login as `alice@example.net` → create an account → delete it with the re-auth + 5 s armed
-  button → domain scope → ES/EN switch → offline banner with the FAB disabled.
-- `tests/installable.spec.ts`: manifest fields, active service worker controlling the page and
-  the app booting from the cache offline.
+- The service is dev-only (`profiles: ["test"]` in `docker-compose-dev.yml`); `up` never
+  starts it and it is absent from the production compose files. `run.sh` maps the invoking
+  uid/gid, so everything under `ldata/e2e/` stays host-owned.
+- Inside the container the entrypoint tunnels `http://localhost:8083` to `http://adminng:80`.
+  `localhost` is a secure context, so the service worker / installability / offline
+  assertions behave exactly as on the host or against a real deployment.
+- Device approval stays out of band: the suite drives `adminng.py --approve-device` in the
+  api container (`docker exec`, socket mounted by the dev compose file). The other specs
+  cover the UI path (devices panel, re-auth + armed authorize).
+- `tests/flows.spec.ts` (one context, stepped): pending device → CLI approval → login as
+  `alice@example.net` → create an account → delete it with the re-auth + 5 s armed button →
+  domain scope → ES/EN switch → offline banner with the FAB disabled.
+- `tests/installable.spec.ts`: manifest fields, active service worker controlling the page
+  and the app booting from the cache offline.
 - `lighthouse.mjs`: performance ≥ 0.85, accessibility ≥ 0.9, best-practices ≥ 0.9; SEO is
   reported only (a private panel disallows crawling in `public/robots.txt`).
-- Artifacts: `ldata/e2e/report/` (HTML) and `ldata/e2e/lighthouse.report.{json,html}`.
-- The suite is destructive to the fixtures it creates (accounts are deleted, the device stays
+- Artifacts: `ldata/e2e/{report,results,screens,a11y,lighthouse.report.{json,html}}`.
+- The suite is destructive to the fixtures it creates (accounts are deleted, devices stay
   approved); it never touches existing mailboxes.
 - CI: `.github/workflows/pwa-e2e.yml`, `workflow_dispatch` only (builds the ten dev images).
+
 
 ## GitHub Actions CI
 

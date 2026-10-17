@@ -165,22 +165,25 @@ What the content checks assert, given the shipped policies:
 
 ## AdminNG frontend: browser suite and Lighthouse
 
-The PWA has its own gates on top of `test.sh` (plan.md Phase 3). They need the dev stack
-running and a Chromium installed by Playwright:
+The PWA has its own gates on top of `test.sh` (plan.md Phase 3). They run in the dev-only
+`pwa-test` container — no host Node, Chromium or `npx playwright install` is needed:
 
 ```bash
 cd adminng/pwa && npm run i18n:check     # en/es keys, placeholders, empty values (in `npm run build`)
-cd adminng/e2e && npm ci && npx playwright install chromium
-cd adminng/e2e && npm run verify         # Playwright flows + Lighthouse budget
+./adminng/pwa-test/run.sh verify         # Playwright flows + installability + Lighthouse budget
+./adminng/pwa-test/run.sh visual         # PNG screenshots (desktop/mobile, EN/ES) under ldata/e2e/screens
+./adminng/pwa-test/run.sh a11y           # axe-core WCAG 2.1 A/AA audit under ldata/e2e/a11y
 ```
 
-- The suite reads `test.creds` and approves its own device with
-  `docker compose --env-file env.dev -f docker-compose-dev.yml exec api adminng.py --approve-device <id>`,
-  so `bootstrap-dev.sh` must have run.
-- Reports: `ldata/e2e/report/` (Playwright HTML) and `ldata/e2e/lighthouse.report.{json,html}`.
+- The harness approves its own device with `adminng.py --approve-device` inside the api
+  container (it mounts the docker socket), so `bootstrap-dev.sh` must have run. The UI path
+  (devices panel, re-auth + armed authorize) is covered by `run.sh superadmin`.
+- Reports: `ldata/e2e/report/` (Playwright HTML), `ldata/e2e/results/` (traces/videos on
+  failure), `ldata/e2e/screens/` and `ldata/e2e/lighthouse.report.{json,html}`.
 - Lighthouse gates performance ≥ 0.85, accessibility ≥ 0.9 and best-practices ≥ 0.9. SEO is
   reported only: `public/robots.txt` disallows crawling the private panel on purpose.
 - CI: `.github/workflows/pwa-e2e.yml`, manual dispatch (it builds ten images, ~30 min).
+
 
 ## Differences from Production
 

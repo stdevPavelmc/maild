@@ -344,7 +344,7 @@ export const api = {
   deleteAlias: (address: string, vtoken: string) =>
     request<void>(`/aliases/${encodeURIComponent(address)}`, { method: 'DELETE', vtoken }),
 
-  listAdmins: () => request<Page<Admin>>('/admins'),
+  listAdmins: (cursor?: string) => request<Page<Admin>>(`/admins${qs({ cursor })}`),
   createAdmin: (body: {
     username: string
     password: string
@@ -362,7 +362,8 @@ export const api = {
     request<{ query: string; results: SearchHit[] }>(`/search${qs({ q })}`),
   logs: (params: { actor?: string; domain?: string; action?: string; cursor?: string }) =>
     request<Page<AuditEvent>>(`/logs${qs(params)}`),
-  devices: (state?: string) => request<Page<Device>>(`/admin/devices${qs({ state })}`),
+  devices: (state?: string, cursor?: string) =>
+    request<Page<Device>>(`/admin/devices${qs({ state, cursor })}`),
   setDeviceState: (device: string, action: 'APPROVE' | 'REVOKE', vtoken: string) =>
     request<{ device_id: string; new_state: DeviceState }>(
       `/admin/devices/${device}/state`,

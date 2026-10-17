@@ -106,6 +106,49 @@ services:
     networks:
       - maild-dev
 
+  # Browser test harness (DEV ONLY): Playwright flows + Lighthouse budget.
+  # One-shot, never started by `up` (profile `test`); use
+  #   ./adminng/pwa-test/run.sh [verify|flows|installable|superadmin|a11y|visual|lighthouse|shell]
+  # It is deliberately absent from the production compose files.
+  pwa-test:
+    image: pavelmc/maild-pwa-test:develop
+    build: ./adminng/pwa-test/
+    container_name: maild-dev-pwa-test
+    hostname: pwa-test
+    profiles: ["test"]
+    restart: "no"
+    init: true
+    # The harness runs as root (Chromium sandbox off, docker socket readable) and
+    # hands the artifacts back to the invoking user on exit: run.sh passes the
+    # uid/gid, so ldata/e2e never ends up root-owned.
+    environment:
+      E2E_CHOWN_UID: "${PWA_TEST_UID:-0}"
+      E2E_CHOWN_GID: "${PWA_TEST_GID:-0}"
+      # The entrypoint tunnels this origin to http://adminng:80: `localhost` is a
+      # secure context, so the service worker / installability / offline checks
+      # run exactly as they do against a real deployment.
+      ADMINNG_URL: http://localhost:8083
+      E2E_UPSTREAM_HOST: adminng
+      E2E_UPSTREAM_PORT: "80"
+      E2E_PROXY_PORT: "8083"
+      E2E_ARTIFACTS: /artifacts
+      MAILD_ROOT: /repo
+      # Approval is out of band by design: the suite drives the documented
+      # `adminng.py --approve-device` CLI inside the api container.
+      ADMINNG_API_CONTAINER: maild-dev-api
+    volumes:
+      - ./test.creds:/repo/test.creds:ro
+      - ./ldata/e2e:/artifacts
+      # dev-only trust: the harness needs `docker exec` for the device CLI.
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      api:
+        condition: service_healthy
+      adminng:
+        condition: service_healthy
+    networks:
+      - maild-dev
+
   mua:
     image: pavelmc/maild-mua:develop
     build: ./mua/

@@ -39,6 +39,18 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     await expect(page.getByRole('cell', { name: 'example.net' })).toBeVisible()
   })
 
+  await test.step('the keyboard shortcut opens the search palette', async () => {
+    await page.goto('/domains')
+    // The Shell (and its window listener) mounts after the boot/handshake.
+    await expect(page.getByRole('link', { name: /Domains/ }).first()).toBeVisible()
+    await page.keyboard.press('Control+k')
+    await expect(page.getByPlaceholder(/Search users, aliases or domains/)).toBeVisible()
+    await page.getByPlaceholder(/Search users, aliases or domains/).fill('example')
+    await expect(page.getByRole('dialog').getByText('example.net').first()).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(page.getByPlaceholder(/Search users, aliases or domains/)).toHaveCount(0)
+  })
+
   await test.step('an account is created through the UI', async () => {
     await page.getByRole('link', { name: /Accounts/ }).first().click()
     await page.getByRole('button', { name: 'New account' }).click()

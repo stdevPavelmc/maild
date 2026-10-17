@@ -10,8 +10,8 @@ import { ConfirmDelete } from '../components/ConfirmDelete'
 export function DevicesPage({ password }: { password: string }) {
   const { t } = useTranslation()
   const online = useOnline()
-  const pending = usePaged<Device>(() => api.devices('PENDING'), [])
-  const approved = usePaged<Device>(() => api.devices('APPROVED'), [])
+  const pending = usePaged<Device>((cursor) => api.devices('PENDING', cursor), [])
+  const approved = usePaged<Device>((cursor) => api.devices('APPROVED', cursor), [])
   const [action, setAction] = useState<{ device: Device; kind: 'APPROVE' | 'REVOKE' } | null>(null)
   const [copied, setCopied] = useState<string | null>(null)
 
@@ -67,6 +67,9 @@ export function DevicesPage({ password }: { password: string }) {
         </h3>
         <ul>{pending.items.map((device) => row(device, 'APPROVE'))}</ul>
         {pending.items.length === 0 && <p className="text-xs text-slate-400">{t('devices.none')}</p>}
+        {pending.cursor && (
+          <Button variant="outline" size="sm" onClick={() => void pending.more()}>{t('common.page')}</Button>
+        )}
       </section>
 
       <section>
@@ -75,6 +78,9 @@ export function DevicesPage({ password }: { password: string }) {
         </h3>
         <ul>{approved.items.map((device) => row(device, 'REVOKE'))}</ul>
         {approved.items.length === 0 && <p className="text-xs text-slate-400">{t('devices.none')}</p>}
+        {approved.cursor && (
+          <Button variant="outline" size="sm" onClick={() => void approved.more()}>{t('common.page')}</Button>
+        )}
       </section>
 
       <ConfirmDelete

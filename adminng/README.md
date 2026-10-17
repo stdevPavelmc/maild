@@ -19,6 +19,7 @@ adminng/
   ├── api/      FastAPI app + Dockerfile   → service `api`    (internal only)
   ├── pwa/      PWA app + Dockerfile       → service `adminng` (exposed)
   │      └── app-generate.sh (APK build, in Docker)
+  ├── pwa-test/ browser suite + Dockerfile → service `pwa-test` (dev only)
   └── README.md
 ```
 
@@ -27,6 +28,8 @@ adminng/
 | `adminng/doc/` | Documentation: [technical-draft.md](doc/technical-draft.md), [plan.md](doc/plan.md), the original Spanish source drafts |
 | `adminng/api/` | FastAPI backend app + Dockerfile → image `maild-api` (service `api`, **internal only**, no published port) |
 | `adminng/pwa/` | Vite + React PWA app + Dockerfile → image `maild-adminng` (service `adminng`, **exposed**: dev port 8083, prod `adminng.${DEFAULT_DOMAIN}` via Traefik) + `app-generate.sh` |
+| `adminng/pwa-test/` | Playwright + Lighthouse harness + Dockerfile → image `maild-pwa-test` (service `pwa-test`, **dev only**, one-shot) |
+
 
 `adminng` serves the built PWA static bundle and reverse-proxies
 `/api/v1/` to `api` — and keeps the exterior-facing access logs.
@@ -53,25 +56,34 @@ of its own: it is a static bundle plus the `/api/v1/` proxy.
 
 ### Frontend checks (Phase 3)
 
+The browser gates run in the dev-only `pwa-test` container (Playwright + Chromium and
+Lighthouse are baked into the image, so the host needs nothing but Docker):
+
 ```bash
 cd adminng/pwa && npm run i18n:check      # en/es key + placeholder parity (part of `npm run build`)
 cd adminng/pwa && npm run build           # i18n gate -> tsc --noEmit -> Vite
 
-cd adminng/e2e && npm ci                  # once
-npx playwright install chromium           # once (~120 MB)
-npm run verify                            # Playwright flows + Lighthouse budget
+./adminng/pwa-test/run.sh verify          # flows + installability + Lighthouse budget
+./adminng/pwa-test/run.sh superadmin      # TOTP enrollment + devices panel
+./adminng/pwa-test/run.sh visual          # ldata/e2e/screens/*.png (desktop/mobile, EN/ES)
+./adminng/pwa-test/run.sh a11y            # axe-core WCAG 2.1 A/AA
+./adminng/pwa-test/run.sh shell           # interactive shell in the harness image
 ```
 
-- `adminng/e2e` drives a real Chromium against `http://localhost:8083`. It approves its own
-  device through `docker compose exec api adminng.py --approve-device <id>` (the UI cannot
-  approve itself by design), then covers login, account create/delete with the 5-second armed
-  confirm, the sidebar domain scope, the language switch and the offline write lockdown.
+- `adminng/pwa-test` drives a real Chromium against `http://localhost:8083`. The entrypoint
+  tunnels that origin to `http://adminng:80` inside the Compose network: `localhost` is a
+  secure context, so the service worker, installability and offline assertions are real.
+- It approves its own device through `adminng.py --approve-device` in the api container (the
+  UI cannot approve itself by design); `run.sh superadmin` covers the UI path (devices panel,
+  re-auth + 5 s armed authorize). `flows.spec.ts` covers login, account create/delete, the
+  sidebar domain scope, the language switch and the offline write lockdown.
 - `tests/installable.spec.ts` asserts the manifest fields, an active service worker controlling
   the page and the app booting from the cache with the network down.
 - `lighthouse.mjs` gates performance ≥ 0.85, accessibility ≥ 0.9 and best-practices ≥ 0.9;
   SEO is reported only (the panel's `robots.txt` disallows crawling on purpose). Reports land in
   `ldata/e2e/`.
-- CI: `.github/workflows/pwa-e2e.yml` (manual dispatch) builds the stack and runs both gates.
+- CI: `.github/workflows/pwa-e2e.yml` (manual dispatch) builds the stack and runs the gate.
+
 
 ## API (Phase 2: device-bound, two-step auth)
 

@@ -1,0 +1,6 @@
+# The harness image installs its own dependencies and writes artifacts to the
+# mounted /artifacts volume; none of this belongs in the build context.
+node_modules
+test-results
+playwright-report
+*.log

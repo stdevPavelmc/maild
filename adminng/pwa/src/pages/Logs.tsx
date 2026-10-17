@@ -63,7 +63,13 @@ export function LogsPage() {
         <Input placeholder={t('logs.action')} value={action} onChange={(event) => setAction(event.target.value)} />
       </div>
 
-      <div ref={parentRef} className="h-[60vh] overflow-y-auto rounded-lg border border-slate-800">
+      <div
+        ref={parentRef}
+        tabIndex={0}
+        role="region"
+        aria-label={t('logs.title')}
+        className="h-[60vh] overflow-y-auto rounded-lg border border-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+      >
         <div style={{ height: `${virtualizer.getTotalSize()}px`, position: 'relative' }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const event = items[virtualRow.index]

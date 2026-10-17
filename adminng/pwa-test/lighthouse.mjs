@@ -3,20 +3,25 @@
  * Lighthouse budget for the AdminNG PWA (plan.md Phase 3 verification).
  *
  * Runs Lighthouse with the Chromium that Playwright installed (no second browser
- * download), keeps the JSON+HTML reports under `ldata/e2e/` and fails the build
- * when accessibility / best-practices / SEO drop below the budget. Installability
- * and the offline shell are asserted by `tests/installable.spec.ts`, which is
- * version-stable across Lighthouse releases (the PWA category was removed in v12).
+ * download), keeps the JSON+HTML reports under the artifacts directory and fails
+ * the build when accessibility / best-practices / performance drop below the
+ * budget. Installability and the offline shell are asserted by
+ * `tests/installable.spec.ts`, which is version-stable across Lighthouse releases
+ * (the PWA category was removed in v12).
+ *
+ * Inside the `pwa-test` container the URL is http://localhost:8083 served by the
+ * entrypoint's tunnel to the `adminng` nginx (a secure context, so the PWA
+ * scoring matches a real deployment behind the ingress).
  */
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const URL = process.env.ADMINNG_URL ?? 'http://localhost:8083'
-const OUT = process.env.LH_OUT ?? join(HERE, '..', '..', 'ldata', 'e2e')
+const OUT = resolve(process.env.E2E_ARTIFACTS ?? join(HERE, '..', '..', 'ldata', 'e2e'))
 /**
  * Gated metrics. SEO is reported but not gated: this is a private admin panel and
  * `public/robots.txt` disallows crawling on purpose, which makes Lighthouse's
@@ -41,11 +46,16 @@ function chromePath() {
 const report = join(OUT, 'lighthouse.json')
 console.log(`lighthouse: auditing ${URL} (reports in ${OUT})`)
 
+// Prefer the installed binary: `npx --yes` would hit the registry on every run
+// (and fail in an air-gapped runner), the local one is pinned by the lockfile.
+const local = join(HERE, 'node_modules', '.bin', 'lighthouse')
+const binary = existsSync(local) ? local : 'npx'
+const prefix = existsSync(local) ? [] : ['--yes', 'lighthouse']
+
 execFileSync(
-  'npx',
+  binary,
   [
-    '--yes',
-    'lighthouse',
+    ...prefix,
     URL,
     '--quiet',
     '--output=json',
@@ -76,3 +86,4 @@ if (failures.length > 0) {
   process.exit(1)
 }
 console.log('lighthouse: within budget')
+

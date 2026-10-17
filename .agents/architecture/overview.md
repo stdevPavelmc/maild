@@ -45,6 +45,7 @@ compose network.
 | `mua` | `pavelmc/maild-mua:develop` | SnappyMail webmail | 8081 | mda |
 | `cron` | `pavelmc/maild-cron:develop` | maintenance jobs | — | db |
 | `dozzle` | `amir20/dozzle:latest` | live log viewer (dev only) | 8082 | — |
+| `pwa-test` | `pavelmc/maild-pwa-test:develop` | Playwright + Lighthouse harness (dev only, one-shot) | — | api, adminng |
 
 - Service names are the DNS aliases on the network; in dev the containers are also named
   `maild-dev-<svc>` (production: `maild-<svc>`, external network `maild`).
@@ -86,6 +87,7 @@ their DB-dependent config stage (`AUTO_PROVISION`, default on). See
 | `ldata/logs` | `/var/log` | cron (empty in dev — JSON logging, see DEV-SETUP.md) |
 | `ldata/backups` | `/backups` | cron (db dumps) |
 | `ldata/dozzle` | `/data` | dozzle |
+| `ldata/e2e` | `/artifacts` | pwa-test (Playwright reports/traces, screenshots, axe JSON, Lighthouse) |
 
 `ldata/` is git-ignored and disposable in dev: `down` → `rm -rf ldata/` → re-run bootstrap.
 

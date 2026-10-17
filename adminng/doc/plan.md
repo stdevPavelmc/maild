@@ -32,7 +32,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | 0 — Scaffolding & wiring | **validated** (CI pending remote run) | per-task table below |
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
 | 2 — Security model | **validated** | per-task table below; full suite 67 passed / 0 failed |
-| 3 — PWA frontend | **partial** | implemented and built; served at :8083; browser E2E/Lighthouse pending (see notes) |
+| 3 — PWA frontend | **validated** | implemented and built; served at :8083; containerized browser suite (`pwa-test`) 3/3 flows + Lighthouse 97/100/96 + axe clean (see notes) |
 | 4 — APK pipeline | **partial** | script + toolchain image + release workflow implemented; first CI/keystore run pending |
 | 5 — Hardening & decision | **partial** | headers/CSP, docs, 66-check suite done; WebAuthn explicitly deferred (decision recorded) |
 
@@ -126,9 +126,9 @@ running it) · **validated** (verified by running the acceptance checks).
 | # | Task | Status | Evidence |
 |---|---|---|---|
 | 1 | Shell layouts (sidebar / bottom tabs / FAB) | **validated** | `components/Shell.tsx`; responsive at the 640 px breakpoint; the FAB only appears on creatable screens and is disabled offline |
-| 2 | Screens & flows (login, 2FA, enrollment QR, pending lock, editors, armed confirm, devices, logs) | **validated** | pages under `src/pages/`; browser suite covers approval → login → create → delete (re-auth + 5 s armed button) |
+| 2 | Screens & flows (login, 2FA, enrollment QR, pending lock, editors, armed confirm, devices, logs) | **validated** | pages under `src/pages/`; `pwa-test` covers approval → login → create → delete (re-auth + 5 s armed button) and, in `superadmin.spec.ts`, TOTP enrollment + devices-panel authorize/revoke through the UI |
 | 3 | Onboarding "server URL" — APK only | **validated** | runtime base (`getBaseUrl`/`setBaseUrl`), first-run `ServerScreen` when built with `VITE_REQUIRE_SERVER_URL=1`, Settings → "Change server"; the TWA APK is same-origin by construction (`APP_URL`) |
-| 4 | Rapid search (Ctrl/⌘K) | **validated** | modal calls `GET /search`; `?q=` is reactive (`lib/useUrlState.ts`), so a hit re-filters an already-mounted screen |
+| 4 | Rapid search (Ctrl/⌘K) | **validated** | modal calls `GET /search`; `?q=` is reactive (`lib/useUrlState.ts`), so a hit re-filters an already-mounted screen; `flows.spec.ts` opens it with the real shortcut and asserts the `example.net` hit |
 | 5 | Offline rules | **validated** | `vite-plugin-pwa` (CacheFirst shell / NetworkOnly API), `OnlineProvider` disables every write control, Dexie log cache; browser suite asserts banner + disabled FAB + offline boot |
 | 6 | Backgrounding (2 min shield / 15 min purge) | **validated** | `store/AuthContext.tsx` (visibilitychange + activity timers) |
 | 7 | Virtualized lists | **validated** (deviation) | `@tanstack/react-virtual` in the logs screen; catalogue tables stay cursor-paginated (bounded DOM) — see notes |
@@ -139,15 +139,31 @@ running it) · **validated** (verified by running the acceptance checks).
 
 - `npm run build` is the gate: i18n completeness → `tsc --noEmit` → Vite. It runs inside the
   image, so a missing Spanish key fails the image build.
-- Browser suite: `adminng/e2e` (Playwright + Chromium, driven from the host against the dev
-  stack). It approves its own device through `adminng.py --approve-device`, then covers login,
-  account create/delete with the armed confirm, the sidebar domain scope, the language switch,
-  the offline lockdown, and the manifest/service-worker/offline boot. **2/2 passing.**
-- Lighthouse 12 (Playwright's Chromium): performance 97, accessibility 100,
-  best-practices 96; SEO is reported only (63) because `public/robots.txt` disallows crawling a
-  private admin panel on purpose.
-- Accessibility fixes found by the audit: secondary text moved from `slate-500` to `slate-400`
-  (3.97:1 → ~7:1) and modals now expose `role="dialog"`/`aria-modal`.
+- Browser suite: **`adminng/pwa-test`** — a dev-only one-shot container (service `pwa-test`)
+  with Playwright 1.64.1 + Chromium and Lighthouse 12.8.2 baked in. `./adminng/pwa-test/run.sh
+  verify` runs `flows`, `installable`, `superadmin` and the Lighthouse budget; no host Node or
+  `npx playwright install` is involved. **3/3 passing.**
+- The container tunnels `http://localhost:8083` to `http://adminng:80`: `localhost` is a secure
+  context, so the service worker / installability / offline assertions behave exactly as on the
+  host or behind the production ingress. (Verified the hard way: `http://adminng` makes
+  `crypto.randomUUID` unavailable and the app cannot even generate its device id.)
+- Device approval stays out of band. `flows`/`visual`/`a11y` read the pending UUID and run the
+  documented `adminng.py --approve-device` in the `api` container through the docker socket
+  (dev-only service, absent from every production compose file). `superadmin.spec.ts` covers the
+  other documented path: TOTP enrollment, then authorize/revoke from the devices panel with
+  re-auth + the 5 s armed button.
+- Lighthouse 12: performance 97, accessibility 100, best-practices 96; SEO is reported only (63)
+  because `public/robots.txt` disallows crawling a private admin panel on purpose.
+- `visual.spec.ts` (desktop 1440×900 + mobile 390×844, EN/ES, ~22 PNGs in `ldata/e2e/screens/`)
+  and `a11y.spec.ts` (axe-core WCAG 2.1 A/AA, JSON per screen in `ldata/e2e/a11y/`) are the
+  review tools for UI/UX work; the first audit run drove three fixes below.
+- Accessibility fixes found by the audits: secondary text moved from `slate-500` to `slate-400`
+  (3.97:1 → ~7:1), modals expose `role="dialog"`/`aria-modal`, and the virtualized log list is now
+  a keyboard-focusable `role="region"` (`scrollable-region-focusable` was the only serious axe
+  finding).
+- Pagination gaps found by the same review: the **devices** panel and the **admins** table used
+  `usePaged` without passing the cursor or rendering "Load more", so only the first page was ever
+  reachable. Both now paginate like domains/accounts/aliases.
 - **Deviation (task 7):** only the logs view is virtualized. The catalogue tables are
   cursor-paginated (25 rows per page, user-driven), so the DOM stays bounded; virtualizing them
   would add complexity without changing the node count.
@@ -157,6 +173,9 @@ running it) · **validated** (verified by running the acceptance checks).
   the device identity on change.
 - Session storage is `localStorage` (device id + token pair); the PKCE/WebAuthn upgrade is the
   Phase-5 credential work.
+- Artifacts are host-owned: the harness runs as root (docker socket, Chromium sandbox off) and
+  `entrypoint.sh` chowns `ldata/e2e` back to the invoking uid/gid on exit.
+
 
 ## Phase 0 — Scaffolding & wiring
 
@@ -261,9 +280,9 @@ archives.
 
 ## Phase 3 — PWA frontend
 
-**Status:** validated — implemented, built, and exercised by the Playwright suite plus the
-Lighthouse budget (see the task table at the top of this document and the verification block
-below).
+**Status:** validated — implemented, built, and exercised in the `pwa-test` container by three
+Playwright specs (flows, installability, superadmin) plus the Lighthouse budget and an axe audit
+(see the task table at the top of this document and the verification block below).
 
 **Goal:** the complete AdminNG experience against the finished API — the
 everyday admin work is fully doable from a phone.
@@ -305,19 +324,29 @@ passes installability on the dev stack.
 # i18n gate: key/placeholder parity, no empty values (also part of the image build)
 cd adminng/pwa && npm run i18n:check
 
-# Browser flows + installability/offline (needs the dev stack running)
-cd adminng/e2e && npm ci && npx playwright install chromium && npm run verify
-#   -> 2 Playwright tests (approval, login, CRUD + armed confirm, domain scope,
-#      i18n switch, offline lockdown, manifest + service worker + offline boot)
+# Browser flows + installability + Lighthouse, in the dev-only pwa-test container
+# (self-contained: Playwright 1.64.1 + Chromium and Lighthouse are baked in)
+./adminng/pwa-test/run.sh verify
+#   -> flows: pending device -> CLI approval -> login -> Ctrl/⌘K search palette ->
+#      create/delete an account (re-auth + 5 s armed confirm) -> domain scope ->
+#      ES/EN switch -> offline lockdown
+#   -> installable: manifest fields, active service worker, boot with the network down
+#   -> superadmin: TOTP enrollment + devices panel authorize/revoke through the UI
 #   -> Lighthouse: performance >= 0.85, accessibility >= 0.9, best-practices >= 0.9
 
-# CI: .github/workflows/pwa-e2e.yml (manual dispatch: builds the stack, runs both)
+# Review tools (artifacts under ldata/e2e/)
+./adminng/pwa-test/run.sh visual    # 22 PNGs: desktop 1440x900 + mobile 390x844, EN/ES
+./adminng/pwa-test/run.sh a11y      # axe WCAG 2.1 A/AA per screen (fails on serious/critical)
+./adminng/pwa-test/run.sh shell     # interactive shell inside the harness image
+
+# CI: .github/workflows/pwa-e2e.yml (manual dispatch: builds the stack, runs verify + a11y)
 ```
 
 Installability is asserted twice: structurally in `tests/installable.spec.ts` (manifest fields,
 active service worker controlling the page, app boot with the network down) and by Lighthouse's
 performance/accessibility/best-practices budget. The install prompt itself is a browser UI and is
 verified on the device at release time.
+
 
 ## Phase 4 — Android APK pipeline
 
@@ -345,8 +374,8 @@ phone against the dev stack reaches a working login (and the device shows up
 
 ## Phase 5 — Hardening, integration & the deprecation decision
 
-**Status:** partial — hardening done, WebAuthn explicitly deferred (decision below), browser
-E2E/Lighthouse outstanding.
+**Status:** partial — hardening done, WebAuthn explicitly deferred (decision below); the browser
+E2E + Lighthouse gate is now containerized (`pwa-test`) and green.
 
 **Goal:** production-grade confidence and an explicit, informed decision on
 PostfixAdmin's future.
@@ -399,14 +428,18 @@ sandbox has no Android SDK download/keystore, so this phase is deliberately `par
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
 | 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** as the fallback for v1 (vacation, fetchmail, welcome templates, backup/restore UI, setup OTP are not ported). AdminNG becomes the primary UI for domains/accounts/aliases/admins/devices/logs. Revisit after adoption with the per-feature table from §11 of the draft; a future Phase 6 ports or retires them. |
 
-**Phase 5 follow-ups (explicitly open):** browser E2E (Playwright) + Lighthouse installability on
-a real browser; automated i18n key-completeness check in CI; WebAuthn/passkeys; APK CI first run.
+**Phase 5 follow-ups (explicitly open):** WebAuthn/passkeys; APK CI first run; per-feature
+PostfixAdmin decision table. Closed here: browser E2E + Lighthouse installability (dev-only
+`pwa-test` service, `run.sh verify`), automated i18n key-completeness check (inside `npm run
+build`, so the image build and CI gate it), and the axe accessibility audit (`run.sh a11y`).
 
 ## Phase 6 — follow-ups (stub, from the Phase 5 decisions)
 
 1. WebAuthn/passkeys for login and re-auth (data model: `webauthn_credential`, challenge store).
-2. Browser E2E + Lighthouse in CI (PWA installability gate).
-3. Automated i18n completeness check (extract keys, fail on missing `es`).
+2. ~~Browser E2E + Lighthouse in CI~~ — done in Phase 3: `adminng/pwa-test` + `run.sh verify`,
+   wired into `.github/workflows/pwa-e2e.yml`; the a11y run publishes its JSON reports.
+3. Automated i18n completeness check — done: `npm run i18n:check` runs inside `npm run build`,
+   which is the frontend image build (and the CI gate).
 4. Per-feature PostfixAdmin decision table (port / declare dead / keep), then retire or keep
    `admin` formally.
 

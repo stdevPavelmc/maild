@@ -265,3 +265,18 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 - `amir20/dozzle:latest` on 8082; live logs of all `maild-dev-*` containers via the
   read-only docker socket. Not part of production.
+
+## pwa-test — browser harness (dev only)
+
+- `adminng/pwa-test/` builds `maild-pwa-test:develop` from
+  `mcr.microsoft.com/playwright:v1.64.1-noble` (pinned to the `@playwright/test` version in
+  the lockfile) plus the static Docker CLI. One-shot: `docker compose run --rm pwa-test`
+  through `adminng/pwa-test/run.sh`; `profiles: ["test"]`, so `up` never starts it.
+- No published port. It joins `maild-dev`, waits for the `api`/`adminng` healthchecks, and
+  the entrypoint tunnels `http://localhost:8083` to `http://adminng:80` — `localhost` is a
+  secure context, so service-worker/installability checks are real.
+- Mounts `./test.creds` read-only (`MAILD_ROOT=/repo`), `./ldata/e2e` as `/artifacts`, and
+  the docker socket: the suite authorizes its own device with the documented
+  `adminng.py --approve-device` inside the `api` container. Absent from all production
+  compose files; the operator's stack never sees it.
+- `run.sh` maps the invoking uid/gid so the artifacts stay host-owned.

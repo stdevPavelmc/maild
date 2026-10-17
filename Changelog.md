@@ -123,6 +123,27 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   `adminng/api/tests/test_catalogue.py` self-test (run inside the api container) asserts the
   write-compatibility rules. The api process now runs as uid/gid 5000 (the vmail owner) with
   the volume mounted read-only, because maildirs are `0700`.
+- Added: **`pwa-test` — the AdminNG browser harness as a dev-only service** (`adminng/pwa-test/`,
+  `maild-pwa-test`): the Playwright suite moved out of `adminng/e2e` and now runs in a one-shot
+  container built on `mcr.microsoft.com/playwright:v1.64.1-noble` (pinned to the lockfile) with
+  Lighthouse 12 and the static Docker CLI. `run.sh verify|flows|installable|superadmin|a11y|
+  visual|lighthouse|shell` is the whole interface; the harness image carries the browsers, so
+  neither the host nor CI needs Node/Chromium. It joins `maild-dev`, waits for the api/adminng
+  healthchecks and tunnels `http://localhost:8083` to `http://adminng:80` (a secure context, so
+  the service-worker/installability/offline checks stay real). The `profiles: ["test"]` service
+  is absent from all production compose files; it mounts `test.creds` read-only, `ldata/e2e` as
+  `/artifacts` and the docker socket, because device approval stays out of band through
+  `adminng.py --approve-device` in the `api` container. New specs: `superadmin` (TOTP enrollment
+  + devices panel authorize/revoke through the UI), `visual` (22 PNGs, desktop/mobile, EN/ES)
+  and `a11y` (axe WCAG 2.1 A/AA). `flows` now also asserts the real Ctrl/⌘K search palette.
+- Fixed: the **devices panel and the admins table never paginated** — both consumed `usePaged`
+  without passing the cursor or rendering "Load more", so only the first page was reachable.
+  They now paginate like the other catalogue screens.
+- Fixed: the virtualized log list is a keyboard-focusable `role="region"`; axe flagged
+  `scrollable-region-focusable` as the only serious accessibility finding (all screens are now
+  clean). `flows` also stops pressing Ctrl/⌘K before the shell has mounted.
+- Changed: `.github/workflows/pwa-e2e.yml` runs the suite through `adminng/pwa-test/run.sh`
+  (no host Node/Playwright install) and uploads the axe reports.
 
 ## 2026-10-17 1.5.1-rc
 - Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**

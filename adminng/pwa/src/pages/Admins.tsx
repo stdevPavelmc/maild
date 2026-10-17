@@ -19,7 +19,7 @@ export function AdminsPage({ password }: { password: string }) {
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Admin | null>(null)
 
-  const list = usePaged<Admin>(() => api.listAdmins(), [])
+  const list = usePaged<Admin>((cursor) => api.listAdmins(cursor), [])
 
   useEffect(() => {
     api.listDomains().then((page) => setAllDomains(page.items)).catch(() => setAllDomains([]))
@@ -108,6 +108,9 @@ export function AdminsPage({ password }: { password: string }) {
           <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
         )}
       </div>
+      {list.cursor && (
+        <Button variant="outline" onClick={() => void list.more()}>{t('common.page')}</Button>
+      )}
 
       <Modal
         open={openNew}

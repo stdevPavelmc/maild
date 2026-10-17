@@ -54,19 +54,17 @@ jobs:
           docker compose --env-file env.dev -f docker-compose-dev.yml logs --tail 80 adminng api
           exit 1
 
-      - name: Install Playwright
-        working-directory: adminng/e2e
+      # The harness image carries Playwright + Chromium + Lighthouse, so the job
+      # needs no host Node/browser setup. The suite approves its own device
+      # through the api container CLI (the service mounts the docker socket).
+      - name: Playwright flows, installability and Lighthouse (container)
         run: |
-          npm ci --no-audit --no-fund
-          npx playwright install --with-deps chromium
+          chmod +x adminng/pwa-test/run.sh adminng/pwa-test/entrypoint.sh
+          ./adminng/pwa-test/run.sh verify
 
-      - name: Playwright flows
-        working-directory: adminng/e2e
-        run: npx playwright test
-
-      - name: Lighthouse budget
-        working-directory: adminng/e2e
-        run: npm run lighthouse
+      - name: Accessibility audit (axe, report in the artifact)
+        continue-on-error: true
+        run: ./adminng/pwa-test/run.sh a11y
 
       - name: Upload the reports
         if: always()
@@ -75,9 +73,11 @@ jobs:
           name: adminng-e2e
           path: |
             ldata/e2e/report
+            ldata/e2e/a11y
             ldata/e2e/lighthouse.report.html
             ldata/e2e/lighthouse.report.json
           if-no-files-found: ignore
+
 
       - name: Stack logs
         if: failure()
