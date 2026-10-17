@@ -90,6 +90,36 @@ cd adminng/pwa && npm run build           # i18n gate -> tsc --noEmit -> Vite
 `adminng/pwa/app-generate.sh` builds the PWA and wraps it in a signed Android APK (Trusted Web
 Activity, Bubblewrap) entirely in Docker — no local Android SDK:
 
+### Signing keystore
+
+The APK must be signed with a **keystore you keep**: losing it means you can no longer update
+an already published app (Play App Signing can mitigate that, but it is an operator decision).
+For development/testing, generate a throwaway one:
+
+```bash
+cd adminng/pwa
+./keystore-generate.sh          # -> ./android.keystore (0600) + ./android.keystore.b64
+```
+
+It uses `keytool` from your JDK, or falls back to Docker (`maild-adminng-apk:local`, or
+`eclipse-temurin:17-jdk-jammy`) when no JDK is installed. It generates a random password when
+you do not set `STORE_PASSWORD`, prints the exact build command, and writes the base64 file for
+the CI secret. Optional overrides: `OUT`, `KEY_ALIAS` (default `maild-apk`), `KEY_PASSWORD`,
+`DNAME`, `VALIDITY` (default 3650 days), `FORCE=1` to overwrite.
+
+For a **production** release, run the same command on a trusted machine with your own
+`DNAME`/passwords, back up both files, and set the repository secrets used by
+`.github/workflows/android-apk.yml`:
+
+| Secret | Value |
+|---|---|
+| `KEYSTORE_BASE64` | the contents of `android.keystore.b64` |
+| `KEY_ALIAS` | the alias (`maild-apk` unless changed) |
+| `KEY_PASSWORD` | the key password |
+| `STORE_PASSWORD` | the keystore password |
+
+(The workflow variable `ADMINNG_APP_URL` is the public https URL of the frontend.)
+
 ```bash
 cd adminng/pwa
 APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \

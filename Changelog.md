@@ -144,6 +144,12 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   clean). `flows` also stops pressing Ctrl/⌘K before the shell has mounted.
 - Changed: `.github/workflows/pwa-e2e.yml` runs the suite through `adminng/pwa-test/run.sh`
   (no host Node/Playwright install) and uploads the axe reports.
+- Added: **`adminng/pwa/keystore-generate.sh`** — the missing APK signing-keystore steps. It
+  generates a dev/test JKS (mode 0600) and its `.b64` (the `KEYSTORE_BASE64` CI secret), prints
+  the exact `app-generate.sh` invocation and the secrets to set, and uses Docker when no JDK is
+  installed. Production keys are generated the same way on a trusted machine and backed up;
+  `*.keystore*` under `adminng/pwa/` is now git-ignored. Documented in `adminng/README.md`
+  ("Signing keystore") and `.agents/devops/workflows.md`.
 - Docs: `plan.md` Phase 5 records the full `./test.sh` run (67/67) and the Phase 6 table now
   decides PostfixAdmin's remaining features one by one — vacation is the only port (Phase 7),
   fetchmail/welcome templates/backup-restore UI/setup OTP are declared dead with their existing

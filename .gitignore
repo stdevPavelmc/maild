@@ -15,6 +15,11 @@ __pycache__/
 adminng/pwa/android-project/
 adminng/pwa/twa-manifest.json
 adminng/pwa/app-release-signed.apk
+adminng/pwa/*.apk
+adminng/pwa/*.aab
+# APK signing material — NEVER commit (see adminng/README.md, "Signing keystore")
+adminng/pwa/*.keystore
+adminng/pwa/*.keystore.b64
 
 # AdminNG browser suite artifacts (dev-only service pwa-test)
 adminng/pwa-test/test-results/

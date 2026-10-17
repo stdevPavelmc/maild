@@ -6,6 +6,10 @@ name: AdminNG Android APK
 #
 # Repository secrets: KEYSTORE_BASE64, KEY_ALIAS, KEY_PASSWORD, STORE_PASSWORD
 # Repository variable: ADMINNG_APP_URL (the public https URL of the frontend)
+#
+# Need a key? `adminng/pwa/keystore-generate.sh` creates a dev/test JKS plus the
+# base64 for KEYSTORE_BASE64 (production keys: same script, trusted machine, own
+# passwords, backed up). See adminng/README.md, "Signing keystore".
 
 on:
   workflow_dispatch:

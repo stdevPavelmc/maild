@@ -416,7 +416,7 @@ is recorded and its follow-up plan exists.
 |---|---|---|---|
 | 1 | `app-generate.sh` (dockerized PWA → signed APK) | **validated** | built `dist/android/cu.maild.adminng-0.1.0.apk` (~0.96 MB) from the live dev stack; `apksigner verify` v2+v3 with the throwaway cert `CN=MailD Test`; `aapt dump badging`: `cu.maild.adminng`, 0.1.0 (1), minSdk 24, target 36 |
 | 2 | GitHub Actions release artifact | **finished** | `.github/workflows/android-apk.yml` (workflow_dispatch + release; keystore from secrets; artifact + release attach); the script it calls is now the one proven above |
-| 3 | Keystore decision + rotation runbook | **partial** | decision: operator-owned keystore stored as repo secret `KEYSTORE_BASE64`; Play Store vs sideload still an operator call |
+| 3 | Keystore decision + rotation runbook | **partial** | dev/test generation documented and scripted (`adminng/pwa/keystore-generate.sh`, validated by rebuilding the APK: the new certificate digest matched); the operator still decides Play Store vs sideload and must supply/back up the release key as the `KEYSTORE_BASE64`/`KEY_ALIAS`/`KEY_PASSWORD`/`STORE_PASSWORD` secrets |
 | 4 | APK first-run flow | **validated (PWA side)** | the TWA loads `APP_URL`, so the PWA's existing handshake → approval → enrollment/2FA flow is what runs on the phone; install/launch still needs a device |
 
 **Phase 4 notes — what the first real run found (all fixed in the script/image):**
@@ -454,6 +454,12 @@ is recorded and its follow-up plan exists.
   pass `APP_URL`); fixed, so the bundled-asset build really points at the deployment.
 - The signed APK is picked up from `android-project/app-release-signed.apk` (the old
   `find … -name '*.apk' | head -1` could return the *unsigned* intermediate).
+- **Keystore:** the missing runbook now exists — `adminng/pwa/keystore-generate.sh` creates a
+  dev/test JKS (0600) plus the base64 for the CI secret, prints the exact build command, and
+  falls back to Docker when no JDK is installed. Proven by rebuilding the APK with a generated
+  key and matching the certificate digest. Production keys must be generated on a trusted
+  machine and backed up (losing them blocks updates unless Play App Signing is used); the
+  Play Store vs sideload call stays with the operator.
 
 
 ### Phase 5 — task status & decisions

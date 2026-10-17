@@ -26,6 +26,10 @@
 #
 # Output: dist/android/<APP_PKG>-<VERSION_NAME>.apk
 #
+# Signing keystore: `keystore-generate.sh` (next to this script) creates a dev/test
+# JKS and prints the exact environment for this script; production keys are
+# generated the same way on a trusted machine and stored as repository secrets.
+#
 # Bubblewrap's `init` is interactive even when a manifest is passed (it asks for
 # the domain, app name, package id and colors). This script therefore writes
 # `twa-manifest.json` itself and drives the deterministic `update` + `build`
