@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Admin, type Domain } from '../lib/api'
+import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
 import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
 import { Button } from '../components/ui/button'
@@ -8,6 +9,7 @@ import { ConfirmDelete } from '../components/ConfirmDelete'
 
 export function AdminsPage({ password }: { password: string }) {
   const { t } = useTranslation()
+  const online = useOnline()
   const [openNew, setOpenNew] = useState(false)
   const [username, setUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -42,12 +44,14 @@ export function AdminsPage({ password }: { password: string }) {
     <div className="space-y-4">
       <SectionHeader
         title={t('admins.title')}
-        action={<Button onClick={() => setOpenNew(true)}>{t('admins.new')}</Button>}
+        action={
+          <Button disabled={!online} onClick={() => setOpenNew(true)}>{t('admins.new')}</Button>
+        }
       />
       <ErrorBanner message={list.error} />
       <div className="overflow-x-auto rounded-lg border border-slate-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-500">
+          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
             <tr>
               <th className="px-3 py-2">{t('login.username')}</th>
               <th className="px-3 py-2">{t('admins.superadmin')}</th>
@@ -82,6 +86,7 @@ export function AdminsPage({ password }: { password: string }) {
                     <Button
                       variant="outline"
                       size="sm"
+                      disabled={!online}
                       onClick={() => {
                         void api
                           .updateAdmin(admin.username, { active: !admin.active })
@@ -90,7 +95,7 @@ export function AdminsPage({ password }: { password: string }) {
                     >
                       {admin.active ? t('mailboxes.suspend') : t('mailboxes.activate')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setDeleting(admin)}>
+                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(admin)}>
                       {t('common.delete')}
                     </Button>
                   </div>
@@ -100,7 +105,7 @@ export function AdminsPage({ password }: { password: string }) {
           </tbody>
         </table>
         {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">{t('common.empty')}</p>
+          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
         )}
       </div>
 
@@ -111,7 +116,7 @@ export function AdminsPage({ password }: { password: string }) {
         footer={
           <>
             <Button variant="outline" onClick={() => setOpenNew(false)}>{t('common.cancel')}</Button>
-            <Button onClick={() => void create()}>{t('admins.create')}</Button>
+            <Button disabled={!online} onClick={() => void create()}>{t('admins.create')}</Button>
           </>
         }
       >
@@ -126,10 +131,10 @@ export function AdminsPage({ password }: { password: string }) {
             onChange={(event) => setNewPassword(event.target.value)}
           />
         </Field>
-        <Toggle checked={superadmin} label={t('admins.superadmin')} onChange={setSuperadmin} />
+        <Toggle checked={superadmin} label={t('admins.superadmin')} disabled={!online} onChange={setSuperadmin} />
         {!superadmin && (
           <div className="space-y-1 rounded border border-slate-800 p-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">{t('admins.domains')}</p>
+            <p className="text-xs uppercase tracking-wide text-slate-400">{t('admins.domains')}</p>
             {allDomains.map((domain) => (
               <label key={domain.domain} className="flex items-center gap-2 text-sm text-slate-300">
                 <input

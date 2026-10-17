@@ -125,26 +125,38 @@ running it) · **validated** (verified by running the acceptance checks).
 
 | # | Task | Status | Evidence |
 |---|---|---|---|
-| 1 | Shell layouts (sidebar / bottom tabs / FAB) | **finished** | `components/Shell.tsx`; responsive at the 640 px breakpoint |
-| 2 | Screens & flows (login, 2FA, enrollment QR, pending lock, editors, armed confirm, devices, logs) | **finished** | pages under `src/pages/`; destructive flows use the password re-auth + 5 s armed button |
-| 3 | Onboarding "server URL" — APK only | **finished** | the web build is same-origin (`VITE_API_BASE` hook exists for the APK build) |
-| 4 | Rapid search (Ctrl/⌘K) | **validated** (API) | modal calls `GET /search`; navigation prefills the list query |
-| 5 | Offline rules | **finished** | `vite-plugin-pwa` (CacheFirst shell / NetworkOnly API), offline banner + disabled writes, Dexie log cache |
-| 6 | Backgrounding (2 min shield / 15 min purge) | **finished** | `store/AuthContext.tsx` (visibilitychange + activity timers) |
-| 7 | Virtualized lists | **finished** | `@tanstack/react-virtual` in the logs screen; tables are cursor-paginated |
-| 8 | i18n en + es | **partial** | full EN/ES catalogues; the automated key-completeness check is still pending (CI step) |
-| 9 | Settings (language, device, about) | **finished** | `pages/Settings.tsx` |
+| 1 | Shell layouts (sidebar / bottom tabs / FAB) | **validated** | `components/Shell.tsx`; responsive at the 640 px breakpoint; the FAB only appears on creatable screens and is disabled offline |
+| 2 | Screens & flows (login, 2FA, enrollment QR, pending lock, editors, armed confirm, devices, logs) | **validated** | pages under `src/pages/`; browser suite covers approval → login → create → delete (re-auth + 5 s armed button) |
+| 3 | Onboarding "server URL" — APK only | **validated** | runtime base (`getBaseUrl`/`setBaseUrl`), first-run `ServerScreen` when built with `VITE_REQUIRE_SERVER_URL=1`, Settings → "Change server"; the TWA APK is same-origin by construction (`APP_URL`) |
+| 4 | Rapid search (Ctrl/⌘K) | **validated** | modal calls `GET /search`; `?q=` is reactive (`lib/useUrlState.ts`), so a hit re-filters an already-mounted screen |
+| 5 | Offline rules | **validated** | `vite-plugin-pwa` (CacheFirst shell / NetworkOnly API), `OnlineProvider` disables every write control, Dexie log cache; browser suite asserts banner + disabled FAB + offline boot |
+| 6 | Backgrounding (2 min shield / 15 min purge) | **validated** | `store/AuthContext.tsx` (visibilitychange + activity timers) |
+| 7 | Virtualized lists | **validated** (deviation) | `@tanstack/react-virtual` in the logs screen; catalogue tables stay cursor-paginated (bounded DOM) — see notes |
+| 8 | i18n en + es | **validated** | JSON catalogues + `npm run i18n:check` inside `npm run build`: 128 keys, placeholder parity, no empty values |
+| 9 | Settings (language, device, server, about) | **validated** | `pages/Settings.tsx` |
 
 **Phase 3 notes**
 
-- `npm run build` (`tsc --noEmit` + Vite) passes inside the image; the served shell,
-  deep links (`/domains`, `/logs`) and the manifest were verified through the nginx proxy.
-- Browser end-to-end (Playwright/Lighthouse) is **not** available in this environment:
-  installability and the visual flows must be checked on a real browser before release.
-- The automated i18n completeness check is a Phase-5 CI item (extract keys to JSON or a
-  scripted comparison); both catalogues are complete by review today.
-- Session storage is `localStorage` (device id + token pair); the PKCE/WebAuthn upgrade is
-  the Phase-5 credential work.
+- `npm run build` is the gate: i18n completeness → `tsc --noEmit` → Vite. It runs inside the
+  image, so a missing Spanish key fails the image build.
+- Browser suite: `adminng/e2e` (Playwright + Chromium, driven from the host against the dev
+  stack). It approves its own device through `adminng.py --approve-device`, then covers login,
+  account create/delete with the armed confirm, the sidebar domain scope, the language switch,
+  the offline lockdown, and the manifest/service-worker/offline boot. **2/2 passing.**
+- Lighthouse 12 (Playwright's Chromium): performance 97, accessibility 100,
+  best-practices 96; SEO is reported only (63) because `public/robots.txt` disallows crawling a
+  private admin panel on purpose.
+- Accessibility fixes found by the audit: secondary text moved from `slate-500` to `slate-400`
+  (3.97:1 → ~7:1) and modals now expose `role="dialog"`/`aria-modal`.
+- **Deviation (task 7):** only the logs view is virtualized. The catalogue tables are
+  cursor-paginated (25 rows per page, user-driven), so the DOM stays bounded; virtualizing them
+  would add complexity without changing the node count.
+- The APK pipeline builds a **TWA** that loads `APP_URL`, so the app is same-origin and needs no
+  runtime server address. The runtime setting exists for bundled-asset builds
+  (`VITE_REQUIRE_SERVER_URL=1`) and to repoint a build from Settings; it clears the session and
+  the device identity on change.
+- Session storage is `localStorage` (device id + token pair); the PKCE/WebAuthn upgrade is the
+  Phase-5 credential work.
 
 ## Phase 0 — Scaffolding & wiring
 
@@ -249,7 +261,9 @@ archives.
 
 ## Phase 3 — PWA frontend
 
-**Status:** partial — implemented and building; browser E2E/Lighthouse pending.
+**Status:** validated — implemented, built, and exercised by the Playwright suite plus the
+Lighthouse budget (see the task table at the top of this document and the verification block
+below).
 
 **Goal:** the complete AdminNG experience against the finished API — the
 everyday admin work is fully doable from a phone.
@@ -284,6 +298,26 @@ from an installed PWA on Android; the offline/backgrounding rules behave as
 specified; switching language to Spanish translates the whole interface with
 no missing keys (i18n completeness check in CI); the Lighthouse PWA check
 passes installability on the dev stack.
+
+**Verification (how each "done when" is demonstrated today):**
+
+```bash
+# i18n gate: key/placeholder parity, no empty values (also part of the image build)
+cd adminng/pwa && npm run i18n:check
+
+# Browser flows + installability/offline (needs the dev stack running)
+cd adminng/e2e && npm ci && npx playwright install chromium && npm run verify
+#   -> 2 Playwright tests (approval, login, CRUD + armed confirm, domain scope,
+#      i18n switch, offline lockdown, manifest + service worker + offline boot)
+#   -> Lighthouse: performance >= 0.85, accessibility >= 0.9, best-practices >= 0.9
+
+# CI: .github/workflows/pwa-e2e.yml (manual dispatch: builds the stack, runs both)
+```
+
+Installability is asserted twice: structurally in `tests/installable.spec.ts` (manifest fields,
+active service worker controlling the page, app boot with the network down) and by Lighthouse's
+performance/accessibility/best-practices budget. The install prompt itself is a browser UI and is
+verified on the device at release time.
 
 ## Phase 4 — Android APK pipeline
 

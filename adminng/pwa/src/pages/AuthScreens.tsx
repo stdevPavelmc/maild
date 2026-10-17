@@ -14,7 +14,7 @@ function ErrorText({ code }: { code: string | null }) {
       : code === 'badCode'
         ? t('login.badCode')
         : code === 'RATE_LIMITED'
-          ? 'RATE_LIMITED'
+          ? t('login.rateLimited')
           : code === 'revoked'
             ? t('device.revoked')
             : t('login.network')
@@ -39,7 +39,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm space-y-5 rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
         <header>
           <h1 className="text-xl font-semibold">{t('app.title')}</h1>
-          <p className="text-xs text-slate-500">{t('app.subtitle')}</p>
+          <p className="text-xs text-slate-400">{t('app.subtitle')}</p>
         </header>
         <ErrorText code={loginError} />
 

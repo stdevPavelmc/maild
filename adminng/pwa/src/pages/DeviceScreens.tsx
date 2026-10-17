@@ -19,7 +19,7 @@ export function PendingScreen() {
       <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-6">
         <h1 className="text-lg font-semibold">🔐 {t('device.pendingTitle')}</h1>
         <p className="text-sm text-slate-400">{t('device.pendingBody')}</p>
-        <p className="text-xs uppercase tracking-wide text-slate-500">{t('device.id')}</p>
+        <p className="text-xs uppercase tracking-wide text-slate-400">{t('device.id')}</p>
         <div className="flex items-center gap-2">
           <code className="flex-1 truncate rounded bg-slate-800 px-2 py-1 text-xs">{device}</code>
           <Button

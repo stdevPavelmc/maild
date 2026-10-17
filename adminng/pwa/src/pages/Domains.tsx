@@ -1,17 +1,28 @@
-import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Domain } from '../lib/api'
+import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
+import { useNewSignal, useSearchQuery } from '../lib/useUrlState'
 import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
 export function DomainsPage({ password }: { password: string }) {
   const { t } = useTranslation()
-  const [params, setParams] = useSearchParams()
-  const [query, setQuery] = useState(params.get('q') ?? '')
-  const [openNew, setOpenNew] = useState(params.get('new') === '1')
+  const online = useOnline()
+  // `?q=` and `?new=1` drive the screen, so the search modal and the FAB work
+  // even when Domains is already mounted (React Router keeps it alive).
+  const [urlQuery, setUrlQuery] = useSearchQuery()
+  const [query, setQuery] = useState(urlQuery)
+  const [openNew, setOpenNew] = useState(false)
+  const newSignal = useNewSignal()
+  useEffect(() => {
+    setQuery(urlQuery)
+  }, [urlQuery])
+  useEffect(() => {
+    if (newSignal) setOpenNew(true)
+  }, [newSignal])
   const [domain, setDomain] = useState('')
   const [description, setDescription] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -39,7 +50,9 @@ export function DomainsPage({ password }: { password: string }) {
     <div className="space-y-4">
       <SectionHeader
         title={t('domains.title')}
-        action={<Button onClick={() => setOpenNew(true)}>{t('domains.new')}</Button>}
+        action={
+          <Button disabled={!online} onClick={() => setOpenNew(true)}>{t('domains.new')}</Button>
+        }
       />
       {advisory && (
         <div className="rounded border border-amber-800 bg-amber-950/50 p-3 text-sm text-amber-200">
@@ -51,8 +64,7 @@ export function DomainsPage({ password }: { password: string }) {
         className="flex gap-2"
         onSubmit={(event) => {
           event.preventDefault()
-          params.set('q', query)
-          setParams(params)
+          setUrlQuery(query)
         }}
       >
         <Input
@@ -64,7 +76,7 @@ export function DomainsPage({ password }: { password: string }) {
 
       <div className="overflow-x-auto rounded-lg border border-slate-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-500">
+          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
             <tr>
               <th className="px-3 py-2">{t('nav.domains')}</th>
               <th className="px-3 py-2">{t('domains.description')}</th>
@@ -90,10 +102,10 @@ export function DomainsPage({ password }: { password: string }) {
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setEditing(item)}>
+                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setEditing(item)}>
                       {t('common.edit')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setDeleting(item)}>
+                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(item)}>
                       {t('common.delete')}
                     </Button>
                   </div>
@@ -103,7 +115,7 @@ export function DomainsPage({ password }: { password: string }) {
           </tbody>
         </table>
         {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">{t('common.empty')}</p>
+          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
         )}
       </div>
       {list.cursor && (
@@ -119,7 +131,7 @@ export function DomainsPage({ password }: { password: string }) {
         footer={
           <>
             <Button variant="outline" onClick={() => setOpenNew(false)}>{t('common.cancel')}</Button>
-            <Button onClick={() => void create()}>{t('domains.create')}</Button>
+            <Button disabled={!online} onClick={() => void create()}>{t('domains.create')}</Button>
           </>
         }
       >
@@ -153,6 +165,7 @@ export function DomainsPage({ password }: { password: string }) {
             <Toggle
               checked={editing.active}
               label={t('common.active')}
+              disabled={!online}
               onChange={(value) => {
                 void api.updateDomain(editing.domain, { active: value }).then(() => list.reload())
               }}

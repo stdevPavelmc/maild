@@ -1,7 +1,9 @@
 import { useTranslation } from 'react-i18next'
 import { useAuth } from '../store/AuthContext'
+import { getBaseUrl } from '../lib/api'
 import { SectionHeader } from '../components/kit'
 import { Button } from '../components/ui/button'
+import { ServerForm } from './ServerScreen'
 
 export function SettingsPage() {
   const { t, i18n } = useTranslation()
@@ -12,7 +14,7 @@ export function SettingsPage() {
       <SectionHeader title={t('nav.settings')} />
 
       <section className="space-y-2 rounded-lg border border-slate-800 p-4">
-        <p className="text-xs uppercase tracking-wide text-slate-500">{t('language')}</p>
+        <p className="text-xs uppercase tracking-wide text-slate-400">{t('language')}</p>
         <div className="flex gap-2">
           <Button variant={i18n.language.startsWith('en') ? 'default' : 'outline'} size="sm" onClick={() => void i18n.changeLanguage('en')}>English</Button>
           <Button variant={i18n.language.startsWith('es') ? 'default' : 'outline'} size="sm" onClick={() => void i18n.changeLanguage('es')}>Español</Button>
@@ -20,10 +22,19 @@ export function SettingsPage() {
       </section>
 
       <section className="space-y-1 rounded-lg border border-slate-800 p-4 text-sm">
-        <p className="text-xs uppercase tracking-wide text-slate-500">{t('login.username')}</p>
-        <p>{user?.username} {user?.superadmin ? '(superadmin)' : ''}</p>
-        <p className="text-xs uppercase tracking-wide text-slate-500">{t('device.id')}</p>
+        <p className="text-xs uppercase tracking-wide text-slate-400">{t('login.username')}</p>
+        <p>{user?.username} {user?.superadmin ? `(${t('settings.superadmin')})` : ''}</p>
+        <p className="text-xs uppercase tracking-wide text-slate-400">{t('device.id')}</p>
         <p className="break-all font-mono text-xs text-slate-400">{device}</p>
+      </section>
+
+      <section className="space-y-2 rounded-lg border border-slate-800 p-4 text-sm">
+        <p className="text-xs uppercase tracking-wide text-slate-400">{t('server.current')}</p>
+        <p className="break-all font-mono text-xs text-slate-400">
+          {getBaseUrl() || t('server.sameOrigin')}
+        </p>
+        <ServerForm onSaved={() => window.location.reload()} submitLabel={t('server.change')} />
+        <p className="text-xs text-slate-400">{t('server.warning')}</p>
       </section>
 
       <section className="space-y-2 rounded-lg border border-slate-800 p-4 text-sm text-slate-400">

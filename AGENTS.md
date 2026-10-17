@@ -68,6 +68,13 @@ for maintenance jobs.
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```
 
+AdminNG frontend gates (stack must be running):
+
+```bash
+cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also runs in `npm run build`)
+cd adminng/e2e && npm run verify         # Playwright flows + Lighthouse budget (needs node_modules/Chromium)
+```
+
 - `bootstrap-dev.sh` provisions: `ldata/` dirs, self-signed certs, and the test fixtures —
   `DEFAULT_DOMAIN` (`sysadmin@<domain>`, the PostfixAdmin superadmin) plus `example.net`
   (`alice`, `bob`, `charlie`, `dylan`, `alice` as domain admin, default aliases), a quota

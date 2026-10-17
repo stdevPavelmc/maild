@@ -13,3 +13,7 @@ dist/
 __pycache__/
 *.pyc
 adminng/pwa/android-project/
+
+# AdminNG browser suite artifacts
+adminng/e2e/test-results/
+adminng/e2e/playwright-report/

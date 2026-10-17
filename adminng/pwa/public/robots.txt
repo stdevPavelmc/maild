@@ -1,0 +1,4 @@
+# MailD AdminNG is a private administration panel: keep it out of search indexes.
+# Served as a real file by the adminng nginx (not the SPA fallback).
+User-agent: *
+Disallow: /

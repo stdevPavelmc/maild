@@ -91,6 +91,25 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Fixed: the AdminNG dev-device note appended to `test.creds` by `bootstrap-dev.sh` was parsed
   as a mailbox credential by `test.sh` (`adminng.device` SASL failures aborted the quota fill
   loop). It is now written as a comment, and `test.sh` ignores credential keys without an `@`.
+- Added: **AdminNG Phase 3 — PWA frontend validated**. The i18n catalogues are plain JSON
+  (`src/i18n/en.json`, `es.json`) and `npm run i18n:check` (keys, placeholders, empty values)
+  runs inside `npm run build`, so a missing Spanish string fails the image build. New browser
+  suite `adminng/e2e` (Playwright): it approves its own device through
+  `adminng.py --approve-device`, then covers login, account create/delete with the re-auth +
+  5-second armed confirm, the sidebar domain scope, the language switch, the offline lockdown,
+  and the manifest/service-worker/offline boot; `lighthouse.mjs` enforces performance ≥ 0.85,
+  accessibility ≥ 0.9 and best-practices ≥ 0.9 (SEO reported only). `npm run verify` runs both;
+  `.github/workflows/pwa-e2e.yml` is the manual CI gate.
+- Added: AdminNG frontend gaps closed — the sidebar **domain selector** (persisted, scopes the
+  accounts and aliases requests), **reactive URL state** so `?q=`/`?new=1` work on an
+  already-mounted screen (rapid search and the FAB were no-ops there before), a real
+  **offline write lockdown** (`OnlineProvider`: create/save/delete/FAB disabled, banner shown),
+  and a **runtime server address** (`ServerScreen` on first run for `VITE_REQUIRE_SERVER_URL=1`
+  builds, plus Settings → *Change server*), which clears the session, device UUID and log cache.
+- Fixed: AdminNG accessibility — secondary text moved from `slate-500` to `slate-400`
+  (contrast 3.97:1 → ~7:1, Lighthouse accessibility 90 → 100) and modals expose
+  `role="dialog"`/`aria-modal`; added `public/robots.txt` (`Disallow: /`, the panel is private)
+  and a meta description.
 - Added: **AdminNG Phase 1 — catalogue API** (`adminng/api/`): domain/mailbox/alias/admin
   CRUD with cursor pagination, rapid `GET /search`, quota usage from the Maildir++
   `.maildirsize` accounting (read-only vmail mount, `du` fallback, cache) and multi-tenant

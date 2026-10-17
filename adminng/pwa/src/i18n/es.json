@@ -1,0 +1,161 @@
+{
+  "app": { "title": "MailD AdminNG", "subtitle": "Administración del servidor de correo, PWA primero" },
+  "nav": {
+    "domains": "Dominios",
+    "mailboxes": "Cuentas",
+    "aliases": "Alias",
+    "admins": "Administradores",
+    "devices": "Dispositivos",
+    "logs": "Registros",
+    "settings": "Ajustes",
+    "admin": "Admin",
+    "search": "Buscar"
+  },
+  "language": "Idioma",
+  "common": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "create": "Crear",
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "close": "Cerrar",
+    "loading": "Cargando…",
+    "empty": "Nada por aquí todavía",
+    "actions": "Acciones",
+    "name": "Nombre",
+    "active": "Activo",
+    "inactive": "Suspendido",
+    "yes": "Sí",
+    "no": "No",
+    "search": "Buscar",
+    "quota": "Cuota",
+    "unlimited": "Ilimitada",
+    "page": "Cargar más",
+    "retry": "Reintentar"
+  },
+  "login": {
+    "title": "Iniciar sesión",
+    "username": "Dirección del administrador",
+    "password": "Contraseña",
+    "submit": "Continuar",
+    "code": "Código del autenticador",
+    "verify": "Verificar",
+    "wrong": "Credenciales inválidas",
+    "badCode": "Código inválido o ya usado — espera al siguiente",
+    "rateLimited": "Demasiados intentos fallidos — espera unos minutos",
+    "network": "No se puede contactar al servidor",
+    "logout": "Salir"
+  },
+  "device": {
+    "pendingTitle": "Esperando aprobación",
+    "pendingBody": "Tus credenciales son válidas, pero este dispositivo aún no fue aprobado. Un superadministrador debe autorizarlo (CLI o panel de dispositivos).",
+    "id": "Identificador del dispositivo",
+    "copy": "Copiar ID",
+    "check": "Verificar aprobación",
+    "cliHint": "Comando en el servidor: docker compose exec api adminng.py --approve-device {{id}}",
+    "revoked": "Este dispositivo fue revocado. Pide a un superadministrador que lo apruebe de nuevo."
+  },
+  "enroll": {
+    "title": "Configurar autenticación en dos pasos",
+    "body": "Los superadministradores deben registrar un autenticador. Escanea el QR o introduce el secreto y confirma con un código.",
+    "secret": "Secreto",
+    "code": "Código de la aplicación",
+    "confirm": "Confirmar",
+    "done": "Registrado"
+  },
+  "privacy": {
+    "title": "Sesión bloqueada",
+    "body": "Introduce tu contraseña para desbloquear la sesión.",
+    "unlock": "Desbloquear"
+  },
+  "offline": "Sin conexión con el servidor. Las operaciones de escritura están bloqueadas por seguridad.",
+  "server": {
+    "title": "Dirección del servidor",
+    "body": "Esta compilación aún no está ligada a un servidor. Introduce la URL base de tu instalación de MailD AdminNG (la misma que abres en el navegador).",
+    "url": "URL del servidor",
+    "test": "Probar y continuar",
+    "testing": "Comprobando…",
+    "ok": "Servidor accesible",
+    "fail": "No se puede contactar con ese servidor",
+    "current": "Servidor actual",
+    "sameOrigin": "Este servidor (mismo origen)",
+    "change": "Cambiar servidor",
+    "warning": "Cambiar de servidor cierra tu sesión y borra los datos locales de este dispositivo."
+  },
+  "domain": {
+    "all": "Todos los dominios",
+    "select": "Dominio"
+  },
+  "domains": {
+    "title": "Dominios",
+    "new": "Nuevo dominio",
+    "description": "Descripción",
+    "mailboxes": "Buzones",
+    "aliases": "Alias",
+    "create": "Crear dominio",
+    "advisory": "Reinicia amavis, mua y mta para generar las claves DKIM, la configuración del webmail y los alias del nuevo dominio."
+  },
+  "mailboxes": {
+    "title": "Cuentas",
+    "new": "Nueva cuenta",
+    "username": "Dirección",
+    "password": "Contraseña",
+    "quota": "Cuota (MB)",
+    "used": "Usado",
+    "create": "Crear cuenta",
+    "aliases": "Alias de reenvío",
+    "addAlias": "Añadir alias",
+    "aliasAddress": "Dirección del alias",
+    "goto": "Reenvía a",
+    "suspend": "Suspender",
+    "activate": "Activar"
+  },
+  "aliases": {
+    "title": "Alias",
+    "new": "Nuevo alias",
+    "address": "Dirección",
+    "goto": "Reenvía a",
+    "create": "Crear alias"
+  },
+  "admins": {
+    "title": "Administradores",
+    "new": "Nuevo administrador",
+    "superadmin": "Superadministrador (acceso global)",
+    "domains": "Dominios gestionados",
+    "create": "Crear administrador"
+  },
+  "devices": {
+    "title": "Dispositivos",
+    "pending": "Solicitudes pendientes",
+    "active": "Dispositivos activos",
+    "revoke": "Revocar",
+    "approve": "Autorizar",
+    "lastSeen": "Última vez",
+    "user": "Usuario",
+    "none": "Sin dispositivos registrados"
+  },
+  "logs": {
+    "title": "Registros de seguridad",
+    "actor": "Autor",
+    "action": "Acción",
+    "domain": "Dominio",
+    "filter": "Filtrar",
+    "clear": "Limpiar filtros",
+    "empty": "Sin eventos"
+  },
+  "search": {
+    "placeholder": "Busca usuarios, alias o dominios…",
+    "hint": "Ctrl/⌘ K",
+    "empty": "Sin coincidencias"
+  },
+  "confirm": {
+    "title": "Confirmación de seguridad",
+    "body": "Esta acción es permanente. Vuelve a autenticarte para continuar.",
+    "password": "Contraseña del administrador",
+    "armed": "Confirma en {{seconds}}s…",
+    "proceed": "Eliminar",
+    "type": "Escribe el nombre para confirmar"
+  },
+  "settings": { "superadmin": "superadministrador" },
+  "quota": { "of": "de" }
+}

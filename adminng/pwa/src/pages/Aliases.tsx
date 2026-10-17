@@ -1,22 +1,37 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Alias } from '../lib/api'
+import { useOnline } from '../lib/online'
+import { useSelectedDomain } from '../lib/selectedDomain'
 import { usePaged } from '../lib/usePaged'
+import { useNewSignal, useSearchQuery } from '../lib/useUrlState'
 import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader } from '../components/kit'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
 export function AliasesPage({ password }: { password: string }) {
   const { t } = useTranslation()
-  const initial = new URLSearchParams(window.location.search)
-  const [query, setQuery] = useState(initial.get('q') ?? '')
-  const [openNew, setOpenNew] = useState(initial.get('new') === '1')
+  const online = useOnline()
+  const scope = useSelectedDomain()
+  const [urlQuery, setUrlQuery] = useSearchQuery()
+  const [query, setQuery] = useState(urlQuery)
+  const [openNew, setOpenNew] = useState(false)
+  const newSignal = useNewSignal()
+  useEffect(() => {
+    setQuery(urlQuery)
+  }, [urlQuery])
+  useEffect(() => {
+    if (newSignal) setOpenNew(true)
+  }, [newSignal])
   const [address, setAddress] = useState('')
   const [goto, setGoto] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Alias | null>(null)
 
-  const list = usePaged<Alias>((cursor) => api.listAliases({ q: query || undefined, cursor }), [query])
+  const list = usePaged<Alias>(
+    (cursor) => api.listAliases({ domain: scope || undefined, q: query || undefined, cursor }),
+    [scope, query],
+  )
 
   const create = async (): Promise<void> => {
     setError(null)
@@ -35,14 +50,23 @@ export function AliasesPage({ password }: { password: string }) {
     <div className="space-y-4">
       <SectionHeader
         title={t('aliases.title')}
-        action={<Button onClick={() => setOpenNew(true)}>{t('aliases.new')}</Button>}
+        action={
+          <Button disabled={!online} onClick={() => setOpenNew(true)}>{t('aliases.new')}</Button>
+        }
       />
       <ErrorBanner message={list.error} />
-      <Input placeholder={t('common.search')} value={query} onChange={(event) => setQuery(event.target.value)} />
+      <form
+        onSubmit={(event) => {
+          event.preventDefault()
+          setUrlQuery(query)
+        }}
+      >
+        <Input placeholder={t('common.search')} value={query} onChange={(event) => setQuery(event.target.value)} />
+      </form>
 
       <div className="overflow-x-auto rounded-lg border border-slate-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-500">
+          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
             <tr>
               <th className="px-3 py-2">{t('aliases.address')}</th>
               <th className="px-3 py-2">{t('aliases.goto')}</th>
@@ -59,14 +83,14 @@ export function AliasesPage({ password }: { password: string }) {
                   {alias.active ? <Badge tone="green">{t('common.yes')}</Badge> : <Badge tone="red">{t('common.no')}</Badge>}
                 </td>
                 <td className="px-3 py-2">
-                  <Button variant="outline" size="sm" onClick={() => setDeleting(alias)}>{t('common.delete')}</Button>
+                  <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(alias)}>{t('common.delete')}</Button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
         {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">{t('common.empty')}</p>
+          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
         )}
       </div>
       {list.cursor && <Button variant="outline" onClick={() => void list.more()}>{t('common.page')}</Button>}
@@ -78,7 +102,7 @@ export function AliasesPage({ password }: { password: string }) {
         footer={
           <>
             <Button variant="outline" onClick={() => setOpenNew(false)}>{t('common.cancel')}</Button>
-            <Button onClick={() => void create()}>{t('aliases.create')}</Button>
+            <Button disabled={!online} onClick={() => void create()}>{t('aliases.create')}</Button>
           </>
         }
       >

@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ApiError, api } from '../lib/api'
+import { useOnline } from '../lib/online'
 import { ArmedButton, ErrorBanner, Field, Input, Modal } from './kit'
 import { Button } from './ui/button'
 
@@ -24,6 +25,7 @@ export function ConfirmDelete({
   label?: string
 }) {
   const { t } = useTranslation()
+  const online = useOnline()
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -51,12 +53,12 @@ export function ConfirmDelete({
       footer={
         <>
           <Button variant="outline" onClick={onClose}>{t('common.cancel')}</Button>
-          <ArmedButton label={label ?? t('confirm.proceed')} onConfirm={() => void run()} disabled={busy} />
+          <ArmedButton label={label ?? t('confirm.proceed')} onConfirm={() => void run()} disabled={busy || !online} />
         </>
       }
     >
       <p className="text-sm text-slate-300">{body}</p>
-      <p className="text-xs text-slate-500">{t('confirm.body')}</p>
+      <p className="text-xs text-slate-400">{t('confirm.body')}</p>
       <ErrorBanner message={error} />
       <Field label={t('confirm.password')}>
         <Input type="password" autoComplete="current-password" value={value} onChange={(event) => setValue(event.target.value)} />

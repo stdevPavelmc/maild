@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, type Device } from '../lib/api'
+import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
 import { Badge, ErrorBanner, SectionHeader } from '../components/kit'
 import { Button } from '../components/ui/button'
@@ -8,6 +9,7 @@ import { ConfirmDelete } from '../components/ConfirmDelete'
 
 export function DevicesPage({ password }: { password: string }) {
   const { t } = useTranslation()
+  const online = useOnline()
   const pending = usePaged<Device>(() => api.devices('PENDING'), [])
   const approved = usePaged<Device>(() => api.devices('APPROVED'), [])
   const [action, setAction] = useState<{ device: Device; kind: 'APPROVE' | 'REVOKE' } | null>(null)
@@ -23,7 +25,7 @@ export function DevicesPage({ password }: { password: string }) {
         <p className="truncate">
           {device.device_name || device.client_type} <Badge tone={device.authorization_state === 'APPROVED' ? 'green' : 'amber'}>{device.authorization_state}</Badge>
         </p>
-        <p className="truncate font-mono text-[11px] text-slate-500">{device.device_id}</p>
+        <p className="truncate font-mono text-[11px] text-slate-400">{device.device_id}</p>
         <p className="text-xs text-slate-400">
           {t('devices.user')}: {device.associated_user || '—'} · {t('devices.lastSeen')}: {new Date(device.last_seen).toLocaleString()}
           {device.last_ip ? ` · ${device.last_ip}` : ''}
@@ -44,6 +46,7 @@ export function DevicesPage({ password }: { password: string }) {
         <Button
           variant="outline"
           size="sm"
+          disabled={!online}
           className={kind === 'REVOKE' ? 'border-red-800 text-red-300' : ''}
           onClick={() => setAction({ device, kind })}
         >
@@ -63,7 +66,7 @@ export function DevicesPage({ password }: { password: string }) {
           ⚠️ {t('devices.pending')} ({pending.items.length})
         </h3>
         <ul>{pending.items.map((device) => row(device, 'APPROVE'))}</ul>
-        {pending.items.length === 0 && <p className="text-xs text-slate-500">{t('devices.none')}</p>}
+        {pending.items.length === 0 && <p className="text-xs text-slate-400">{t('devices.none')}</p>}
       </section>
 
       <section>
@@ -71,7 +74,7 @@ export function DevicesPage({ password }: { password: string }) {
           ✓ {t('devices.active')} ({approved.items.length})
         </h3>
         <ul>{approved.items.map((device) => row(device, 'REVOKE'))}</ul>
-        {approved.items.length === 0 && <p className="text-xs text-slate-500">{t('devices.none')}</p>}
+        {approved.items.length === 0 && <p className="text-xs text-slate-400">{t('devices.none')}</p>}
       </section>
 
       <ConfirmDelete

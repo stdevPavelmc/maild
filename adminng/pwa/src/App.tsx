@@ -1,8 +1,12 @@
+import { useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AuthProvider, useAuth } from './store/AuthContext'
+import { OnlineProvider } from './lib/online'
+import { getBaseUrl, needsServerSetup } from './lib/api'
 import { Shell } from './components/Shell'
 import { LoginPage } from './pages/AuthScreens'
 import { PendingScreen, PrivacyShield } from './pages/DeviceScreens'
+import { ServerScreen } from './pages/ServerScreen'
 import { DomainsPage } from './pages/Domains'
 import { MailboxesPage } from './pages/Mailboxes'
 import { AliasesPage } from './pages/Aliases'
@@ -43,11 +47,17 @@ function Gate() {
 }
 
 export default function App() {
+  const [base, setBase] = useState(getBaseUrl)
+
+  if (needsServerSetup()) return <ServerScreen onSaved={() => setBase(getBaseUrl())} />
+
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <Gate />
-      </AuthProvider>
-    </BrowserRouter>
+    <OnlineProvider>
+      <BrowserRouter>
+        <AuthProvider key={base}>
+          <Gate />
+        </AuthProvider>
+      </BrowserRouter>
+    </OnlineProvider>
   )
 }

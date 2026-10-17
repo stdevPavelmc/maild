@@ -51,6 +51,28 @@ docker compose --env-file env.dev -f docker-compose-dev.yml up -d db api adminng
 `db` container from `ADMINNG_DB`, default `adminng`). `adminng` has no environment
 of its own: it is a static bundle plus the `/api/v1/` proxy.
 
+### Frontend checks (Phase 3)
+
+```bash
+cd adminng/pwa && npm run i18n:check      # en/es key + placeholder parity (part of `npm run build`)
+cd adminng/pwa && npm run build           # i18n gate -> tsc --noEmit -> Vite
+
+cd adminng/e2e && npm ci                  # once
+npx playwright install chromium           # once (~120 MB)
+npm run verify                            # Playwright flows + Lighthouse budget
+```
+
+- `adminng/e2e` drives a real Chromium against `http://localhost:8083`. It approves its own
+  device through `docker compose exec api adminng.py --approve-device <id>` (the UI cannot
+  approve itself by design), then covers login, account create/delete with the 5-second armed
+  confirm, the sidebar domain scope, the language switch and the offline write lockdown.
+- `tests/installable.spec.ts` asserts the manifest fields, an active service worker controlling
+  the page and the app booting from the cache with the network down.
+- `lighthouse.mjs` gates performance ≥ 0.85, accessibility ≥ 0.9 and best-practices ≥ 0.9;
+  SEO is reported only (the panel's `robots.txt` disallows crawling on purpose). Reports land in
+  `ldata/e2e/`.
+- CI: `.github/workflows/pwa-e2e.yml` (manual dispatch) builds the stack and runs both gates.
+
 ## API (Phase 2: device-bound, two-step auth)
 
 Every request except `GET /health` carries `X-Device-ID` (a UUID the client
@@ -141,8 +163,11 @@ channel — always verify the identity of the requester before approving.
   Traefik/ingress (TLS terminated by your proxy, like `mailadmin.` and
   `webmail.`; the stack itself terminates no TLS).
 - **Android:** signed APK produced by `adminng/pwa/app-generate.sh` and attached
-  as an artifact to every GitHub release. The APK is the only client that asks
-  for the server URL on first run.
+  as an artifact to every GitHub release. It is a Trusted Web Activity: the APK
+  loads `APP_URL`, so it is same-origin and needs no in-app server setting.
+  Builds that ship their own assets (`VITE_REQUIRE_SERVER_URL=1`) show the
+  server-address screen on first run; the same form lives in Settings → *Change
+  server* and clears the session, the device identity and the log cache.
 
 ## Documentation
 

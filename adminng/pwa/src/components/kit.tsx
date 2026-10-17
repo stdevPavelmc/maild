@@ -24,7 +24,7 @@ export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
       {...props}
       className={cn(
         'h-10 w-full rounded-md border border-slate-700 bg-slate-900 px-3 text-slate-100',
-        'placeholder:text-slate-500 focus:border-blue-500 focus:outline-none disabled:opacity-50',
+        'placeholder:text-slate-400 focus:border-blue-500 focus:outline-none disabled:opacity-50',
         props.className,
       )}
     />
@@ -94,7 +94,7 @@ export function Badge({ tone = 'slate', children }: { tone?: 'slate' | 'green' |
 }
 
 export function QuotaBar({ used, limit }: { used: number; limit: number }) {
-  if (limit <= 0) return <span className="text-xs text-slate-500">∞</span>
+  if (limit <= 0) return <span className="text-xs text-slate-400">∞</span>
   const pct = Math.min(100, Math.round((used * 100) / limit))
   const tone = pct >= 90 ? 'bg-red-500' : pct >= 70 ? 'bg-orange-500' : 'bg-blue-500'
   return (
@@ -102,7 +102,7 @@ export function QuotaBar({ used, limit }: { used: number; limit: number }) {
       <div className="h-1.5 w-24 overflow-hidden rounded bg-slate-800">
         <div className={cn('h-full', tone)} style={{ width: `${pct}%` }} />
       </div>
-      <span className="text-xs text-slate-500">{pct}%</span>
+      <span className="text-xs text-slate-400">{pct}%</span>
     </div>
   )
 }
@@ -122,7 +122,12 @@ export function Modal({
 }) {
   if (!open) return null
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 sm:items-center">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 sm:items-center"
+    >
       <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-slate-900 p-5 shadow-xl sm:rounded-2xl">
         <div className="mb-4 flex items-center justify-between gap-4">
           <h2 className="text-lg font-semibold">{title}</h2>
@@ -183,7 +188,7 @@ export function ArmedButton({
 }
 
 export function Empty({ text }: { text: string }) {
-  return <p className="py-8 text-center text-sm text-slate-500">{text}</p>
+  return <p className="py-8 text-center text-sm text-slate-400">{text}</p>
 }
 
 export function ErrorBanner({ message }: { message: string | null }) {

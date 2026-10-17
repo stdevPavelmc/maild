@@ -49,6 +49,21 @@ inter-service hostnames (`AMAVIS=amavis`, `MTA=mta`, `CTDB=contacts`) are image
 `ENV` now. Dead vars dropped with it: `CTDB` (unused — the mua reads
 `POSTGRES_EXTRA_DB`) and `AMAVIS_MTA` (unused — the amavis entrypoint reads `MTA`).
 
+### PWA build-time variables (not container env)
+
+`adminng/pwa` is a static bundle: its variables are read by Vite at **build** time and baked
+into the JS, so they are not part of the compose/`env_file` chain and must be passed to
+`docker build`/`npm run build`:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `VITE_API_BASE` | empty (same origin) | Absolute API base baked into the bundle. The web deployment leaves it empty: `adminng`'s nginx proxies `/api/v1/`. |
+| `VITE_REQUIRE_SERVER_URL` | unset | `1` marks a bundled-asset build (own assets, e.g. a Capacitor-style APK) whose first run must ask for the server address (`ServerScreen`). The TWA pipeline (`app-generate.sh`) loads `APP_URL`, so it is same-origin and leaves this unset. |
+
+The runtime value the user enters is stored in `localStorage` (`adminng.baseUrl`) and wins over
+`VITE_API_BASE`; changing it from Settings clears the token pair, the device UUID and the Dexie
+log cache before reloading.
+
 ## The variable matrix
 
 Per service: what the image bakes (defaults), what the operator file must

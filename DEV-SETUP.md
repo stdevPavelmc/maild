@@ -163,6 +163,25 @@ What the content checks assert, given the shipped policies:
   (`552 Mailbox is full`, through the dovecot quota-status policy) and over-quota submissions
   bounce back with an NDR.
 
+## AdminNG frontend: browser suite and Lighthouse
+
+The PWA has its own gates on top of `test.sh` (plan.md Phase 3). They need the dev stack
+running and a Chromium installed by Playwright:
+
+```bash
+cd adminng/pwa && npm run i18n:check     # en/es keys, placeholders, empty values (in `npm run build`)
+cd adminng/e2e && npm ci && npx playwright install chromium
+cd adminng/e2e && npm run verify         # Playwright flows + Lighthouse budget
+```
+
+- The suite reads `test.creds` and approves its own device with
+  `docker compose --env-file env.dev -f docker-compose-dev.yml exec api adminng.py --approve-device <id>`,
+  so `bootstrap-dev.sh` must have run.
+- Reports: `ldata/e2e/report/` (Playwright HTML) and `ldata/e2e/lighthouse.report.{json,html}`.
+- Lighthouse gates performance ≥ 0.85, accessibility ≥ 0.9 and best-practices ≥ 0.9. SEO is
+  reported only: `public/robots.txt` disallows crawling the private panel on purpose.
+- CI: `.github/workflows/pwa-e2e.yml`, manual dispatch (it builds ten images, ~30 min).
+
 ## Differences from Production
 
 The `docker-compose-dev.yml` configuration includes several changes optimized for local development:

@@ -11,8 +11,54 @@
 
 const DEVICE_KEY = 'adminng.device'
 const TOKENS_KEY = 'adminng.tokens'
+const BASE_KEY = 'adminng.baseUrl'
 
-export const API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) ?? ''
+/**
+ * Server base URL. Empty string means "same origin as the PWA" (the normal web
+ * deployment: the `adminng` nginx proxies /api/v1/). A bundled build (APK with
+ * its own assets) sets `VITE_REQUIRE_SERVER_URL=1` and the user picks the server
+ * at first run; the value is persisted in localStorage and wins over the
+ * build-time `VITE_API_BASE` default.
+ */
+const BUILD_BASE = ((import.meta.env.VITE_API_BASE as string | undefined) ?? '').replace(/\/+$/, '')
+
+export function getBaseUrl(): string {
+  return localStorage.getItem(BASE_KEY) ?? BUILD_BASE
+}
+
+export function normaliseBase(url: string): string {
+  const trimmed = url.trim()
+  if (!trimmed || trimmed === '/') return ''
+  return trimmed.replace(/\/+$/, '')
+}
+
+export function setBaseUrl(url: string): void {
+  const clean = normaliseBase(url)
+  if (clean) localStorage.setItem(BASE_KEY, clean)
+  else localStorage.removeItem(BASE_KEY)
+}
+
+/** A bundled build with no server chosen yet must show the onboarding screen. */
+export function needsServerSetup(): boolean {
+  return import.meta.env.VITE_REQUIRE_SERVER_URL === '1' && getBaseUrl() === ''
+}
+
+/** Onboarding "test connection": the health route answers without auth. */
+export async function probeServer(url: string): Promise<void> {
+  const base = normaliseBase(url)
+  const response = await fetch(`${base}/api/v1/health`)
+  if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  const payload = (await response.json()) as { status?: string }
+  if (payload.status !== 'ok') throw new Error('server degraded')
+}
+
+/** Drop everything bound to one server: token pair, device identity, prefs. */
+export function clearSession(): void {
+  localStorage.removeItem(TOKENS_KEY)
+  localStorage.removeItem(DEVICE_KEY)
+  localStorage.removeItem('adminng.lastActivity')
+  localStorage.removeItem('adminng.domain')
+}
 
 export type Tokens = { access: string; refresh: string }
 export type SessionState = 'REQUIRES_TOTP_ENROLLMENT' | 'REQUIRES_2FA' | 'AUTHENTICATED'
@@ -161,7 +207,7 @@ async function parse<T>(response: Response): Promise<T> {
 async function refreshTokens(): Promise<boolean> {
   const tokens = loadTokens()
   if (!tokens) return false
-  const response = await fetch(`${API_BASE}/api/v1/auth/refresh`, {
+  const response = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Device-ID': deviceId() },
     body: JSON.stringify({ refresh_token: tokens.refresh }),
@@ -185,7 +231,7 @@ export async function request<T>(path: string, options: Options = {}): Promise<T
   if (vtoken) headers['X-Security-Validation-Token'] = vtoken
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const response = await fetch(`${API_BASE}/api/v1${path}`, {
+  const response = await fetch(`${getBaseUrl()}/api/v1${path}`, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),

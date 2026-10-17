@@ -1,18 +1,29 @@
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Alias, type Domain, type Mailbox } from '../lib/api'
+import { useOnline } from '../lib/online'
+import { setSelectedDomain, useSelectedDomain } from '../lib/selectedDomain'
 import { usePaged } from '../lib/usePaged'
+import { useNewSignal, useSearchQuery } from '../lib/useUrlState'
 import { Badge, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
 
 export function MailboxesPage({ password }: { password: string }) {
   const { t } = useTranslation()
-  const initial = new URLSearchParams(window.location.search)
-  const [query, setQuery] = useState(initial.get('q') ?? '')
-  const [domain, setDomain] = useState('')
+  const online = useOnline()
+  const scope = useSelectedDomain()
+  const [urlQuery, setUrlQuery] = useSearchQuery()
+  const [query, setQuery] = useState(urlQuery)
+  const [openNew, setOpenNew] = useState(false)
+  const newSignal = useNewSignal()
+  useEffect(() => {
+    setQuery(urlQuery)
+  }, [urlQuery])
+  useEffect(() => {
+    if (newSignal) setOpenNew(true)
+  }, [newSignal])
   const [domains, setDomains] = useState<Domain[]>([])
-  const [openNew, setOpenNew] = useState(initial.get('new') === '1')
   const [username, setUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [name, setName] = useState('')
@@ -25,8 +36,8 @@ export function MailboxesPage({ password }: { password: string }) {
   const [aliasToDelete, setAliasToDelete] = useState<Alias | null>(null)
 
   const list = usePaged<Mailbox>(
-    (cursor) => api.listMailboxes({ domain: domain || undefined, q: query || undefined, cursor }),
-    [domain, query],
+    (cursor) => api.listMailboxes({ domain: scope || undefined, q: query || undefined, cursor }),
+    [scope, query],
   )
 
   useEffect(() => {
@@ -80,31 +91,41 @@ export function MailboxesPage({ password }: { password: string }) {
     <div className="space-y-4">
       <SectionHeader
         title={t('mailboxes.title')}
-        action={<Button onClick={() => setOpenNew(true)}>{t('mailboxes.new')}</Button>}
+        action={
+          <Button disabled={!online} onClick={() => setOpenNew(true)}>{t('mailboxes.new')}</Button>
+        }
       />
       <ErrorBanner message={list.error} />
       <div className="flex flex-wrap gap-2">
         <select
           className="h-10 rounded-md border border-slate-700 bg-slate-900 px-3 text-sm"
-          value={domain}
-          onChange={(event) => setDomain(event.target.value)}
+          aria-label={t('domain.select')}
+          value={scope}
+          onChange={(event) => setSelectedDomain(event.target.value)}
         >
-          <option value="">— {t('nav.domains')} —</option>
+          <option value="">{t('domain.all')}</option>
           {domains.map((item) => (
             <option key={item.domain} value={item.domain}>{item.domain}</option>
           ))}
         </select>
-        <Input
-          className="max-w-xs"
-          placeholder={t('common.search')}
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
+        <form
+          className="max-w-xs flex-1"
+          onSubmit={(event) => {
+            event.preventDefault()
+            setUrlQuery(query)
+          }}
+        >
+          <Input
+            placeholder={t('common.search')}
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </form>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-slate-800">
         <table className="min-w-full text-sm">
-          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-500">
+          <thead className="bg-slate-900 text-left text-xs uppercase text-slate-400">
             <tr>
               <th className="px-3 py-2">{t('mailboxes.username')}</th>
               <th className="px-3 py-2">{t('common.name')}</th>
@@ -132,10 +153,10 @@ export function MailboxesPage({ password }: { password: string }) {
                 </td>
                 <td className="px-3 py-2">
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => void openEditor(mailbox)}>
+                    <Button variant="outline" size="sm" disabled={!online} onClick={() => void openEditor(mailbox)}>
                       {t('common.edit')}
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setDeleting(mailbox)}>
+                    <Button variant="outline" size="sm" disabled={!online} onClick={() => setDeleting(mailbox)}>
                       {t('common.delete')}
                     </Button>
                   </div>
@@ -145,7 +166,7 @@ export function MailboxesPage({ password }: { password: string }) {
           </tbody>
         </table>
         {!list.loading && list.items.length === 0 && (
-          <p className="py-6 text-center text-sm text-slate-500">{t('common.empty')}</p>
+          <p className="py-6 text-center text-sm text-slate-400">{t('common.empty')}</p>
         )}
       </div>
       {list.cursor && (
@@ -159,7 +180,7 @@ export function MailboxesPage({ password }: { password: string }) {
         footer={
           <>
             <Button variant="outline" onClick={() => setOpenNew(false)}>{t('common.cancel')}</Button>
-            <Button onClick={() => void create()}>{t('mailboxes.create')}</Button>
+            <Button disabled={!online} onClick={() => void create()}>{t('mailboxes.create')}</Button>
           </>
         }
       >
@@ -194,6 +215,7 @@ export function MailboxesPage({ password }: { password: string }) {
             <Field label={t('common.name')}>
               <Input
                 defaultValue={editing.name}
+                disabled={!online}
                 onBlur={(event) => {
                   void api
                     .updateMailbox(editing.username, { name: event.target.value })
@@ -205,6 +227,7 @@ export function MailboxesPage({ password }: { password: string }) {
               <Input
                 inputMode="numeric"
                 defaultValue={Math.round(editing.quota_bytes / 1024 / 1024)}
+                disabled={!online}
                 onBlur={(event) => {
                   void api
                     .updateMailbox(editing.username, {
@@ -218,6 +241,7 @@ export function MailboxesPage({ password }: { password: string }) {
               <Input
                 type="password"
                 placeholder="••••••••"
+                disabled={!online}
                 onBlur={(event) => {
                   if (!event.target.value) return
                   void api.updateMailbox(editing.username, { password: event.target.value })
@@ -227,6 +251,7 @@ export function MailboxesPage({ password }: { password: string }) {
             <Toggle
               checked={editing.active}
               label={t('common.active')}
+              disabled={!online}
               onChange={(value) => {
                 void api
                   .updateMailbox(editing.username, { active: value })
@@ -235,7 +260,7 @@ export function MailboxesPage({ password }: { password: string }) {
             />
 
             <div className="rounded border border-slate-800 p-3">
-              <p className="mb-2 text-xs uppercase tracking-wide text-slate-500">
+              <p className="mb-2 text-xs uppercase tracking-wide text-slate-400">
                 {t('mailboxes.aliases')}
               </p>
               <div className="flex flex-wrap gap-2">
@@ -245,18 +270,19 @@ export function MailboxesPage({ password }: { password: string }) {
                     className="flex items-center gap-2 rounded bg-slate-800 px-2 py-1 text-xs"
                   >
                     {alias.address}
-                    <button aria-label="remove" onClick={() => setAliasToDelete(alias)}>✕</button>
+                    <button aria-label="remove" disabled={!online} onClick={() => setAliasToDelete(alias)}>✕</button>
                   </span>
                 ))}
-                {aliases.length === 0 && <span className="text-xs text-slate-500">—</span>}
+                {aliases.length === 0 && <span className="text-xs text-slate-400">—</span>}
               </div>
               <div className="mt-3 flex gap-2">
                 <Input
                   placeholder={t('mailboxes.aliasAddress')}
                   value={aliasAddress}
+                  disabled={!online}
                   onChange={(event) => setAliasAddress(event.target.value)}
                 />
-                <Button variant="outline" onClick={() => void addAlias()}>
+                <Button variant="outline" disabled={!online} onClick={() => void addAlias()}>
                   {t('mailboxes.addAlias')}
                 </Button>
               </div>

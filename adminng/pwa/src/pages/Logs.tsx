@@ -82,7 +82,7 @@ export function LogsPage() {
                     {event.result}
                   </Badge>
                 </div>
-                <p className="truncate text-xs text-slate-500">
+                <p className="truncate text-xs text-slate-400">
                   {new Date(event.ts).toLocaleString()} · {event.actor}
                   {event.domain ? ` · ${event.domain}` : ''}
                   {event.ip ? ` · ${event.ip}` : ''}
@@ -91,7 +91,7 @@ export function LogsPage() {
             )
           })}
         </div>
-        {items.length === 0 && <p className="py-8 text-center text-sm text-slate-500">{t('logs.empty')}</p>}
+        {items.length === 0 && <p className="py-8 text-center text-sm text-slate-400">{t('logs.empty')}</p>}
       </div>
       {cursor && (
         <Button variant="outline" onClick={() => void load(false, cursor ?? undefined)}>

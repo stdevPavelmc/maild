@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
-import { api, type SearchHit } from '../lib/api'
+import { api, type Domain, type SearchHit } from '../lib/api'
+import { useOnline } from '../lib/online'
+import { setSelectedDomain, useSelectedDomain } from '../lib/selectedDomain'
 import { useAuth } from '../store/AuthContext'
 import { Button } from './ui/button'
-import { Modal } from './kit'
+import { Modal, Select } from './kit'
 
 const links = [
   { to: '/domains', key: 'domains', icon: '🌐' },
@@ -24,18 +26,28 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const [search, setSearch] = useState(false)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<SearchHit[]>([])
-  const [offline, setOffline] = useState(!navigator.onLine)
+  const [domains, setDomains] = useState<Domain[]>([])
+  const online = useOnline()
+  const offline = !online
+  const selectedDomain = useSelectedDomain()
 
+  // Domain scope (spec §6.2): the list feeds the sidebar selector and therefore
+  // the accounts/aliases filters.
   useEffect(() => {
-    const on = (): void => setOffline(false)
-    const off = (): void => setOffline(true)
-    window.addEventListener('online', on)
-    window.addEventListener('offline', off)
+    if (!user) return
+    let alive = true
+    api
+      .listDomains()
+      .then((page) => {
+        if (alive) setDomains(page.items)
+      })
+      .catch(() => {
+        if (alive) setDomains([])
+      })
     return () => {
-      window.removeEventListener('online', on)
-      window.removeEventListener('offline', off)
+      alive = false
     }
-  }, [])
+  }, [user])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent): void => {
@@ -64,6 +76,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, [query, search])
 
   const current = links.find((link) => location.pathname.startsWith(link.to))
+  const creatable = ['/domains', '/mailboxes', '/aliases', '/admins'].includes(current?.to ?? '')
   const go = (hit: SearchHit): void => {
     setSearch(false)
     const target = hit.type === 'user' ? '/mailboxes' : hit.type === 'alias' ? '/aliases' : '/domains'
@@ -82,8 +95,22 @@ export function Shell({ children }: { children: React.ReactNode }) {
         <aside className="hidden w-56 shrink-0 border-r border-slate-800 p-4 sm:block">
           <div className="mb-6">
             <h1 className="text-lg font-semibold">{t('app.title')}</h1>
-            <p className="text-xs text-slate-500">{user?.username}</p>
+            <p className="text-xs text-slate-400">{user?.username}</p>
           </div>
+          <label className="mb-1 block text-[11px] uppercase tracking-wide text-slate-400" htmlFor="domain-scope">
+            {t('domain.select')}
+          </label>
+          <Select
+            id="domain-scope"
+            className="mb-4 h-9 text-sm"
+            value={selectedDomain}
+            onChange={(event) => setSelectedDomain(event.target.value)}
+          >
+            <option value="">{t('domain.all')}</option>
+            {domains.map((item) => (
+              <option key={item.domain} value={item.domain}>{item.domain}</option>
+            ))}
+          </Select>
           <nav className="space-y-1">
             {links.map((link) => (
               <NavLink
@@ -100,9 +127,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
               </NavLink>
             ))}
           </nav>
-          <div className="mt-8 space-y-2 text-xs text-slate-500">
+          <div className="mt-8 space-y-2 text-xs text-slate-400">
             <button className="w-full text-left hover:text-slate-300" onClick={() => setSearch(true)}>
-              🔎 {t('nav.search')} <span className="text-slate-600">({t('search.hint')})</span>
+              🔎 {t('nav.search')} <span className="text-slate-400">({t('search.hint')})</span>
             </button>
             <div className="flex items-center gap-1">
               <button className="hover:text-slate-300" onClick={() => switchLanguage('en')}>EN</button>
@@ -138,16 +165,37 @@ export function Shell({ children }: { children: React.ReactNode }) {
           </NavLink>
         ))}
       </nav>
-      <button
-        className="fixed bottom-20 right-4 z-30 h-12 w-12 rounded-full bg-blue-600 text-2xl leading-none shadow-lg sm:bottom-6"
-        aria-label="create"
-        onClick={() => navigate(`${current?.to ?? '/domains'}?new=1`)}
-      >
-        +
-      </button>
+      {creatable && (
+        <button
+          className="fixed bottom-20 right-4 z-30 h-12 w-12 rounded-full bg-blue-600 text-2xl leading-none shadow-lg disabled:opacity-40 sm:bottom-6"
+          aria-label={t('common.create')}
+          title={online ? t('common.create') : t('offline')}
+          disabled={!online}
+          onClick={() => {
+            const next = new URLSearchParams(location.search)
+            next.set('new', '1')
+            navigate(`${current?.to ?? '/domains'}?${next.toString()}`)
+          }}
+        >
+          +
+        </button>
+      )}
 
       <Modal open={menu} title={t('app.title')} onClose={() => setMenu(false)}>
         <div className="space-y-2">
+          <label className="block text-[11px] uppercase tracking-wide text-slate-400" htmlFor="domain-scope-mobile">
+            {t('domain.select')}
+          </label>
+          <Select
+            id="domain-scope-mobile"
+            value={selectedDomain}
+            onChange={(event) => setSelectedDomain(event.target.value)}
+          >
+            <option value="">{t('domain.all')}</option>
+            {domains.map((item) => (
+              <option key={item.domain} value={item.domain}>{item.domain}</option>
+            ))}
+          </Select>
           {links.map((link) => (
             <Button
               key={link.to}
@@ -190,11 +238,11 @@ export function Shell({ children }: { children: React.ReactNode }) {
               onClick={() => go(hit)}
             >
               <span className="truncate">{hit.display_name}</span>
-              <span className="text-xs uppercase text-slate-500">{hit.type}</span>
+              <span className="text-xs uppercase text-slate-400">{hit.type}</span>
             </button>
           ))}
           {query.length >= 2 && hits.length === 0 && (
-            <p className="py-4 text-center text-xs text-slate-500">{t('search.empty')}</p>
+            <p className="py-4 text-center text-xs text-slate-400">{t('search.empty')}</p>
           )}
         </div>
       </Modal>

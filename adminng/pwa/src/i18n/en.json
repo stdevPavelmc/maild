@@ -1,0 +1,161 @@
+{
+  "app": { "title": "MailD AdminNG", "subtitle": "PWA-first mailserver administration" },
+  "nav": {
+    "domains": "Domains",
+    "mailboxes": "Accounts",
+    "aliases": "Aliases",
+    "admins": "Admins",
+    "devices": "Devices",
+    "logs": "Logs",
+    "settings": "Settings",
+    "admin": "Admin",
+    "search": "Search"
+  },
+  "language": "Language",
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "create": "Create",
+    "edit": "Edit",
+    "delete": "Delete",
+    "close": "Close",
+    "loading": "Loading…",
+    "empty": "Nothing here yet",
+    "actions": "Actions",
+    "name": "Name",
+    "active": "Active",
+    "inactive": "Suspended",
+    "yes": "Yes",
+    "no": "No",
+    "search": "Search",
+    "quota": "Quota",
+    "unlimited": "Unlimited",
+    "page": "Load more",
+    "retry": "Retry"
+  },
+  "login": {
+    "title": "Sign in",
+    "username": "Administrator address",
+    "password": "Password",
+    "submit": "Continue",
+    "code": "Authenticator code",
+    "verify": "Verify",
+    "wrong": "Invalid credentials",
+    "badCode": "Invalid or already used code — wait for the next one",
+    "rateLimited": "Too many failed attempts — wait a few minutes",
+    "network": "Cannot reach the server",
+    "logout": "Sign out"
+  },
+  "device": {
+    "pendingTitle": "Waiting for approval",
+    "pendingBody": "Your credentials are valid, but this device has not been approved yet. A superadmin must authorize it (CLI or devices panel).",
+    "id": "Device identifier",
+    "copy": "Copy ID",
+    "check": "Check approval",
+    "cliHint": "Server-side command: docker compose exec api adminng.py --approve-device {{id}}",
+    "revoked": "This device was revoked. Ask a superadmin to approve it again."
+  },
+  "enroll": {
+    "title": "Set up two-factor authentication",
+    "body": "Superadmins must enroll an authenticator. Scan the QR or enter the secret, then confirm with a code.",
+    "secret": "Secret",
+    "code": "Code from the app",
+    "confirm": "Confirm",
+    "done": "Enrolled"
+  },
+  "privacy": {
+    "title": "Session locked",
+    "body": "Enter your password to unlock the session.",
+    "unlock": "Unlock"
+  },
+  "offline": "No connection to the server. Write operations are blocked for safety.",
+  "server": {
+    "title": "Server address",
+    "body": "This build is not tied to a server yet. Enter the base URL of your MailD AdminNG installation (the address you also open in a browser).",
+    "url": "Server URL",
+    "test": "Test and continue",
+    "testing": "Checking…",
+    "ok": "Server reachable",
+    "fail": "Cannot reach that server",
+    "current": "Current server",
+    "sameOrigin": "This server (same origin)",
+    "change": "Change server",
+    "warning": "Changing the server signs you out and clears this device's local data."
+  },
+  "domain": {
+    "all": "All domains",
+    "select": "Domain"
+  },
+  "domains": {
+    "title": "Domains",
+    "new": "New domain",
+    "description": "Description",
+    "mailboxes": "Mailboxes",
+    "aliases": "Aliases",
+    "create": "Create domain",
+    "advisory": "Restart amavis, mua and mta to generate DKIM keys, webmail config and aliases for the new domain."
+  },
+  "mailboxes": {
+    "title": "Accounts",
+    "new": "New account",
+    "username": "Address",
+    "password": "Password",
+    "quota": "Quota (MB)",
+    "used": "Used",
+    "create": "Create account",
+    "aliases": "Forwarding aliases",
+    "addAlias": "Add alias",
+    "aliasAddress": "Alias address",
+    "goto": "Forwards to",
+    "suspend": "Suspend",
+    "activate": "Activate"
+  },
+  "aliases": {
+    "title": "Aliases",
+    "new": "New alias",
+    "address": "Address",
+    "goto": "Forwards to",
+    "create": "Create alias"
+  },
+  "admins": {
+    "title": "Administrators",
+    "new": "New administrator",
+    "superadmin": "Superadmin (global access)",
+    "domains": "Managed domains",
+    "create": "Create administrator"
+  },
+  "devices": {
+    "title": "Devices",
+    "pending": "Pending requests",
+    "active": "Active devices",
+    "revoke": "Revoke",
+    "approve": "Authorize",
+    "lastSeen": "Last seen",
+    "user": "User",
+    "none": "No devices registered"
+  },
+  "logs": {
+    "title": "Security logs",
+    "actor": "Actor",
+    "action": "Action",
+    "domain": "Domain",
+    "filter": "Filter",
+    "clear": "Clear filters",
+    "empty": "No events"
+  },
+  "search": {
+    "placeholder": "Search users, aliases or domains…",
+    "hint": "Ctrl/⌘ K",
+    "empty": "No matches"
+  },
+  "confirm": {
+    "title": "Security confirmation",
+    "body": "This action is permanent. Re-authenticate to continue.",
+    "password": "Administrator password",
+    "armed": "Confirm in {{seconds}}s…",
+    "proceed": "Delete",
+    "type": "Type the name to confirm"
+  },
+  "settings": { "superadmin": "superadmin" },
+  "quota": { "of": "of" }
+}

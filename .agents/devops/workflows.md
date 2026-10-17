@@ -123,6 +123,29 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 - Exit code 0 only when every executed check passed. Run the full suite before merging
   changes to mta/mda/amavis/cron/config generation.
 
+## AdminNG browser suite (Playwright + Lighthouse)
+
+The PWA has its own gates; they need the dev stack up and a Playwright Chromium:
+
+```bash
+cd adminng/pwa && npm run i18n:check          # en/es parity; also inside `npm run build`
+cd adminng/e2e && npm ci                      # once
+npx playwright install chromium               # once (~120 MB, no root needed)
+cd adminng/e2e && npm run verify              # flows + Lighthouse budget
+```
+
+- `tests/flows.spec.ts` (one context, stepped): pending device → `adminng.py --approve-device`
+  → login as `alice@example.net` → create an account → delete it with the re-auth + 5 s armed
+  button → domain scope → ES/EN switch → offline banner with the FAB disabled.
+- `tests/installable.spec.ts`: manifest fields, active service worker controlling the page and
+  the app booting from the cache offline.
+- `lighthouse.mjs`: performance ≥ 0.85, accessibility ≥ 0.9, best-practices ≥ 0.9; SEO is
+  reported only (a private panel disallows crawling in `public/robots.txt`).
+- Artifacts: `ldata/e2e/report/` (HTML) and `ldata/e2e/lighthouse.report.{json,html}`.
+- The suite is destructive to the fixtures it creates (accounts are deleted, the device stays
+  approved); it never touches existing mailboxes.
+- CI: `.github/workflows/pwa-e2e.yml`, `workflow_dispatch` only (builds the ten dev images).
+
 ## GitHub Actions CI
 
 `.github/workflows/docker-image.yml` runs on `develop`/`main` (push + pull request). It is a
