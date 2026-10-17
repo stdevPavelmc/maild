@@ -5,17 +5,20 @@
 Default for new services: **Ubuntu `resolute` (26.04 LTS)**. Use Debian only when a
 Debian-specific feature is required — then **Debian `trixie`**. The db is special:
 **`postgres:18-trixie`** (never try postgres:16); the web UIs use the official
-`php:8.3-apache(-bookworm)` images.
+`php:<branch>-apache` images — **`mua` on `php:8.5-apache`**, **`admin` on
+`php:8.1-apache-bookworm`** (see the web UI table below).
 
-### ⚠️ Known drift between these rules and the working tree
+### Web UI base images (current state + pending work)
 
-The uncommitted working tree currently pins older bases for the two web UIs (HEAD already had the
-newer ones). Confirm the intended direction with the maintainer before "fixing" either side:
+The two web UIs follow PHP's own release cadence, not the Ubuntu LTS rollover. Both are Debian
+images, and `php:8.3-apache`, `php:8.4-apache` and `php:8.5-apache` are all **trixie** (each bare
+tag has the same digest as its `-trixie` sibling), so the `apt-get install` list does not change
+between them — the `mua` bump touched nothing but the PHP branch.
 
-| Service | Rule (canonical) | Working tree today |
-|---------|------------------|--------------------|
-| admin | `php:8.3-apache-bookworm` | `php:8.1-apache-bookworm` |
-| mua | `php:8.3-apache` | `php:8.0-apache` (the kept `mua/internet.Dockerfile` / `mua/local.Dockerfile` variants already use 8.3) |
+| Service | Base today | Notes |
+|---------|-----------|-------|
+| mua | `php:8.5-apache` (trixie) | Moved from `php:8.3-apache` on 2026-10-17: 8.3 left *active* support on 2025-12-31 (security-only since then, EOL 2027-12-31), 8.5 is active until 2027-12-31 and gets security fixes until 2029-12-31. The bump needed two settings in `mua/snappymail.ini` (`display_errors = Off` + `error_reporting` without the deprecation levels): SnappyMail 2.38.2 predates PHP 8.4 and raises `E_DEPRECATED` from its own code (its `MailSo\Log\Logger` maps `E_STRICT`, deprecated in 8.4), which was printed into the responses — that breaks every later `header()` call and prefixes the JSON API with HTML, killing the webmail in the browser. Details: `.agents/services/catalog.md` → mua. |
+| admin | `php:8.1-apache-bookworm` | **PHP 8.1 reached end of life on 2025-12-31.** Not a one-line bump: PHP 8.4 unbundled `ext/imap` to PECL while `admin/Dockerfile` builds `imap` (`docker-php-ext-install imap`) because PostfixAdmin needs it. Pending — its own branch, do not bundle it with `mua`. |
 
 `clamav`, `amavis`, `mda`, `cron` and `mta` all moved to `ubuntu:resolute` on 2026-10-15/16: the
 Ubuntu LTS rollover is **complete (5/5)** — the procedure and the package traps each step uncovered
@@ -31,9 +34,9 @@ dump/restore (the production procedure, with its caveats and rollback: `db_upgra
 `postgres:18` images also changed the default data layout and need the `PGDATA` pin MailD keeps in
 `db/Dockerfile`.
 
-CI publishes its own variants: `mua/internet.Dockerfile` and `mua/local.Dockerfile` still
-exist for that; the dev compose always builds the plain `./<svc>/Dockerfile` (admin's
-internet/local variants were removed — a single Dockerfile per service is the goal).
+The per-service `internet.Dockerfile` / `local.Dockerfile` variants are gone (including `mua`'s):
+there is exactly **one `Dockerfile` per service**, and that is what every compose file builds
+(`build: ./<svc>/`).
 
 ## Dockerfile order & hygiene
 

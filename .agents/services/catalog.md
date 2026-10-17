@@ -125,6 +125,22 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Webmail on Apache; dev publishes 8081:80. The app is baked into the image at
   `/var/www/html`; **only** `/var/www/html/data` is persisted (`ldata/mua_web`, owned by
   `www-data` — bootstrap-dev.sh fixes the ownership and restarts mua).
+- Base image **`php:8.5-apache`** (trixie) since 2026-10-17, was `php:8.3-apache` (active support
+  for 8.3 ended on 2025-12-31: security-only until 2027-12-31, while 8.5 is active until
+  2027-12-31 and patched until 2029-12-31). SnappyMail 2.38.2 predates PHP 8.4 and so raises
+  deprecations from its own code — `MailSo\Log\Logger` maps `E_STRICT` (deprecated in 8.4, see
+  `Logger.php:153/171`) and its HTTP client calls `curl_close()`. `mua/snappymail.ini` therefore
+  keeps `display_errors = Off` (PHP's compiled default is *On*, because the official image activates
+  no `php.ini`; a printed notice fails every later `header()` call — no CSP/X-Frame-Options — and
+  prefixes the JSON API with HTML, so `POST /?/Json/` stops being valid JSON and the webmail dies
+  in the browser) and `error_reporting = E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED`; every other
+  level still reaches `docker compose logs mua` through `log_errors`/`error_log=/dev/stderr`.
+  **Never patch SnappyMail's own files inside the image** — its version is pinned by
+  `ARG SNAPPY_VERSION` and refreshed by a normal image bump.
+- The image builds only `pdo` + `pdo_pgsql` (hence `libpq-dev`): it carries no `gd`/`mcrypt`, so
+  the `libfreetype6-dev` / `libjpeg62-turbo-dev` / `libmcrypt-dev` build deps it used to install
+  were dropped on 2026-10-17 (−11 MB, `php -m` byte-identical, no extension or Apache module links
+  them).
 - `config-setup.php` (a PHP helper the entrypoint runs) writes MailD's settings into
   SnappyMail's `application.ini`: `BANNER_TITLE`, the contacts DSN (db `contacts`) with
   `POSTGRES_PASSWORD`, and the admin panel credentials. It patches the file **at text level**

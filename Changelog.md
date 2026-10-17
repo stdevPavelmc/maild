@@ -18,6 +18,33 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-17 1.5.1-rc
+- Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**
+  (both Debian trixie, so the package list is unchanged). PHP 8.3 left *active* support on
+  2025-12-31 and only receives critical security fixes until 2027-12-31; 8.5 is actively supported
+  until 2027-12-31 and patched until 2029-12-31. No schema, env, volume or config change: an
+  existing deployment only needs `docker compose pull` + `up -d` (the webmail app itself, and
+  therefore its `data/` volume, is unchanged).
+- Fixed: **the webmail was broken on PHP 8.4+ — repaired with configuration only** (no forking of
+  SnappyMail): `display_errors = Off` and
+  `error_reporting = E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED` in `mua/snappymail.ini`. SnappyMail
+  2.38.2 predates PHP 8.4 and raises `E_DEPRECATED` from its own code (`MailSo\Log\Logger` maps
+  `E_STRICT`, deprecated in 8.4 — `Logger.php:153/171`; its HTTP client also calls the newly
+  deprecated `curl_close()`). Because the official PHP image activates no `php.ini`, PHP's compiled
+  default `display_errors = On` applied: the notice was **printed into the response**, which made
+  every later `header()` fail (`Cannot modify header information`: no CSP, no X-Frame-Options) and
+  prefixed the JSON API with HTML, so `POST /?/Json/` returned invalid JSON and the webmail died in
+  the browser. `log_errors`/`error_log = /dev/stderr` are untouched — warnings, notices and fatals
+  still reach `docker compose logs mua`.
+- Removed: the dead `mua` build dependencies `libfreetype6-dev`, `libjpeg62-turbo-dev` and
+  `libmcrypt-dev`. The image builds only `pdo`/`pdo_pgsql` (`libpq-dev` stays); no PHP extension and
+  no Apache module links freetype/jpeg/mcrypt, and `php -m`/`php -i`/behaviour are identical
+  without them: −11 MB on the image.
+- Note: SnappyMail itself is unchanged (2.38.2 is still the newest upstream release, so this
+  release improves the *runtime's* support window, not the app's); the `admin` image is still on
+  `php:8.1-apache-bookworm` (PHP 8.1 is EOL) and needs its own change, because PHP 8.4 unbundled the
+  `imap` extension that PostfixAdmin uses — tracked in `.agents/devops/base-images.md`.
+
 ## 2026-10-16 1.5.0-rc
 - Changed: **new env distribution schema — one env file per deployment.** Every tunable now
   defaults INSIDE each service image (an `ENV` block per Dockerfile, only the variables that

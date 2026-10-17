@@ -1,4 +1,4 @@
-FROM php:8.3-apache
+FROM php:8.5-apache
 
 # if updated you must review domain.json against the new version !!!
 ARG SNAPPY_VERSION=2.38.2
@@ -10,9 +10,6 @@ RUN apt-get update && \
         curl \
         wget \
         bind9-host  \
-        libfreetype6-dev \
-        libjpeg62-turbo-dev \
-        libmcrypt-dev \
         libpq-dev
 
 RUN docker-php-ext-install pdo pdo_pgsql && \
