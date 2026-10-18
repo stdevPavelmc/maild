@@ -53,6 +53,10 @@ ADMINNG_AUTO_APPROVE_FIRST = _bool("ADMINNG_AUTO_APPROVE_FIRST", False)
 ADMINNG_TOTP_REQUIRED = os.environ.get("ADMINNG_TOTP_REQUIRED", "superadmin")
 ADMINNG_SEARCH_LIMIT = _int("ADMINNG_SEARCH_LIMIT", 20)
 ADMINNG_QUOTA_CACHE_TTL = _int("ADMINNG_QUOTA_CACHE_TTL", 300)
+# Swagger UI + OpenAPI contract (/api/v1/docs, /api/v1/openapi.json): OFF by
+# default so production never hands the full API map to anonymous callers
+# (F-04 of the 2026-10 security audit); env.dev flips it to yes for local work.
+ADMINNG_API_DOCS = _bool("ADMINNG_API_DOCS", False)
 
 # --- Auth / device trust (Phase 2) ---------------------------------------------
 # Shared secret for JWT signing and TOTP-secret encryption. Mandatory: the api

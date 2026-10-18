@@ -25,6 +25,20 @@ from .routers import (
     webauthn,
 )
 
+# The OpenAPI contract + Swagger UI are a dev affordance: with ADMINNG_API_DOCS=no
+# (the image default = production posture) FastAPI serves 404s on /api/v1/docs and
+# /api/v1/openapi.json instead of the full API map (2026-10 audit F-04). ReDoc
+# stays off in both modes: its default /redoc path is not proxied by nginx anyway.
+_docs_kwargs = (
+    {
+        "docs_url": "/api/v1/docs",
+        "redoc_url": None,
+        "openapi_url": "/api/v1/openapi.json",
+    }
+    if settings.ADMINNG_API_DOCS
+    else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+)
+
 app = FastAPI(
     title="MailD AdminNG API",
     version=settings.APP_VERSION,
@@ -36,8 +50,7 @@ app = FastAPI(
         "maildir layout, quota in bytes); AdminNG's own state lives in its own "
         "database."
     ),
-    docs_url="/api/v1/docs",
-    openapi_url="/api/v1/openapi.json",
+    **_docs_kwargs,
 )
 
 install_error_handlers(app)

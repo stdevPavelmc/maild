@@ -116,6 +116,7 @@ baked (the operator sets them).
 | `POSTGRES_USER` | `maild` | catalogue role |
 | `ADMINNG_DB` | `adminng` | own database (devices, sessions, TOTP, audit) |
 | `ADMINNG_API_PORT` | `8080` | internal listen port (nginx proxies to it) |
+| `ADMINNG_API_DOCS` | `no` | `yes` = serve the OpenAPI contract + Swagger UI (`/api/v1/openapi.json`, `/api/v1/docs`); dev-only convenience, keep it off in production (2026-10 audit F-04) |
 | `ADMINNG_ACCESS_TTL` | `600` | access-token lifetime, seconds |
 | `ADMINNG_REFRESH_IDLE_TTL` | `900` | refresh-token inactivity purge (the 15-min rule) |
 | `ADMINNG_REAUTH_TTL` | `30` | destructive-action validation token lifetime, seconds |
