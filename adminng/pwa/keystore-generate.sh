@@ -101,6 +101,7 @@ cat <<EOF
     key password  : $KEY_PASSWORD
 
     Local build (one line):
+      DOCKER_NETWORK=host JAVA_TOOL_OPTIONS='-Djava.net.preferIPv6Addresses=true' \\
       KEYSTORE="$OUT" KEY_ALIAS="$KEY_ALIAS" \\
       KEY_PASSWORD='$KEY_PASSWORD' STORE_PASSWORD='$STORE_PASSWORD' \\
       APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \\

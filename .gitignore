@@ -20,6 +20,7 @@ adminng/pwa/*.aab
 # APK signing material — NEVER commit (see adminng/README.md, "Signing keystore")
 adminng/pwa/*.keystore
 adminng/pwa/*.keystore.b64
+adminng/pwa/build.sh
 
 # AdminNG browser suite artifacts (dev-only service pwa-test)
 adminng/pwa-test/test-results/
