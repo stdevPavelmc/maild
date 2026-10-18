@@ -195,8 +195,9 @@ receive_override_options = no_address_mappings
 
 # virtual domains linking
 virtual_mailbox_domains = proxy:pgsql:/etc/postfix/pgsql/virtual_domains_maps.cf
+virtual_alias_domains = proxy:pgsql:/etc/postfix/pgsql/virtual_alias_domains.cf
 virtual_mailbox_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_mailbox_maps.cf
-virtual_alias_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_alias_maps.cf
+virtual_alias_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_alias_maps.cf, proxy:pgsql:/etc/postfix/pgsql/virtual_alias_domain_maps.cf, proxy:pgsql:/etc/postfix/pgsql/virtual_alias_domain_catchall.cf
 relay_domains = $mydestination, proxy:pgsql:/etc/postfix/pgsql/relay_domains.cf
 virtual_mailbox_base = /home/vmail
 virtual_minimum_uid = 100

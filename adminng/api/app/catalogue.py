@@ -28,8 +28,13 @@ _ADMIN_LOCK = 842019021
 
 _DOMAIN_COLUMNS = (
     "domain, description, aliases, mailboxes, maxquota, quota, transport, "
-    "backupmx, active, created, modified"
+    "backupmx, active, created, modified, "
+    "(SELECT count(*) FROM alias_domain ad WHERE ad.target_domain = domain.domain) "
+    "AS alias_domains, "
+    "(SELECT ad.target_domain FROM alias_domain ad "
+    "WHERE ad.alias_domain = domain.domain) AS aliasing_to"
 )
+_DOMAIN_ALIAS_COLUMNS = "alias_domain, target_domain, active, created, modified"
 
 
 def _tenant_clause(principal: Principal, column: str = "domain") -> tuple[str, list]:
@@ -51,7 +56,30 @@ def _domain_out(row: dict) -> dict:
         "active": row["active"],
         "created": row["created"],
         "modified": row["modified"],
+        "alias_domains": row["alias_domains"],
+        "aliasing_to": row["aliasing_to"],
     }
+
+
+def _domain_alias_out(row: dict) -> dict:
+    return {
+        "alias_domain": row["alias_domain"],
+        "target_domain": row["target_domain"],
+        "active": row["active"],
+        "created": row["created"],
+        "modified": row["modified"],
+    }
+
+
+def _ensure_domain_alias_pair(
+    principal: Principal, alias_domain: str, target_domain: str
+) -> None:
+    if alias_domain == target_domain:
+        raise conflict("alias domain must differ from target domain")
+    ensure_domain_allowed(principal, alias_domain)
+    ensure_domain_allowed(principal, target_domain)
+    get_domain(principal, alias_domain)
+    get_domain(principal, target_domain)
 
 
 def _mailbox_out(row: dict) -> dict:
@@ -211,6 +239,98 @@ def delete_domain(principal: Principal, domain: str) -> None:
 
     for username in usernames:
         revoke_user_sessions(username)
+
+# --------------------------------------------------------------- domain aliases
+def list_domain_aliases(
+    principal: Principal,
+    domain: str | None,
+    limit: int,
+    cursor: str | None,
+) -> dict:
+    conds, params = ["TRUE"], []
+    if domain:
+        ensure_domain_allowed(principal, domain)
+        conds.append("(alias_domain = %s OR target_domain = %s)")
+        params.extend([domain, domain])
+    if not principal.superadmin:
+        conds.append("alias_domain = ANY(%s) AND target_domain = ANY(%s)")
+        params.extend([principal.domains, principal.domains])
+    if cursor:
+        conds.append("alias_domain > %s")
+        params.append(decode_cursor(cursor))
+
+    limit = clamp_limit(limit)
+    params.append(limit + 1)
+    sql = (
+        f"SELECT {_DOMAIN_ALIAS_COLUMNS} FROM alias_domain "
+        f"WHERE {' AND '.join(conds)} ORDER BY alias_domain LIMIT %s"
+    )
+    with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
+        cur.execute(sql, params)
+        rows = [_domain_alias_out(row) for row in cur.fetchall()]
+    return page(rows, "alias_domain", limit)
+
+
+def get_domain_alias(principal: Principal, alias_domain: str) -> dict:
+    with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
+        cur.execute(
+            f"SELECT {_DOMAIN_ALIAS_COLUMNS} FROM alias_domain WHERE alias_domain = %s",
+            (alias_domain,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        raise not_found("domain alias", alias_domain)
+    _ensure_domain_alias_pair(principal, row["alias_domain"], row["target_domain"])
+    return _domain_alias_out(row)
+
+
+def create_domain_alias(principal: Principal, payload: dict) -> dict:
+    alias_domain = payload["alias_domain"]
+    target_domain = payload["target_domain"]
+    _ensure_domain_alias_pair(principal, alias_domain, target_domain)
+    with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
+        try:
+            cur.execute(
+                """
+                INSERT INTO alias_domain (alias_domain, target_domain, active)
+                VALUES (%s, %s, %s)
+                """,
+                (alias_domain, target_domain, payload["active"]),
+            )
+        except psycopg.errors.UniqueViolation:
+            raise conflict(f"alias domain '{alias_domain}' already exists") from None
+        conn.commit()
+    return get_domain_alias(principal, alias_domain)
+
+
+def update_domain_alias(
+    principal: Principal, alias_domain: str, payload: dict
+) -> dict:
+    current = get_domain_alias(principal, alias_domain)
+    fields = {key: value for key, value in payload.items() if value is not None}
+    if "target_domain" in fields:
+        _ensure_domain_alias_pair(principal, alias_domain, fields["target_domain"])
+    if fields:
+        assignments = ", ".join(f"{key} = %s" for key in fields)
+        with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE alias_domain SET {assignments}, modified = now() "
+                "WHERE alias_domain = %s",
+                [*fields.values(), alias_domain],
+            )
+            if cur.rowcount == 0:
+                raise not_found("domain alias", alias_domain)
+            conn.commit()
+    return get_domain_alias(principal, current["alias_domain"])
+
+
+def delete_domain_alias(principal: Principal, alias_domain: str) -> None:
+    get_domain_alias(principal, alias_domain)
+    with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM alias_domain WHERE alias_domain = %s", (alias_domain,))
+        if cur.rowcount == 0:
+            raise not_found("domain alias", alias_domain)
+        conn.commit()
 
 # --------------------------------------------------------------------- mailboxes
 _MAILBOX_COLUMNS = (
@@ -681,7 +801,6 @@ def search(principal: Principal, query: str, limit: int) -> dict:
             )
 
     return {"query": query, "results": results}
-
 
 
 

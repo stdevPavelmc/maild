@@ -482,7 +482,7 @@ is recorded and its follow-up plan exists.
 |---|---|---|---|
 | 1 | WebAuthn / passkeys | **deferred (decision)** | TOTP is enforced for superadmins and fully tested; passkeys need a platform-authenticator harness (browser/phone) that this environment cannot provide. Tracked as Phase 6 in the roadmap below. |
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
-| 3 | `test.sh` consolidation | **validated** | **68 checks** (67 + the fan-out delivery check), 31 unit/integration tests; full **68 passed / 0 failed / 0 skipped** run against the current stack (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
+| 3 | `test.sh` consolidation | **validated** | **71 checks**; full **71 passed / 0 failed / 0 skipped** run against the current stack; 36 API unit/integration tests passed (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
 | 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** installed as the escape hatch, but each feature now has an explicit port/dead/keep call in the table below. AdminNG is the primary UI for domains/accounts/aliases/admins/devices/logs. |
 
@@ -509,6 +509,16 @@ confirmation remain mandatory for destructive operations.
 WebAuthn/passkeys will support device-bound login and re-auth, with password
 fallback. The proposed data model is `webauthn_credential` plus a challenge
 store, and the browser uses `navigator.credentials.*`.
+
+### Phase 6.2 — domain aliases (implemented)
+
+AdminNG manages the existing PostfixAdmin `alias_domain` table without catalogue DDL:
+both alias and target domains must exist and be within the caller's tenant scope;
+self-aliases are rejected; deletes require re-authentication and all writes are audited.
+Postfix's three PostgreSQL maps handle domain acceptance, local-part-preserving rewrites
+and catch-all rewrites. The domain cards show inbound alias counts and target relationships,
+and the domain editor manages active state and re-authenticated deletes. `test.sh` verifies
+delivery through an alias domain and refusal after deactivation.
 
 ### Other follow-ups
 
@@ -540,7 +550,7 @@ existing replacement in this repository.
 | 5 | Backup / restore UI | `admin` dump/restore pages | **Declare dead** | `cron/scripts/backup_db.sh` produces validated dumps of both databases with retention, and `db_upgrade.md` documents restore. A web restore button is a destructive surface with no operational need |
 | 6 | Setup OTP (`POSTFIXADMIN_SETUP_PASSWORD`) | `admin` entrypoint | **Declare dead** | The admin entrypoint generates and prints its own OTP per boot; AdminNG bootstraps devices through the audited `adminng.py` CLI. The variable is already ignored by the entrypoint |
 | 7 | Password scheme (md5crypt) | catalogue (`mailbox.password`) | **Keep for v1; separate stack-wide migration** | PostfixAdmin, Dovecot and AdminNG must switch schemes together (ARGON2/BLF-CRYPT). Tracked in §11.1; out of scope for the deprecation itself |
-| 8 | Alias domains | not present in this deployment's catalogue/API | **Not applicable** | No `alias_domain` usage in the schema, seeder or API; do not add it for parity's sake |
+| 8 | Alias domains | PostfixAdmin `alias_domain` table + Postfix PostgreSQL maps | **Ported (Phase 6.2)** | AdminNG CRUD is tenant-scoped on both endpoints; Postfix rewrites alias-domain recipients to the target while preserving the local part, with inactive aliases refused. |
 
 **Consequence for `admin`:** it remains in the stack as the escape hatch for rows 2–6 (with row 2
 being the only one the roadmap intends to port). A future Phase 7 implements vacation in AdminNG;
@@ -562,4 +572,3 @@ the docs updated.
 **Explicitly out of scope for v1** (tracked in §11 of the draft): vacation,
 fetchmail, welcome templates, backup/restore UI, scratch TOTP codes, PostfixAdmin
 feature parity beyond the catalogue, a stack-wide password-scheme migration.
-

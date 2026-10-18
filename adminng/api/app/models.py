@@ -7,9 +7,9 @@ catalogue `admin` row plus its `domain_admins` scope.
 
 import re
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 _DOMAIN_RE = re.compile(
     r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$"
@@ -78,6 +78,8 @@ class DomainOut(BaseModel):
     active: bool
     created: datetime | None
     modified: datetime | None
+    alias_domains: int
+    aliasing_to: str | None
 
 
 class Advisory(BaseModel):
@@ -88,6 +90,41 @@ class Advisory(BaseModel):
 
 class DomainCreated(DomainOut):
     advisories: list[Advisory] = []
+
+
+class DomainAliasCreate(BaseModel):
+    alias_domain: str
+    target_domain: str
+    active: bool = True
+
+    @field_validator("alias_domain", "target_domain")
+    @classmethod
+    def _validate_domain(cls, value: str) -> str:
+        return _norm_domain(value)
+
+    @model_validator(mode="after")
+    def _distinct_domains(self) -> Self:
+        if self.alias_domain == self.target_domain:
+            raise ValueError("alias domain must differ from target domain")
+        return self
+
+
+class DomainAliasUpdate(BaseModel):
+    target_domain: str | None = None
+    active: bool | None = None
+
+    @field_validator("target_domain")
+    @classmethod
+    def _validate_target_domain(cls, value: str | None) -> str | None:
+        return None if value is None else _norm_domain(value)
+
+
+class DomainAliasOut(BaseModel):
+    alias_domain: str
+    target_domain: str
+    active: bool
+    created: datetime | None
+    modified: datetime | None
 
 
 # -------------------------------------------------------------------- mailboxes

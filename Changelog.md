@@ -232,6 +232,13 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   timeout. Destructive actions still require password re-authentication and
   the armed confirmation; `test.sh` covers the remembered TTL and the re-auth
   negative.
+- Added: **AdminNG domain aliases** using PostfixAdmin's existing `alias_domain`
+  table (no catalogue DDL). The API provides tenant-scoped CRUD for both sides,
+  rejects self-aliases, audits changes and requires re-authentication for deletes.
+  Postfix now loads three PostgreSQL maps, excludes active alias domains from
+  virtual mailbox domains, and rewrites `user@alias-domain` to the same user at
+  the target. The PWA shows target counts/relationships and manages mappings in
+  the domain editor. `test.sh` checks delivery and inactive-alias refusal.
 
 ## 2026-10-17 1.5.1-rc
 - Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**

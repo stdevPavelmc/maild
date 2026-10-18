@@ -139,8 +139,8 @@ The installation, the first-boot provisioning, the first login, DKIM and the man
 # AdminNG — the next-generation admin interface (PWA)
 
 MailD also ships **AdminNG**, a PWA-first administration UI (domains, accounts, aliases,
-administrators, devices and audit logs) with a zero-trust device model, mandatory TOTP for
-superadmins and a full audit trail:
+alias domains, administrators, devices and audit logs) with a zero-trust device model,
+mandatory TOTP for superadmins and a full audit trail:
 
 - **Dev:** <http://localhost:8083> · **Production:** `https://adminng.<DEFAULT_DOMAIN>`
   through your ingress (Traefik labels are already in the production compose files).

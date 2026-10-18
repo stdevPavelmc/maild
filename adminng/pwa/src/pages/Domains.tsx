@@ -18,6 +18,7 @@ import {
 } from '../components/cards'
 import { Button } from '../components/ui/button'
 import { ConfirmDelete } from '../components/ConfirmDelete'
+import { DomainAliasManager } from '../components/DomainAliasManager'
 
 export function DomainsPage({ password }: { password: string }) {
   const { t } = useTranslation()
@@ -118,6 +119,16 @@ export function DomainsPage({ password }: { password: string }) {
             <MetaRow>
               <MetaChip icon="📬" title={t('domains.mailboxes')}>{item.mailboxes}</MetaChip>
               <MetaChip icon="🎭" title={t('domains.aliases')}>{item.aliases}</MetaChip>
+              {item.alias_domains > 0 && (
+                <MetaChip icon="↗" title={t('domains.aliasDomains')}>
+                  {item.alias_domains}
+                </MetaChip>
+              )}
+              {item.aliasing_to && (
+                <MetaChip icon="↗" title={t('domains.aliasingTo')}>
+                  {t('domains.aliasingTo')} {item.aliasing_to}
+                </MetaChip>
+              )}
             </MetaRow>
           </EntityCard>
         ))}
@@ -174,6 +185,12 @@ export function DomainsPage({ password }: { password: string }) {
               onChange={(value) => {
                 void api.updateDomain(editing.domain, { active: value }).then(() => list.reload())
               }}
+            />
+            <DomainAliasManager
+              domain={editing.domain}
+              password={password}
+              online={online}
+              onChanged={() => list.reload()}
             />
           </>
         )}

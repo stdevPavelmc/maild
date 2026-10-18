@@ -87,6 +87,13 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 - SMTP 25, submission 587 (auth), SMTPS 465. SPF (`SPF_ENABLE`) and DNSBL (`DNSBL_ENABLE`,
   `DNSBL_LIST`) checks; `RELAY` / `ALWAYS_BCC` optional; max size `MAX_MESSAGESIZE`.
+- Postfix's PostgreSQL maps include the PostfixAdmin alias-domain maps:
+  `virtual_alias_domains.cf` recognizes active alias domains, and
+  `virtual_alias_domain_maps.cf` preserves the local part while rewriting to the target.
+  `virtual_alias_domain_catchall.cf` handles the `@alias-domain` form. Alias domains are
+  excluded from `virtual_mailbox_domains` while active so Postfix treats them as virtual
+  aliases, not independent mailbox domains. The SQL lookups are live; adding or deactivating
+  an alias-domain row does not require an MTA restart.
 - Postfix **3.10** (resolute): `compatibility_level = 3.9` (the value the distro ships) and the TLS
   block follows the new parameter set — the two settings Postfix 3.9 obsoleted
   (`smtpd_tls_dh1024_param_file`, `smtpd_tls_eecdh_grade`) are gone and ECDHE auto-curves do the

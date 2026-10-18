@@ -93,6 +93,15 @@ export type Domain = {
   active: boolean
   created: string | null
   modified: string | null
+  alias_domains: number
+  aliasing_to: string | null
+}
+export type DomainAlias = {
+  alias_domain: string
+  target_domain: string
+  active: boolean
+  created: string | null
+  modified: string | null
 }
 export type Mailbox = {
   username: string
@@ -374,6 +383,23 @@ export const api = {
     request<Domain>(`/domains/${encodeURIComponent(domain)}`, { method: 'PUT', body }),
   deleteDomain: (domain: string, vtoken: string) =>
     request<void>(`/domains/${encodeURIComponent(domain)}`, { method: 'DELETE', vtoken }),
+  listDomainAliases: (domain?: string, cursor?: string) =>
+    request<Page<DomainAlias>>(`/domain-aliases${qs({ domain, cursor })}`),
+  createDomainAlias: (body: { alias_domain: string; target_domain: string }) =>
+    request<DomainAlias>('/domain-aliases', { method: 'POST', body }),
+  updateDomainAlias: (
+    aliasDomain: string,
+    body: { target_domain?: string; active?: boolean },
+  ) =>
+    request<DomainAlias>(`/domain-aliases/${encodeURIComponent(aliasDomain)}`, {
+      method: 'PUT',
+      body,
+    }),
+  deleteDomainAlias: (aliasDomain: string, vtoken: string) =>
+    request<void>(`/domain-aliases/${encodeURIComponent(aliasDomain)}`, {
+      method: 'DELETE',
+      vtoken,
+    }),
 
   listMailboxes: (params: { domain?: string; q?: string; cursor?: string }) =>
     request<Page<Mailbox>>(`/mailboxes${qs(params)}`),
@@ -427,4 +453,3 @@ export const api = {
       { method: 'PUT', body: { action }, vtoken },
     ),
 }
-

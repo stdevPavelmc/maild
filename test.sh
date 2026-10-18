@@ -631,6 +631,42 @@ else
     sql "DELETE FROM alias WHERE address = '$FANOUT';" > /dev/null 2>&1
 fi
 
+# C2c — PostfixAdmin alias domain: preserve the local part onto the target domain,
+# then ensure an inactive alias-domain row is not accepted at RCPT.
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "domain alias routing ($DC_NEEDED)"
+else
+    DOMAIN_ALIAS_TEST="aliasroute-$DOMAIN"
+    DOMAIN_ALIAS_USER="${ADMINMAIL%%@*}"
+    sql "INSERT INTO domain
+            (domain, description, aliases, mailboxes, maxquota, quota, transport, backupmx, active)
+        VALUES ('$DOMAIN_ALIAS_TEST', 'test.sh alias domain', 0, 0, 0, 0, 'virtual', false, true)
+        ON CONFLICT (domain) DO UPDATE SET active = true;" > /dev/null 2>&1
+    sql "INSERT INTO alias_domain (alias_domain, target_domain, active)
+        VALUES ('$DOMAIN_ALIAS_TEST', '$DOMAIN', true)
+        ON CONFLICT (alias_domain) DO UPDATE SET target_domain = '$DOMAIN', active = true;" \
+        > /dev/null 2>&1
+    F="$(chrono)"
+    swx -s "$SERVER" -p 587 -tls -a PLAIN -au "$ADMINMAIL" -ap "$PASS" \
+       -t "$DOMAIN_ALIAS_USER@$DOMAIN_ALIAS_TEST" -f "$ADMINMAIL" --header "Subject: $F"
+    if [ "$SW_RC" -eq 0 ] && wait_msg "$ADMINMAIL" INBOX "$F" ; then
+       t_ok "domain alias $DOMAIN_ALIAS_TEST preserves the local part and delivers to $DOMAIN"
+    else
+       t_fail "domain alias routing (rc=$SW_RC)" ; dump_swaks
+    fi
+    sql "UPDATE alias_domain SET active = false WHERE alias_domain = '$DOMAIN_ALIAS_TEST';" \
+       > /dev/null 2>&1
+    swx -s "$SERVER" -p 587 -tls -a PLAIN -au "$ADMINMAIL" -ap "$PASS" \
+       -t "$DOMAIN_ALIAS_USER@$DOMAIN_ALIAS_TEST" -f "$ADMINMAIL" --header "Subject: $(chrono)"
+    if [ "$SW_RC" -ne 0 ] && grep -Eq ' 550| 553' "$SW_LOG" ; then
+       t_ok "inactive domain alias $DOMAIN_ALIAS_TEST is refused at RCPT"
+    else
+       t_fail "inactive domain alias is refused (rc=$SW_RC)" ; dump_swaks
+    fi
+    sql "DELETE FROM alias_domain WHERE alias_domain = '$DOMAIN_ALIAS_TEST';
+        DELETE FROM domain WHERE domain = '$DOMAIN_ALIAS_TEST';" > /dev/null 2>&1
+fi
+
 # C3 — IMAPS (993): login and SEARCH
 if out="$(timeout -k5 30 curl --silent --insecure --user "$ADMINMAIL:$PASS" \
             --url "imaps://$SERVER:993/INBOX" -X 'SEARCH ALL' 2>&1)" &&
@@ -1428,6 +1464,33 @@ else
         t_fail "I8 alias/search"
     fi
 
+    # I8b — alias-domain CRUD is scoped on both domain endpoints and audited.
+    DOMAIN_ALIAS_API="alias-$ADMINNG_DOMAIN"
+    adminng_call POST /domains "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"domain\":\"$DOMAIN_ALIAS_API\",\"description\":\"Alias domain test\"}"
+    DOMAIN_ALIAS_SOURCE_CODE="$ADMINNG_CODE"
+    adminng_call POST /domain-aliases "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        "{\"alias_domain\":\"$DOMAIN_ALIAS_API\",\"target_domain\":\"$ADMINNG_DOMAIN\"}"
+    DOMAIN_ALIAS_CREATE_CODE="$ADMINNG_CODE"
+    adminng_call GET "/domain-aliases?domain=$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    DOMAIN_ALIAS_LIST="$ADMINNG_BODY"
+    adminng_call PUT "/domain-aliases/$DOMAIN_ALIAS_API" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
+        '{"active":false}'
+    DOMAIN_ALIAS_UPDATE_CODE="$ADMINNG_CODE"
+    adminng_call GET "/domain-aliases/$DOMAIN_ALIAS_API" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    DOMAIN_ALIAS_STATE="$ADMINNG_BODY"
+    adminng_call GET "/domains/$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ "$DOMAIN_ALIAS_SOURCE_CODE" = 201 ] &&
+       [ "$DOMAIN_ALIAS_CREATE_CODE" = 201 ] &&
+       printf '%s' "$DOMAIN_ALIAS_LIST" | grep -q "\"alias_domain\":\"$DOMAIN_ALIAS_API\"" &&
+       [ "$DOMAIN_ALIAS_UPDATE_CODE" = 200 ] &&
+       printf '%s' "$DOMAIN_ALIAS_STATE" | grep -q '"active":false' &&
+       printf '%s' "$ADMINNG_BODY" | grep -q '"alias_domains":1' ; then
+        t_ok "I8b domain-alias CRUD lists both endpoints, counts target aliases and updates active state"
+    else
+        t_fail "I8b domain-alias API (source=$DOMAIN_ALIAS_SOURCE_CODE create=$DOMAIN_ALIAS_CREATE_CODE update=$DOMAIN_ALIAS_UPDATE_CODE)"
+    fi
+
     # I9 — suspension blocks IMAPS (after the Dovecot auth-cache flush)
     adminng_call PUT "/mailboxes/$ADMINNG_USER" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" '{"active":false}'
     adminng_flush_auth
@@ -1489,6 +1552,10 @@ else
     adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
         "{\"password\":\"$ADMIN_PW\"}"
     SV="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
+    adminng_call DELETE "/domain-aliases/$DOMAIN_ALIAS_API" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
+    I12_DA="$ADMINNG_CODE"
+    adminng_call DELETE "/domains/$DOMAIN_ALIAS_API" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
+    I12_DS="$ADMINNG_CODE"
     adminng_call DELETE "/aliases/sales@$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
     I12_A="$ADMINNG_CODE"
     adminng_call DELETE "/mailboxes/$ADMINNG_USER" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
@@ -1496,12 +1563,13 @@ else
     adminng_call DELETE "/domains/$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" "" "$SV"
     I12_C="$ADMINNG_CODE"
     adminng_call GET "/domains/$ADMINNG_DOMAIN" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
-    if [ "$I12_A" = 204 ] && [ "$I12_B" = 204 ] && [ "$I12_C" = 204 ] &&
+    if [ "$I12_DA" = 204 ] && [ "$I12_DS" = 204 ] &&
+       [ "$I12_A" = 204 ] && [ "$I12_B" = 204 ] && [ "$I12_C" = 204 ] &&
        [ "$ADMINNG_CODE" = 404 ] &&
        [ "$(sql "SELECT count(*) FROM mailbox WHERE domain='$ADMINNG_DOMAIN'")" = "0" ] ; then
-        t_ok "I12 re-auth DELETE cascade: alias/mailbox/domain gone (204s, then 404)"
+        t_ok "I12 re-auth DELETE removes domain alias/source, alias/mailbox/domain (204s, then 404)"
     else
-        t_fail "I12 delete cascade (alias=$I12_A mailbox=$I12_B domain=$I12_C get=$ADMINNG_CODE)"
+        t_fail "I12 delete cascade (domain_alias=$I12_DA source=$I12_DS alias=$I12_A mailbox=$I12_B domain=$I12_C get=$ADMINNG_CODE)"
     fi
 
     # I13 — refresh rotation + reuse detection
@@ -1530,8 +1598,9 @@ else
     adminng_call GET "/logs?limit=50" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
     if [ "$ADMINNG_CODE" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q LOGIN_OK &&
        printf '%s' "$ADMINNG_BODY" | grep -q MAILBOX_CREATE &&
+       printf '%s' "$ADMINNG_BODY" | grep -q DOMAIN_ALIAS_CREATE &&
        printf '%s' "$ADMINNG_BODY" | grep -q DOMAIN_DELETE ; then
-        t_ok "I14 the audit trail records LOGIN_OK, MAILBOX_CREATE and DOMAIN_DELETE"
+        t_ok "I14 the audit trail records login, mailbox and domain-alias changes and domain delete"
     else
         t_fail "I14 audit logs (code=$ADMINNG_CODE)"
     fi
@@ -1594,4 +1663,3 @@ if [ "$T_FAIL" -gt 0 ] ; then
 fi
 printf '  %sOK: every executed check passed%s\n' "$C_OK" "$C_OFF"
 exit 0
-

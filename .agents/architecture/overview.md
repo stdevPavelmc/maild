@@ -21,6 +21,10 @@ compose network.
   the mda → Maildir. The mta writes the mda's IP into `main.cf` at start
   (`virtual_transport = lmtp:inet:<ip>:24`) — if the mda is recreated with a new IP the mta
   must be restarted or it delivers to a dead address while reporting unhealthy.
+- **Alias domains:** Postfix checks the PostfixAdmin `alias_domain` table. An active
+  `user@alias-domain` is rewritten to `user@target-domain` before mailbox delivery; inactive
+  alias-domain rows are not eligible recipients. AdminNG requires both domains to exist and
+  the caller to manage both of them.
 - **Outbound:** submission on :587 (auth) → SPF/DNSBL checks → amavis (DKIM signing,
   `DKIM_SIGNING=yes`) → internet. `RELAY` and `ALWAYS_BCC` are optional mta knobs.
 - **Content filter:** EICAR and banned attachments (`$banned_filename_re`, e.g. `.exe`)

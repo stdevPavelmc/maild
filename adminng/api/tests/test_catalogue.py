@@ -194,7 +194,81 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 404)
         self.assertEqual(catalogue.get_domain(SUPER, DOMAIN)["mailboxes"], 0)
 
-    def test_08_domain_delete_cascades(self):
+    def test_08_domain_alias_scope_and_counts(self):
+        source = "alias.adminng-selftest.test"
+        secondary = "alt.adminng-selftest.test"
+        for alias_domain in (source, secondary):
+            catalogue.create_domain(
+                SUPER,
+                {
+                    "domain": alias_domain,
+                    "description": "Alias domain test",
+                    "maxquota": 0,
+                    "quota": 0,
+                    "transport": "virtual",
+                    "backupmx": False,
+                    "active": True,
+                },
+            )
+        try:
+            alias = catalogue.create_domain_alias(
+                SUPER,
+                {
+                    "alias_domain": source,
+                    "target_domain": DOMAIN,
+                    "active": True,
+                },
+            )
+            self.assertEqual(alias["alias_domain"], source)
+            self.assertEqual(catalogue.get_domain(SUPER, DOMAIN)["alias_domains"], 1)
+            self.assertEqual(catalogue.get_domain(SUPER, source)["aliasing_to"], DOMAIN)
+            self.assertEqual(
+                [row["alias_domain"] for row in catalogue.list_domain_aliases(
+                    SUPER, DOMAIN, 50, None
+                )["items"]],
+                [source],
+            )
+
+            target_only = Principal("target-only", False, [DOMAIN], DEVICE)
+            with self.assertRaises(ApiError) as ctx:
+                catalogue.get_domain_alias(target_only, source)
+            self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+            self.assertEqual(
+                catalogue.list_domain_aliases(target_only, DOMAIN, 50, None)["items"],
+                [],
+            )
+            retargeted = catalogue.update_domain_alias(
+                SUPER, source, {"target_domain": secondary}
+            )
+            self.assertEqual(retargeted["target_domain"], secondary)
+            self.assertEqual(catalogue.get_domain(SUPER, DOMAIN)["alias_domains"], 0)
+            self.assertEqual(catalogue.get_domain(SUPER, secondary)["alias_domains"], 1)
+            with self.assertRaises(ApiError) as ctx:
+                catalogue.create_domain_alias(
+                    SUPER,
+                    {
+                        "alias_domain": DOMAIN,
+                        "target_domain": DOMAIN,
+                        "active": True,
+                    },
+                )
+            self.assertEqual(ctx.exception.code, "CONFLICT")
+
+            inactive = catalogue.update_domain_alias(SUPER, source, {"active": False})
+            self.assertFalse(inactive["active"])
+            catalogue.delete_domain_alias(SUPER, source)
+            self.assertEqual(catalogue.get_domain(SUPER, secondary)["alias_domains"], 0)
+        finally:
+            with connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "DELETE FROM alias_domain WHERE alias_domain = %s OR target_domain = %s",
+                    (source, secondary),
+                )
+                conn.commit()
+            for alias_domain in (source, secondary):
+                catalogue.delete_domain(SUPER, alias_domain)
+
+    def test_09_domain_delete_cascades(self):
         catalogue.create_mailbox(
             SUPER,
             {
@@ -224,4 +298,3 @@ if __name__ == "__main__":
             _wipe()
         except Exception as exc:  # pragma: no cover - best-effort cleanup
             print(f"cleanup warning: {exc}", file=sys.stderr)
-

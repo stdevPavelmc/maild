@@ -12,14 +12,25 @@ from fastapi.responses import JSONResponse
 
 from . import settings
 from .errors import install_error_handlers
-from .routers import admins, aliases, auth, devices, domains, logs, mailboxes, search
+from .routers import (
+    admins,
+    aliases,
+    auth,
+    devices,
+    domain_aliases,
+    domains,
+    logs,
+    mailboxes,
+    search,
+)
 
 app = FastAPI(
     title="MailD AdminNG API",
     version=settings.APP_VERSION,
     description=(
         "PWA-first administration API for the MailD PostfixAdmin catalogue: "
-        "domains, mailboxes, aliases, administrators, rapid search and quota "
+        "domains, domain aliases, mailboxes, address aliases, "
+        "administrators, rapid search and quota "
         "usage. Catalogue writes follow PostfixAdmin exactly (md5crypt, "
         "maildir layout, quota in bytes); AdminNG's own state lives in its own "
         "database."
@@ -34,6 +45,7 @@ for _router in (
     auth.router,
     devices.router,
     domains.router,
+    domain_aliases.router,
     mailboxes.router,
     aliases.router,
     admins.router,
@@ -75,4 +87,3 @@ def health() -> JSONResponse:
         },
         status_code=200 if ok else 503,
     )
-
