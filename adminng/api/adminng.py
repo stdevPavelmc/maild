@@ -125,6 +125,42 @@ def cmd_totp_reset(username: str) -> int:
     return 0
 
 
+def cmd_legacy_hashes() -> int:
+    """Report catalogue rows still on legacy md5crypt ($1$) hashes.
+
+    Reads the catalogue (mailddb): the legacy rows are the ones the
+    2027-02-01 weak-scheme removal will lock out — a password change
+    (webmail or this API) rehashes them with the current PASSWORD_SCHEME.
+    """
+    from app.passwords import MD5CRYPT_SUPPORT_ENDS, is_legacy
+
+    with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT username, 'mailbox' AS kind FROM mailbox WHERE password LIKE '$1$%' "
+            "UNION ALL "
+            "SELECT username, 'admin' FROM admin WHERE password LIKE '$1$%' "
+            "ORDER BY kind, username"
+        )
+        rows = cur.fetchall()
+
+    if not rows:
+        print("no legacy md5crypt hashes: the catalogue is fully migrated")
+        return 0
+
+    print(
+        f"{len(rows)} legacy md5crypt hash(es) remain — weak-scheme support "
+        f"ends {MD5CRYPT_SUPPORT_ENDS.isoformat()}:"
+    )
+    for row in rows:
+        print(f"  {row['kind']:<8} {row['username']}")
+    print(
+        "migrate them with a password change (webmail Settings → Password, "
+        "or the API) before the deadline; rehash-on-login migrates them as "
+        "users authenticate."
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="adminng.py",
@@ -161,6 +197,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="USERNAME",
         help="delete a TOTP credential so the next login re-enrolls",
     )
+    group.add_argument(
+        "--legacy-hashes",
+        action="store_true",
+        help="report mailbox/admin rows still on legacy md5crypt ($1$) hashes; "
+        "weak-scheme support ends 2027-02-01 — those rows must be migrated "
+        "(password change/rehash-on-login) before then",
+    )
     return parser
 
 
@@ -179,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_reset_ratelimit(args.reset_ratelimit)
         if args.totp_reset:
             return cmd_totp_reset(args.totp_reset)
+        if args.legacy_hashes:
+            return cmd_legacy_hashes()
     except psycopg.errors.InvalidTextRepresentation:
         print("invalid device id: expected a UUID (e.g. DE793C1A-...) ", file=sys.stderr)
         return 2

@@ -30,9 +30,11 @@ AdminNG deprecates it only later, by explicit decision (plan.md, Phase 5).
    proper enrollment flow on first login.
 5. **Full audit trail** — every mutation logged, with domain-scoped visibility.
 6. **Compatible by construction** — writes rows exactly like PostfixAdmin /
-   `admin/seed.sh` do today: no DDL on the catalogue, same md5crypt scheme,
-   same `maildir`/quota formats — so Postfix, Dovecot and Amavis keep working
-   unchanged, and PostfixAdmin remains a fully valid fallback.
+   `admin/seed.sh` do today: no DDL on the catalogue, the same Argon2id password
+   scheme (md5crypt accepted as legacy until 2027-02-01, §3.1), same
+   `maildir`/quota formats — so Postfix, Dovecot and Amavis keep working
+   unchanged. PostfixAdmin remains a dev-only fallback (it cannot verify
+   Argon2id).
 7. **i18n from day one** — English source language with a complete Spanish
    translation, auto-detected, user-overridable.
 
@@ -170,12 +172,23 @@ Everything here is what `admin/seed.sh`, `POSTFIXADMIN_ENCRYPT=md5crypt` and the
 Dovecot/Postfix/Amavis SQL consumers already rely on. A row written by AdminNG
 must be indistinguishable from a row written by PostfixAdmin:
 
-- **Passwords: md5crypt (`$1$...`)** — the one scheme both PostfixAdmin
-  (`POSTFIXADMIN_ENCRYPT`) and Dovecot (`default_password_scheme`) verify. The
-  API hashes with the exact `crypt()` semantics `seed.sh` uses
-  (`$1$<8-hex-salt>$`); never store another format in `mailbox.password` /
-  `admin.password`.
-- **`mailbox` row:** `username` (full email, PK), `password` (md5crypt), `name`,
+- **Passwords: Argon2id with legacy md5crypt coexistence (2026-10 audit
+  F-18).** New hashes are `{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…` (the
+  `{SCHEME}` prefix is mandatory for Dovecot's SQL passdb; the parameters are
+  self-encoded in the hash, so any writer's output verifies). Legacy raw
+  `$1$<8-char-salt>$<22-char-checksum>` (md5crypt) hashes remain legal and may
+  mix freely in the same column: Dovecot verifies them through
+  `default_password_scheme = MD5-CRYPT` (enabled by `auth_allow_weak_schemes`).
+  The writers (`admin/seed.sh`, this API's `app/passwords.py`, the webmail
+  change-password driver) follow `PASSWORD_SCHEME` (`argon2id` default,
+  `md5crypt` escape hatch). **Weak-scheme support is removed on 2027-02-01**:
+  from that date the API refuses `PASSWORD_SCHEME=md5crypt`, the mda sets
+  `auth_allow_weak_schemes = no`, and legacy `$1$` rows stop authenticating
+  (rehash-on-login and password changes migrate them before then;
+  `adminng.py --legacy-hashes` lists the stragglers). PostfixAdmin cannot
+  verify Argon2id — it is a deprecated, dev-only fallback, accepted by design.
+- **`mailbox` row:** `username` (full email, PK), `password` (Argon2id, or
+  legacy md5crypt during the window), `name`,
   `maildir = '<domain>/<local_part>/'` (**trailing slash**), `quota` in
   **bytes, 0 = unlimited** (Dovecot's userdb SQL returns the column raw), plus
   `local_part`, `domain`, `active`, `created`/`modified`.
@@ -186,10 +199,10 @@ must be indistinguishable from a row written by PostfixAdmin:
   `active`. A user's own forwarding aliases are simply alias rows whose
   `goto` includes the mailbox address (the UI's "tags in the user editor",
   §6.3, edits these rows in place).
-- **`admin` row:** `username` (full email), `password` (md5crypt — same value
-  as the matching `mailbox` row where it exists; that is the MailD convention
-  from `seed.sh`), `superadmin`, `active`; per-domain scope via
-  `domain_admins` (`username`, `domain`, `active`).
+- **`admin` row:** `username` (full email), `password` (Argon2id/legacy md5crypt
+  per the scheme above — same value as the matching `mailbox` row where it
+  exists; that is the MailD convention from `seed.sh`), `superadmin`, `active`;
+  per-domain scope via `domain_admins` (`username`, `domain`, `active`).
 - **Dovecot auth-cache caveat, carried over:** after a password change,
   Dovecot's auth cache (`auth_cache_ttl`, 1 minute in MailD) may still accept
   the old password for up to a minute — the same note the SnappyMail
@@ -317,7 +330,8 @@ self-approve safely. The full how-to lives in `adminng/README.md`.
 
 1. `POST /device/handshake` (no auth): registers the device `PENDING`.
 2. `POST /auth/login-step1` — username + password, verified against the
-   catalogue `admin` table (md5crypt):
+   catalogue `admin` table (Argon2id, or legacy md5crypt during the window —
+   `app/passwords.py`, §3.1):
    - device `PENDING` ⇒ `403 DEVICE_NOT_AUTHORIZED` (lock screen; poll
      `GET /device/status`) — the payload shape from the original draft is the
      contract of record (`detail`, `device_id`, `associated_user`);
@@ -626,10 +640,12 @@ Every phase must respect these MailD core principles:
 
 ## 11. Risks & open questions (for the review)
 
-1. **md5crypt is weak** — inherited from the PostfixAdmin/Dovecot contract and
-   out of scope for v1; the right long-term fix is a stack-wide scheme
-   migration (PostfixAdmin + Dovecot + AdminNG together, e.g. ARGON2/
-   BLF-CRYPT) — flagged for the Phase 5 deprecation decision.
+1. **Password scheme — addressed (2026-10 audit F-18).** Argon2id is now the
+   default writer scheme across `seed.sh`, the API and the webmail driver, with
+   legacy md5crypt `$1$` coexistence (Dovecot `default_password_scheme` +
+   `auth_allow_weak_schemes`) and rehash-on-login. The weak-scheme window is
+   enforced and ends **2027-02-01**; see §3.1. Remaining open point: PostfixAdmin
+   (deprecated dev-only fallback) cannot verify Argon2id — accepted by design.
 2. **Feature gap vs PostfixAdmin:** vacation, fetchmail, welcome/vacation
    templates, backup/restore UI and the setup-OTP flow are **not** in AdminNG
    v1; PostfixAdmin stays as fallback. The Phase 5 decision must scope them in

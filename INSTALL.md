@@ -115,13 +115,34 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
   boot and kept in the data volume; set `MUA_ADMIN_PASSWORD` to pin a known one.
 - **Changing a mailbox password:** users do it themselves from the webmail (**Settings →
   Password**). MailD ships the SnappyMail `change-password` plugin wired to its own catalogue
-  driver, so the new password is immediately valid over IMAP/POP3/SMTP and in PostfixAdmin.
+  driver, so the new password is immediately valid over IMAP/POP3/SMTP.
   Because Dovecot caches authentication results for a minute (`auth_cache_ttl` in
   `mda/dovecot/conf.d/10-auth.conf`), the *previous* password can still be accepted for up to
   that minute — the new one always works at once, and
   `docker compose exec mda doveadm auth cache flush` removes any doubt.
   The baseline plugins (X-Originating-IP header, change-password, TOTP two-factor) are installed
   and enabled on every boot — `MUA_PLUGINS` in `env.sample` lists them.
+
+## Password hashes and the 2027-02-01 deadline
+
+Mailbox/administrator passwords are hashed with **Argon2id** by default
+(`{ARGON2ID}$argon2id$…`, `PASSWORD_SCHEME=argon2id`), written identically by
+first-boot provisioning, the AdminNG API and the webmail change-password driver.
+Older deployments carry **legacy md5crypt (`$1$…`)** hashes; both formats are
+valid in the same column and Dovecot verifies either, so nothing breaks on
+upgrade. Two things to know:
+
+- **PostfixAdmin cannot verify Argon2id** (it is a deprecated, dev-only
+  fallback). Its logins only work for accounts still on legacy hashes. If you
+  must keep the PostfixAdmin UI working for a while, set
+  `PASSWORD_SCHEME=md5crypt` — but note the deadline below.
+- **Weak-scheme support is removed on 2027-02-01.** From that date MailD
+  releases refuse `PASSWORD_SCHEME=md5crypt`, Dovecot's
+  `auth_allow_weak_schemes` goes back to `no`, and any remaining `$1$` hash stops
+  authenticating. Rows migrate on a password change or automatically on the
+  next IMAP/POP3 login (rehash-on-login); watch progress with
+  `docker compose exec api adminng.py --legacy-hashes`. The mda logs a startup
+  warning with the remaining count on every boot.
 
 > The first domain is already there: do **not** recreate it, or you will get a duplicate.
 

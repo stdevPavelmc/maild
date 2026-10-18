@@ -24,9 +24,13 @@ passdb sql {
   # PostfixAdmin's mailbox table: the password is all the passdb needs
   query = SELECT username AS user, password FROM mailbox WHERE username = '%{user}' AND active='1'
 
-  # PostfixAdmin stores md5crypt hashes unless POSTFIXADMIN_ENCRYPT says otherwise.
-  # MD5-CRYPT is disabled by default in Dovecot 2.4, hence the
-  # `auth_allow_weak_schemes = yes` in 10-auth.conf (see the note there).
+  # Mixed-format column (2026-10 audit F-18): legacy rows are raw md5crypt
+  # ($1$…, verified through default_password_scheme = MD5-CRYPT below, allowed
+  # by auth_allow_weak_schemes = yes in 10-auth.conf) and new rows carry the
+  # explicit {ARGON2ID} prefix (verified by Dovecot's {SCHEME} dispatch).
+  # default_password_scheme = MD5-CRYPT stays: it only ever applies to the
+  # UNPREFIXED (legacy) hashes. Weak-scheme support ends 2027-02-01 —
+  # rehash-on-login and password changes must have migrated every row by then.
   default_password_scheme = MD5-CRYPT
 }
 
@@ -35,6 +39,14 @@ userdb sql {
   # per-user limit comes from the `quota` column (BYTES, 0 = unlimited) returned as
   # the quota root's storage_size (2.3 returned `quota_rule = *:bytes=N`)
   query = SELECT CONCAT('/home/vmail/', maildir) AS home, 5000 AS uid, 5000 AS gid, quota AS quota_storage_size FROM mailbox WHERE username = '%{user}' AND active='1'
+
+  # The plaintext password is exported to the postlogin scripts as PLAIN_PASS
+  # (Dovecot docs: "Converting Password Schemes"). rehash-password.sh uses it to
+  # rehash legacy $1$ rows to Argon2id on successful logins. It never reaches a
+  # mail process and is never logged.
+  fields {
+    plain_pass = %{password}
+  }
 
   # doveadm -A (the daily quota report) iterates the active mailboxes
   iterate_query = SELECT username AS user FROM mailbox WHERE active = '1'

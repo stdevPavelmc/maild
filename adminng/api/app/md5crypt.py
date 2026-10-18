@@ -1,6 +1,6 @@
-"""md5crypt ($1$) hashing — the PostfixAdmin/Dovecot common denominator.
+"""md5crypt ($1$) hashing — the LEGACY catalogue password scheme.
 
-MailD stores mailbox/admin passwords as md5crypt: `POSTFIXADMIN_ENCRYPT=md5crypt`
+MailD used to store mailbox/admin passwords as md5crypt: `POSTFIXADMIN_ENCRYPT=md5crypt`
 and Dovecot's `default_password_scheme` both verify it, and `admin/seed.sh`
 produces it with PHP's crypt(). Python 3.13 removed the stdlib `crypt` module,
 so this is a self-contained implementation of the FreeBSD md5crypt algorithm
@@ -8,8 +8,9 @@ so this is a self-contained implementation of the FreeBSD md5crypt algorithm
 
     $1$<8-char salt>$<22-char checksum>
 
-Anything written to mailbox.password / admin.password MUST come from here (or be
-produced by PostfixAdmin/seed.sh with the same scheme).
+Since the 2026-10 security audit (F-18) new hashes are Argon2id — the scheme
+dispatch and the 2027-02-01 weak-scheme removal deadline live in
+`app/passwords.py`; this module stays as the legacy engine (writer + verifier).
 """
 
 import hashlib

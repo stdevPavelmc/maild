@@ -79,13 +79,33 @@ else
     echo "seed: #################### !!! #############################" >&2
 fi
 
-# md5crypt ($1$...): the scheme both PostfixAdmin (encrypt=md5crypt) and Dovecot (MD5-CRYPT) verify.
-# -n (no php.ini): the admin image's PHP prints an "imap extension" startup warning on *stdout*
-# that would otherwise corrupt the captured value; crypt() is a core function, always available.
-HASH="$(php -n -r 'echo crypt($argv[1], sprintf("\$1\$%08x\$", crc32(uniqid("", true))));' "$ADMIN_PW" 2>/dev/null | tr -d '\r\n')"
-case "$HASH" in
-    \$1\$*) : ;;
-    *) log "FATAL: could not produce an md5crypt hash (got '${HASH}')"; exit 1 ;;
+# ---- password hash (PASSWORD_SCHEME) ----------------------------------------
+# Argon2id by default: '{ARGON2ID}$argon2id$…' with PHP's PASSWORD_ARGON2ID
+# defaults (m=65536, t=4, p=1) — the exact format and parameters the AdminNG
+# API and the webmail change-password driver write, so all writers are
+# interchangeable. PASSWORD_SCHEME=md5crypt is the legacy escape hatch
+# (raw $1$…): weak-scheme support is REMOVED on 2027-02-01 (Dovecot's
+# auth_allow_weak_schemes goes 'no' and the api refuses to boot with it) —
+# see .agents/services/configuration.md.
+case "$(printf '%s' "${PASSWORD_SCHEME:-argon2id}" | tr '[:upper:]' '[:lower:]')" in
+    md5crypt)
+        if [ "$(date -u +%s)" -ge "$(date -u -d '2027-02-01' +%s)" ] ; then
+            log "FATAL: PASSWORD_SCHEME=md5crypt is no longer supported (weak-scheme removal, 2027-02-01)"
+            exit 1
+        fi
+        HASH="$(php -n -r 'echo crypt($argv[1], sprintf("\$1\$%08x\$", crc32(uniqid("", true))));' "$ADMIN_PW" 2>/dev/null | tr -d '\r\n')"
+        case "$HASH" in
+            \$1\$*) : ;;
+            *) log "FATAL: could not produce an md5crypt hash (got '${HASH}')"; exit 1 ;;
+        esac
+        ;;
+    argon2id|*)
+        HASH="$(php -n -r 'echo "{ARGON2ID}" . password_hash($argv[1], PASSWORD_ARGON2ID);' "$ADMIN_PW" 2>/dev/null | tr -d '\r\n')"
+        case "$HASH" in
+            '{ARGON2ID}$argon2id'*) : ;;
+            *) log "FATAL: could not produce an Argon2id hash (got '${HASH}')"; exit 1 ;;
+        esac
+        ;;
 esac
 
 # ---- seed (single transaction + advisory lock) ---------------------------

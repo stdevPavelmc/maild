@@ -40,6 +40,12 @@ for maintenance jobs.
   writes the `maild_provision` row; `amavis`/`mua`/`mta` wait on it before their config
   stage (no manual `setup.php`, no stack restart). Keep the seeder idempotent and
   non-destructive, and keep `AUTO_PROVISION=no` working as the manual fallback.
+- **Password hashes are Argon2id by default** (`PASSWORD_SCHEME=argon2id`; the shared writers
+  are `admin/seed.sh`, the AdminNG API and the mua change-password driver). Legacy md5crypt
+  `$1$` hashes coexist and migrate on password change or rehash-on-login, but **weak-scheme
+  support is removed on 2027-02-01** (date-gated at runtime) — never add a new md5crypt-only
+  path. PostfixAdmin cannot verify Argon2id; it is a deprecated dev-only fallback.
+  Details: `.agents/services/configuration.md`.
 - **Compose file chain.** `docker-compose-dev.yml` is the development source of truth;
   every *perdurable* change must be mirrored into `docker-compose.yml` (the **production
   source of truth**, derived from `-dev`). `compose-github.yml` and `compose-gitlab.yml` are

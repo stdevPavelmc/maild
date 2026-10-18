@@ -64,6 +64,12 @@ ENV APACHE_DOCUMENT_ROOT /var/www/html/public
 # must come from the operator env file (dev: env.dev, prod: .env — see env.sample).
 # The entrypoint maps POSTGRES_* onto POSTFIXADMIN_DB_* when set. Full variable matrix:
 # .agents/services/configuration.md.
+# Stack-wide scheme for the hashes seed.sh provisions (Argon2id by default; the
+# md5crypt escape hatch ends 2027-02-01 — .agents/services/configuration.md).
+# NOTE: PostfixAdmin (deprecated dev-only fallback) keeps its own
+# POSTFIXADMIN_ENCRYPT=md5crypt and CANNOT verify Argon2id hashes — its logins
+# only work for accounts still on legacy hashes. Accepted: PA is not a
+# supported production surface.
 ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
@@ -71,6 +77,7 @@ ENV POSTGRES_HOST=db \
     POSTFIXADMIN_SMTP_SERVER=mta \
     POSTFIXADMIN_SMTP_PORT=25 \
     POSTFIXADMIN_ENCRYPT=md5crypt \
+    PASSWORD_SCHEME=argon2id \
     AUTO_PROVISION=yes \
     PROVISION_VERSION=1 \
     PROVISION_WAIT_TIMEOUT=180 \
@@ -115,4 +122,4 @@ LABEL org.opencontainers.image.title="MailD Admin UI (PostfixAdmin)" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
       cu.maild.original-maintainer="David Goodwin <david@codepoets.co.uk> (@DavidGoodwin), PostfixAdmin project" \
-      org.opencontainers.image.created="2026-10-16"
+      org.opencontainers.image.created="2026-10-18"

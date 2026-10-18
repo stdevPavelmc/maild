@@ -1437,7 +1437,7 @@ else
 
     # I6 — the API-created mailbox logs into IMAPS
     if adminng_imap "$ADMINNG_USER" "$ADMINNG_PW" ; then
-        t_ok "I6 the API-created mailbox logs into IMAPS immediately (md5crypt accepted)"
+        t_ok "I6 the API-created mailbox logs into IMAPS immediately (Argon2id hash verified)"
     else
         t_fail "I6 IMAPS login for the API-created mailbox"
     fi

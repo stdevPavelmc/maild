@@ -118,7 +118,43 @@ if [ "$1" = 'dovecot' ]; then
         echo "We need a valid 'mail.crt' & 'mail.key' files in the /certs volume!"
         exit 1
     fi
-    
+
+    # --- password-scheme posture (2026-10 audit F-18) -------------------------
+    # Weak-scheme (md5crypt) support is a timed coexistence window: it ends on
+    # 2027-02-01. Until then legacy raw $1$ hashes keep verifying (see 10-auth.conf);
+    # new hashes are Argon2id ({ARGON2ID} prefix, written by the AdminNG API, the
+    # webmail change-password driver and seed.sh). This gate runs on EVERY boot
+    # (configure.sh only runs on first boot) so the deadline is honored by running
+    # containers after a restart, not only by fresh deployments. From the date,
+    # auth_allow_weak_schemes goes back to 'no' and legacy mailboxes stop
+    # authenticating — `adminng.py --legacy-hashes` lists the rows to migrate, and
+    # rehash-on-login migrates them automatically as users authenticate.
+    if [ "$(date -u +%Y%m%d)" -ge 20270201 ] ; then
+        WEAK_SCHEMES=no
+        echo "mda: WARNING - weak-scheme (md5crypt) support ENDED on 2027-02-01." >&2
+        echo "mda: WARNING - mailboxes still on legacy \$1\$ hashes can no longer authenticate;" >&2
+        echo "mda: WARNING - check 'adminng.py --legacy-hashes' and migrate those accounts." >&2
+    else
+        WEAK_SCHEMES=yes
+        # Track migration progress: count the legacy $1$ rows once per boot
+        # (best effort — a slow/unavailable db must never block startup). They
+        # migrate on password change or on the next IMAP/POP3 login
+        # (rehash-on-login, scripts/rehash-password.sh).
+        LEGACY_ROWS="$(PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -q -w -X \
+            -h "${POSTGRES_HOST}" -p "${POSTGRES_PORT:-5432}" \
+            -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -t -A -c \
+            "SELECT count(*) FROM mailbox WHERE password LIKE '\$1\$%'" 2>/dev/null || true)"
+        if [ -n "${LEGACY_ROWS}" ] && [ "${LEGACY_ROWS}" -gt 0 ] 2>/dev/null ; then
+            echo "mda: WARNING - ${LEGACY_ROWS} mailbox(es) still use legacy md5crypt (\$1\$) hashes." >&2
+            echo "mda: WARNING - weak-scheme support ends 2027-02-01 and they will stop authenticating;" >&2
+            echo "mda: WARNING - they migrate on password change or on their next IMAP/POP3 login." >&2
+            echo "mda: WARNING - (rehash-on-login is skipped when PASSWORD_SCHEME=md5crypt)." >&2
+            echo "mda: WARNING - progress: 'adminng.py --legacy-hashes' (in the api container)." >&2
+        fi
+    fi
+    sed -i "s/^auth_allow_weak_schemes.*/auth_allow_weak_schemes = ${WEAK_SCHEMES}/" \
+        /etc/dovecot/conf.d/10-auth.conf
+
     # daily mailbox quota report: a background loop that mails the admin the
     # mailboxes over QUOTA_REPORT_THRESHOLD (80% by default) on the first tick
     # past QUOTA_REPORT_HOUR:QUOTA_REPORT_MINUTE (00:01 by default) with no

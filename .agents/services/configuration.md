@@ -79,11 +79,11 @@ every DB consumer and is never baked.
 | Service | Image ENV defaults (overridable) | Mandatory from the operator file | Optional overrides (documented in env.sample) |
 |---------|----------------------------------|----------------------------------|-----------------------------------------------|
 | db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=contacts` `ADMINNG_DB=adminng` | `POSTGRES_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB`, `ADMINNG_DB` (advanced; `ADMINNG_DB` must match the api's) |
-| admin | `POSTGRES_HOST/DB/USER` `POSTFIXADMIN_DB_TYPE=pgsql` `POSTFIXADMIN_SMTP_SERVER=mta` `POSTFIXADMIN_SMTP_PORT=25` `POSTFIXADMIN_ENCRYPT=md5crypt` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `MAIL_ADMIN_PASSWORD` (empty ⇒ OTP), `PROVISION_*`, `POSTFIXADMIN_*` |
-| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `ADMINNG_API_PORT=8080` `ADMINNG_API_DOCS=no` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REMEMBER_TTL=86400` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_WEBAUTHN_RP_ID=localhost` `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084` `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) | every `ADMINNG_*` knob |
+| admin | `POSTGRES_HOST/DB/USER` `POSTFIXADMIN_DB_TYPE=pgsql` `POSTFIXADMIN_SMTP_SERVER=mta` `POSTFIXADMIN_SMTP_PORT=25` `POSTFIXADMIN_ENCRYPT=md5crypt` `PASSWORD_SCHEME=argon2id` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `MAIL_ADMIN_PASSWORD` (empty ⇒ OTP), `PROVISION_*`, `POSTFIXADMIN_*`, `PASSWORD_SCHEME` |
+| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `ADMINNG_API_PORT=8080` `ADMINNG_API_DOCS=no` `PASSWORD_SCHEME=argon2id` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REMEMBER_TTL=86400` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_WEBAUTHN_RP_ID=localhost` `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084` `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) | every `ADMINNG_*` knob, `PASSWORD_SCHEME` |
 | adminng | (none — static PWA + nginx proxy) | — | — (no `env_file`); dev publishes 8083 (HTTP) and 8084 (HTTPS, local CA) |
-| mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST/DB/USER` `POSTGRES_EXTRA_DB=contacts` `MUA_ADMIN_USER=maild` `MUA_CONFIG_WAIT_TIMEOUT=120` `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `MUA_ADMIN_PASSWORD` (empty ⇒ generated + logged), `BANNER_TITLE`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT` |
-| mda | `POSTGRES_HOST/DB/USER` `DEFAULT_MAILBOX_SIZE=200M` `QUOTA_REPORT_HOUR=0` `QUOTA_REPORT_MINUTE=1` `COUNTRY=JM` `STATE=Kingston` `CITY=Kingston` `ORG=MailD` `OU=MailD` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, cert subject (`COUNTRY/STATE/CITY/ORG/OU`) |
+| mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST/DB/USER` `POSTGRES_EXTRA_DB=contacts` `PASSWORD_SCHEME=argon2id` `MUA_ADMIN_USER=maild` `MUA_CONFIG_WAIT_TIMEOUT=120` `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `MUA_ADMIN_PASSWORD` (empty ⇒ generated + logged), `BANNER_TITLE`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT`, `PASSWORD_SCHEME` |
+| mda | `POSTGRES_HOST/DB/USER` `PASSWORD_SCHEME=argon2id` `DEFAULT_MAILBOX_SIZE=200M` `QUOTA_REPORT_HOUR=0` `QUOTA_REPORT_MINUTE=1` `COUNTRY=JM` `STATE=Kingston` `CITY=Kingston` `ORG=MailD` `OU=MailD` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, cert subject (`COUNTRY/STATE/CITY/ORG/OU`), `PASSWORD_SCHEME` (rehash-on-login gate) |
 | mta | `POSTGRES_HOST/DB/USER` `MAX_MESSAGESIZE=34865152` `SPF_ENABLE=True` `DNSBL_ENABLE=true` `DNSBL_LIST=zen.spamhaus.org=…` `PEER_WAIT_TIMEOUT=120` `PEER_WATCH_INTERVAL=30` `AMAVIS=amavis` `MDA=mda` `MUA=MUA` `ADMIN=admin` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `RELAY`, `ALWAYS_BCC`, `POSTMASTER_ABUSE_SETUP` (unset ⇒ off), `MAX_MESSAGESIZE`, `SPF_ENABLE`, `DNSBL_*`, `PEER_*` |
 | amavis | `POSTGRES_HOST/DB/USER` `MTA=mta` `CLAMAV=clamav` `CRON=cron` `SPAM_FILTER_ENABLED=yes` `AV_ENABLED=yes` `DKIM_SIGNING=yes` `SA_AUTOLEARN_NONSPAM=0.1` `SA_AUTOLEARN_SPAM=10` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `AV_ENABLED`, `SPAM_FILTER_ENABLED`, `DKIM_SIGNING`, `SA_*`, `JUNK_RETENTION_DAYS` |
 | cron | `POSTGRES_HOST/DB/USER` `MTA=mta` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `JUNK_RETENTION_DAYS`, `SA_HAM_SAMPLE_*` (the entrypoint dumps the env into `/etc/environment`, from where the cron jobs source it) |
@@ -105,6 +105,37 @@ localhost values. Origins outside the allowlist, insecure non-local origins,
 and origins outside the RP ID's DNS suffix are rejected. Credentials are
 scoped to the account and approved device; revoking the device removes them.
 Password/TOTP login remains the fallback.
+
+### Password hashing scheme (`PASSWORD_SCHEME`) — 2026-10 audit F-18
+
+`PASSWORD_SCHEME` (`argon2id` default, `md5crypt` legacy) is shared by the
+three catalogue writers — `admin/seed.sh` (first boot), the AdminNG `api`, and
+the `mua` change-password driver. New hashes are Argon2id:
+`{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…` (the `{SCHEME}` prefix is required
+by Dovecot's SQL passdb; parameters are self-encoded, so any writer's output
+verifies). `mailbox.password` / `admin.password` may mix formats freely — the
+mda needs no change for coexistence: legacy raw `$1$` hashes verify through
+`default_password_scheme = MD5-CRYPT` (enabled by `auth_allow_weak_schemes`),
+prefixed hashes through Dovecot's `{SCHEME}` dispatch.
+
+**The weak-scheme window is timed and enforced.** `mda/docker-entrypoint.sh`
+date-gates `auth_allow_weak_schemes` on every boot (`yes` before **2027-02-01**,
+`no` from it) and warns with the count while legacy rows remain; the `api`
+refuses to boot with `PASSWORD_SCHEME=md5crypt` after the deadline and exposes
+`adminng.py --legacy-hashes` (count + usernames) to track progress. Existing
+`$1$` rows migrate on a password change (webmail/API) or automatically on the
+next IMAP/POP3 login: `mda/scripts/rehash-password.sh`, wired as an
+`imap-postlogin`/`pop3-postlogin` service, rehashes legacy rows to Argon2id
+(guarded `UPDATE … WHERE password LIKE '$1$%'`, so concurrent changes are never
+clobbered) and is skipped when `PASSWORD_SCHEME=md5crypt`.
+
+**PostfixAdmin is a deprecated, dev-only fallback and cannot verify Argon2id**
+(`crypt()` argon2id → false, no salt generator): its logins only work for
+accounts still on legacy hashes. This is accepted by design; an operator who
+needs the PostfixAdmin UI until the deadline can set `PASSWORD_SCHEME=md5crypt`
+(the existing rows keep working), at the cost of the weak scheme. Dev fixtures
+stay on MD5-CRYPT on purpose (`bootstrap-dev.sh`) to exercise the coexistence
+path.
 
 Debug switches (all off by default, never baked): `DEBUG` (mta alias-file
 dump), `MTA_DEBUG`, `MDA_DEBUG_INIT/AUTH/AUTH_PASSWORD/MAIL/SSL`, `MUA_DEBUG`,

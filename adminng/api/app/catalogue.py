@@ -1,8 +1,10 @@
 """Catalogue access — the PostfixAdmin tables, written the PostfixAdmin way.
 
 Non-negotiable compatibility rules (technical-draft §3.1):
-  * password = md5crypt (`$1$...`), produced by `app.md5crypt` (the same scheme
-    PostfixAdmin's `POSTFIXADMIN_ENCRYPT` and Dovecot's default scheme verify);
+  * password: NEW hashes are Argon2id ('{ARGON2ID}$argon2id$…', produced by
+    `app.passwords` per PASSWORD_SCHEME); legacy raw md5crypt ($1$…) stays
+    verifiable until 2027-02-01 (weak-scheme removal) — both formats are
+    legal and may mix in the same column (Dovecot verifies both);
   * mailbox.maildir = '<domain>/<local_part>/' (trailing slash);
   * mailbox.quota and domain.quota are BYTES, 0 = unlimited;
   * deletes cascade explicitly (domain -> mailboxes/aliases/domain_admins/...),
@@ -20,7 +22,7 @@ from . import settings
 from .auth import Principal, ensure_domain_allowed, revoke_user_sessions
 from .db import connect
 from .errors import conflict, not_found
-from .md5crypt import hash_password
+from .passwords import hash_password
 from .pagination import clamp_limit, decode_cursor, page
 
 # Advisory lock for admin mutations (the last-superadmin guard must not race).

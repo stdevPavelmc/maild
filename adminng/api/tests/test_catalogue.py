@@ -8,7 +8,8 @@ It exercises the catalogue layer directly (no HTTP) against the dev fixtures'
 database, using a throwaway domain, and asserts the PostfixAdmin write
 compatibility rules from technical-draft §3.1:
 
-  * md5crypt hashes in mailbox/admin.password;
+  * Argon2id hashes ({ARGON2ID}$argon2id$…, per PASSWORD_SCHEME) in
+    mailbox/admin.password;
   * maildir = '<domain>/<local_part>/' (trailing slash);
   * quota in bytes (0 = unlimited);
   * domain counters (mailboxes/aliases) keep step;
@@ -27,7 +28,7 @@ from app import catalogue
 from app.auth import Principal
 from app.db import connect
 from app.errors import ApiError
-from app.md5crypt import hash_password, is_md5crypt, verify_password
+from app.passwords import hash_password, verify_password
 
 DOMAIN = "adminng-selftest.test"
 MAILBOX = f"e2e@{DOMAIN}"
@@ -55,21 +56,16 @@ def _wipe() -> None:
         conn.commit()
 
 
-class Md5cryptTests(unittest.TestCase):
+class PasswordSchemeTests(unittest.TestCase):
     def test_hash_shape_and_verification(self):
         hashed = hash_password(PASSWORD)
-        self.assertTrue(is_md5crypt(hashed), hashed)
-        self.assertEqual(len(hashed.split("$")[2]), 8)
+        self.assertTrue(hashed.startswith("{ARGON2ID}$argon2id$"), hashed)
         self.assertTrue(verify_password(PASSWORD, hashed))
         self.assertFalse(verify_password(PASSWORD + "x", hashed))
 
-    def test_salt_is_preserved(self):
-        hashed = hash_password(PASSWORD)
-        salt = hashed.split("$")[2]
-        self.assertEqual(hash_password(PASSWORD, salt), hashed)
-
-    def test_rejects_non_md5crypt(self):
+    def test_rejects_unknown_formats(self):
         self.assertFalse(verify_password(PASSWORD, "$2y$10$notamd5hash"))
+        self.assertFalse(verify_password(PASSWORD, "{BLF-CRYPT}$2y$10$whatever"))
         self.assertFalse(verify_password(PASSWORD, None))
 
 
@@ -113,7 +109,7 @@ class CatalogueTests(unittest.TestCase):
         with connect() as conn, conn.cursor() as cur:
             cur.execute("SELECT password FROM mailbox WHERE username = %s", (MAILBOX,))
             stored = cur.fetchone()["password"]
-        self.assertTrue(is_md5crypt(stored), stored)
+        self.assertTrue(stored.startswith("{ARGON2ID}$argon2id$"), stored)
         self.assertTrue(verify_password(PASSWORD, stored))
 
         self.assertEqual(catalogue.get_domain(SUPER, DOMAIN)["mailboxes"], 1)

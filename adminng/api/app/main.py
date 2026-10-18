@@ -46,7 +46,8 @@ app = FastAPI(
         "PWA-first administration API for the MailD PostfixAdmin catalogue: "
         "domains, domain aliases, mailboxes, address aliases, "
         "administrators, rapid search and quota "
-        "usage. Catalogue writes follow PostfixAdmin exactly (md5crypt, "
+        "usage. Catalogue writes follow PostfixAdmin exactly (Argon2id "
+        "passwords with md5crypt accepted as legacy until 2027-02-01, "
         "maildir layout, quota in bytes); AdminNG's own state lives in its own "
         "database."
     ),

@@ -15,13 +15,18 @@ RUN apt-get update && \
         dovecot-lmtpd \
         dovecot-managesieved \
         spamassassin \
+        postgresql-client \
         python3 && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
 # resolute package notes: `netcat` is now a virtual package apt refuses to resolve (it
 # ships `netcat-openbsd` and `netcat-traditional`), so the former is installed
-# explicitly — it provides the `nc` the healthcheck uses. Everything else keeps its
+# explicitly — it provides the `nc` the healthcheck uses. `postgresql-client` is
+# the rehash-on-login helper's UPDATE channel (scripts/rehash-password.sh, wired
+# as a postlogin service in 10-master.conf): it migrates legacy md5crypt ($1$)
+# password hashes to Argon2id as users authenticate (2026-10 audit F-18; the
+# weak-scheme window ends 2027-02-01). Everything else keeps its
 # name, and the Ubuntu LTS jump drags Dovecot from 2.3.16 to 2.4.2: the /etc/dovecot
 # tree below is 2.4 configuration (the 2.3 one is archived in dovecot-jammy/ for
 # reference and as the diff baseline, see .agents/devops/base-os-upgrade.md).
@@ -48,10 +53,14 @@ RUN mkdir /home/vmail && \
 # (dev: env.dev, prod: .env — see env.sample). DEFAULT_DOMAIN and MAIL_ADMIN_USER are
 # deployment values passed by the compose file (they have no default here on purpose).
 # COUNTRY/STATE/CITY/ORG/OU feed the self-signed certificate subject (first boot only).
+# PASSWORD_SCHEME is the stack-wide hash scheme (argon2id default; md5crypt is the
+# legacy escape hatch that ends 2027-02-01): the mda only reads it to decide whether
+# rehash-on-login may migrate legacy $1$ rows (it is skipped under md5crypt).
 # Full variable matrix: .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
+    PASSWORD_SCHEME=argon2id \
     DEFAULT_MAILBOX_SIZE=200M \
     QUOTA_REPORT_HOUR=0 \
     QUOTA_REPORT_MINUTE=1 \
@@ -62,6 +71,12 @@ ENV POSTGRES_HOST=db \
     OU=MailD
 
 ADD dovecot/ /etc/dovecot
+
+# rehash-creds.sh carries the catalogue credentials for the rehash-on-login
+# helper (substituted by configure.sh at first boot); readable only by root
+# and the vmail group, which is what the postlogin script runs as.
+RUN chown root:vmail /etc/dovecot/rehash-creds.sh && \
+    chmod 0640 /etc/dovecot/rehash-creds.sh
 
 # NOTE: the imapsieve learning scripts are NOT compiled at build time:
 # the vnd.dovecot.pipe & imapsieve extensions are only available when
@@ -117,4 +132,4 @@ LABEL org.opencontainers.image.title="MailD MDA (Dovecot)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-16"
+      org.opencontainers.image.created="2026-10-18"

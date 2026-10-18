@@ -58,6 +58,15 @@ ADMINNG_QUOTA_CACHE_TTL = _int("ADMINNG_QUOTA_CACHE_TTL", 300)
 # (F-04 of the 2026-10 security audit); env.dev flips it to yes for local work.
 ADMINNG_API_DOCS = _bool("ADMINNG_API_DOCS", False)
 
+# --- Password hashing (2026-10 audit F-18) --------------------------------------
+# Scheme for NEW mailbox/admin password hashes: 'argon2id' (default,
+# {ARGON2ID}-prefixed) or 'md5crypt' (legacy raw $1$, the PostfixAdmin-compatible
+# escape hatch). Weak-scheme support is REMOVED on 2027-02-01: from that date
+# PASSWORD_SCHEME=md5crypt refuses to boot and legacy $1$ rows stop verifying
+# (Dovecot's auth_allow_weak_schemes goes back to 'no' too). See
+# app/passwords.py and .agents/services/configuration.md.
+PASSWORD_SCHEME = os.environ.get("PASSWORD_SCHEME", "argon2id").strip().lower()
+
 # --- Auth / device trust (Phase 2) ---------------------------------------------
 # Shared secret for JWT signing and TOTP-secret encryption. Mandatory: the api
 # refuses to start without it (compose passes it with a `${ADMINNG_SECRET_KEY:?}`

@@ -89,8 +89,14 @@ What it does, idempotently (a second run re-asserts the same state and changes n
 - writes **`test.creds`** (git-ignored, mode `0600`) with every password and then verifies them:
   an IMAP login for each mailbox plus a real PostfixAdmin web login (302 → `main.php`).
 
-The *same* password works over IMAP/SMTP and in the PostfixAdmin UI: `admin/docker-entrypoint.sh`
-hashes with `md5crypt` and Dovecot verifies `MD5-CRYPT`, which is the same `$1$…` format.
+The *same* password works over IMAP/SMTP and in the PostfixAdmin UI: the dev
+fixtures are hashed with **legacy md5crypt `$1$…`** on purpose
+(`bootstrap-dev.sh` runs `doveadm pw -s MD5-CRYPT`), so the local stack always
+exercises the legacy-coexistence path that the stack-wide default (Argon2id,
+`PASSWORD_SCHEME`) is migrating away from; Dovecot verifies both. Change a
+password from the webmail or the AdminNG API and the row becomes
+`{ARGON2ID}$argon2id$…`, which PostfixAdmin can no longer verify — see
+`INSTALL.md` (“Password hashes and the 2027-02-01 deadline”).
 
 Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh passwords.
 

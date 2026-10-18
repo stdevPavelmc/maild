@@ -23,7 +23,7 @@ from fastapi import Depends, Header, Request
 from . import audit, crypto, devices, ratelimit, settings, tokens, totp
 from .db import connect
 from .errors import ApiError, forbidden_tenant
-from .md5crypt import verify_password
+from .passwords import verify_password
 
 
 class Principal:

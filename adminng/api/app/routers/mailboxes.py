@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from .. import audit, catalogue, quota
+from .. import audit, catalogue, quota, settings
 from ..auth import Principal, get_principal, require_reauth
 from ..models import MailboxCreate, MailboxOut, MailboxUpdate, Page, QuotaStatus
 
@@ -45,7 +45,7 @@ def create_mailbox(
 ) -> dict:
     created = catalogue.create_mailbox(principal, payload.model_dump())
     _audit(request, principal, "MAILBOX_CREATE", created["username"], created["domain"],
-           quota_bytes=created["quota_bytes"])
+           quota_bytes=created["quota_bytes"], hash_scheme=settings.PASSWORD_SCHEME)
     return created
 
 
@@ -71,6 +71,7 @@ def update_mailbox(
         updated["username"],
         updated["domain"],
         changed=sorted(k for k, v in payload.model_dump().items() if v is not None),
+        **({"hash_scheme": settings.PASSWORD_SCHEME} if payload.password is not None else {}),
     )
     return updated
 

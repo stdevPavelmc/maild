@@ -18,6 +18,36 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-18 1.6.0-dev
+- Security: **mailbox and administrator passwords now use Argon2id instead of MD5-CRYPT
+  (2026-10 security audit F-18)**. New hashes (`{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…`)
+  keep the `{SCHEME}` prefix Dovecot's SQL passdb requires; the parameters are self-encoded,
+  so every writer's output verifies. All three catalogue writers agree:
+  `admin/seed.sh` (first boot), the AdminNG API (`app/passwords.py`, replacing the exclusive
+  `md5crypt` module which stays as the legacy verifier) and the webmail change-password
+  driver (`mua/plugins/change-password-maild`). A new shared `PASSWORD_SCHEME` knob
+  (`argon2id` default, `md5crypt` legacy escape hatch) selects the scheme in the admin, api,
+  mda and mua images. Password-write audit events now record the scheme used.
+- Added: **rehash-on-login** — `mda/scripts/rehash-password.sh`, wired as an
+  `imap-postlogin`/`pop3-postlogin` service, migrates a legacy `$1$` row to Argon2id on the
+  user's next successful IMAP/POP3 login (guarded `UPDATE … WHERE password LIKE '$1$%'`, so a
+  concurrent password change is never clobbered; skipped when `PASSWORD_SCHEME=md5crypt`).
+  `mda` images install `postgresql-client` for it.
+- Added: `adminng.py --legacy-hashes` lists the mailbox/admin rows still on legacy `$1$`
+  hashes (count + usernames), and the mda logs a startup warning with the remaining count on
+  every boot, so operators can track the migration.
+- Deprecated: **weak-scheme (md5crypt) support ends stack-wide on 2027-02-01**, enforced at
+  runtime, not just documented: `mda/docker-entrypoint.sh` date-gates
+  `auth_allow_weak_schemes` on every boot and the API refuses to boot with
+  `PASSWORD_SCHEME=md5crypt` after the deadline — from then legacy `$1$` hashes stop
+  authenticating. Documented in `env.sample`, `INSTALL.md`, `.agents/services/configuration.md`
+  and `adminng/doc/technical-draft.md` §3.1.
+- Changed: **PostfixAdmin is now a deprecated, dev-only fallback for password work** — it
+  cannot verify Argon2id (no salt generator; `crypt()` argon2id → false), so its logins only
+  work for accounts still on legacy hashes. Accepted by design; an operator who needs it can
+  set `PASSWORD_SCHEME=md5crypt` until the deadline. Dev fixtures deliberately stay on
+  MD5-CRYPT (`bootstrap-dev.sh`) to exercise the coexistence path.
+
 ## 2026-10-17 1.6.0-dev
 - Fixed: `bootstrap-dev.sh` aborted with `mkdir: Permission denied` on a truly fresh tree
   (or after `rm -rf ldata/`): docker auto-creates the missing bind-mount parents as root,

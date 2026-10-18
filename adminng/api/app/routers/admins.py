@@ -2,14 +2,14 @@
 
 from fastapi import APIRouter, Depends, Request, Response
 
-from .. import audit, catalogue
+from .. import audit, catalogue, settings
 from ..auth import Principal, require_reauth, require_superadmin
 from ..models import AdminCreate, AdminOut, AdminUpdate, Page
 
 router = APIRouter(prefix="/admins", tags=["admins"])
 
 
-def _audit(request, principal, action, username):
+def _audit(request, principal, action, username, **details):
     audit.record(
         actor=principal.username,
         action=action,
@@ -19,6 +19,7 @@ def _audit(request, principal, action, username):
         domain=None,
         ip=audit.client_ip(request),
         endpoint=f"{request.method} {request.url.path}",
+        **details,
     )
 
 
@@ -38,7 +39,8 @@ def create_admin(
     principal: Principal = Depends(require_superadmin),
 ) -> dict:
     created = catalogue.create_admin(principal, payload.model_dump())
-    _audit(request, principal, "ADMIN_CREATE", created["username"])
+    _audit(request, principal, "ADMIN_CREATE", created["username"],
+           hash_scheme=settings.PASSWORD_SCHEME)
     return created
 
 
@@ -55,7 +57,8 @@ def update_admin(
     principal: Principal = Depends(require_superadmin),
 ) -> dict:
     updated = catalogue.update_admin(principal, username, payload.model_dump())
-    _audit(request, principal, "ADMIN_UPDATE", updated["username"])
+    _audit(request, principal, "ADMIN_UPDATE", updated["username"],
+           **({"hash_scheme": settings.PASSWORD_SCHEME} if payload.password is not None else {}))
     return updated
 
 

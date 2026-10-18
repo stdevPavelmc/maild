@@ -71,6 +71,16 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `docker compose exec mda /scripts/quota_report.sh --now [--dry-run]`.
 - `mda/configure.sh` (startup helper, invoked by the entrypoint) and `mda/sendmail.py`
   are part of the image.
+- **rehash-on-login** (2026-10 audit F-18): `mda/scripts/rehash-password.sh` is wired as an
+  `imap-postlogin`/`pop3-postlogin` service in `mda/dovecot/conf.d/10-master.conf` (`script-login`,
+  runs as `vmail`) and migrates a legacy `$1$` row to Argon2id on a successful IMAP/POP3 login
+  (guarded `UPDATE … WHERE password LIKE '$1$%'`; skipped under `PASSWORD_SCHEME=md5crypt`). It
+  reads `PLAIN_PASS` from the userdb `plain_pass = %{password}` field (`auth-sql.conf.ext`) and
+  the catalogue credentials from `/etc/dovecot/rehash-creds.sh` (0640 root:vmail), which is why the
+  image installs `postgresql-client`. The script sets its own `PATH` (script-login runs it with a
+  minimal environment) and logs to stderr at *Error* level only. The entrypoint also date-gates
+  `auth_allow_weak_schemes` (yes before 2027-02-01, no from it) and warns with the remaining
+  legacy count on every boot.
 - **Auth cache** (`mda/dovecot/conf.d/10-auth.conf`): MailD runs it short on purpose —
   `auth_cache_size = 10M` with `auth_cache_ttl = 1 minute` and `auth_cache_negative_ttl = 0`.
   A cached *success* keeps authenticating without asking the catalogue, so a longer TTL made a
@@ -78,8 +88,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   alive for ten minutes; negative caching for an hour could lock a user out of a password he had
   mistyped before adopting it. See `.agents/devops/workflows.md` for the symptom and
   `doveadm auth cache flush`.
-- env: defaults baked in `mda/Dockerfile` (`DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, the
-  self-signed cert subject); the operator file is the `env_file:` and overrides any of them;
+- env: defaults baked in `mda/Dockerfile` (`PASSWORD_SCHEME`, `DEFAULT_MAILBOX_SIZE`,
+  `QUOTA_REPORT_*`, the self-signed cert subject); the operator file is the `env_file:` and
+  overrides any of them;
   password + `DEFAULT_DOMAIN`/`MAIL_ADMIN_USER` passed explicitly at compose level.
 - Ports: 110, 143, 993, 995 (POP3/IMAP + TLS) and 4190 (ManageSieve), 12345 (SASL).
 
