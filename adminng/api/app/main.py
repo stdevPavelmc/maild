@@ -22,6 +22,7 @@ from .routers import (
     logs,
     mailboxes,
     search,
+    webauthn,
 )
 
 app = FastAPI(
@@ -43,6 +44,7 @@ install_error_handlers(app)
 
 for _router in (
     auth.router,
+    webauthn.router,
     devices.router,
     domains.router,
     domain_aliases.router,

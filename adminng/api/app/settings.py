@@ -67,6 +67,18 @@ ADMINNG_ENROLL_TTL = _int("ADMINNG_ENROLL_TTL", 600)    # TOTP enrollment window
 ADMINNG_LOGIN_MAX_FAILURES = _int("ADMINNG_LOGIN_MAX_FAILURES", 5)
 ADMINNG_LOCKOUT_SECONDS = _int("ADMINNG_LOCKOUT_SECONDS", 900)
 ADMINNG_DEVICE_NAME_MAX = _int("ADMINNG_DEVICE_NAME_MAX", 120)
+ADMINNG_WEBAUTHN_RP_ID = os.environ.get(
+    "ADMINNG_WEBAUTHN_RP_ID", "localhost"
+).strip().lower().rstrip(".")
+ADMINNG_WEBAUTHN_ORIGINS = tuple(
+    origin.strip().rstrip("/")
+    for origin in os.environ.get(
+        "ADMINNG_WEBAUTHN_ORIGINS",
+        "http://localhost:8083,https://localhost:8084",
+    ).split(",")
+    if origin.strip()
+)
+ADMINNG_WEBAUTHN_CHALLENGE_TTL = _int("ADMINNG_WEBAUTHN_CHALLENGE_TTL", 300)
 
 VMAIL_ROOT = os.environ.get("VMAIL_ROOT", "/home/vmail")
 

@@ -1,3 +1,9 @@
+import type {
+  AuthenticationOptionsJSON,
+  RegistrationOptionsJSON,
+  SerializedCredential,
+} from './webauthn'
+
 /**
  * AdminNG API client (technical-draft §5).
  *
@@ -80,6 +86,16 @@ export type SessionState = 'REQUIRES_TOTP_ENROLLMENT' | 'REQUIRES_2FA' | 'AUTHEN
 export type DeviceState = 'PENDING' | 'APPROVED' | 'REVOKED'
 export type Page<T> = { items: T[]; next_cursor: string | null }
 export type User = { username: string; superadmin: boolean; domains: string[] }
+export type WebAuthnChallenge<T> = { challenge_id: string; public_key: T }
+export type WebAuthnStatus = { configured: boolean; enabled: boolean }
+export type AuthenticatedSession = {
+  access_token: string
+  refresh_token: string
+  expires_in: number
+  remember: boolean
+  idle_timeout: number
+  user: User
+}
 
 export type Domain = {
   domain: string
@@ -356,6 +372,46 @@ export const api = {
       auth: false,
       body: { flow_token, code },
     }),
+  webauthnStatus: () => request<WebAuthnStatus>('/auth/webauthn/status'),
+  webauthnRegistrationOptions: (password: string) =>
+    request<WebAuthnChallenge<RegistrationOptionsJSON>>('/auth/webauthn/register/options', {
+      method: 'POST',
+      body: { password },
+    }),
+  webauthnRegistrationVerify: (challenge_id: string, credential: SerializedCredential) =>
+    request<{ enabled: boolean }>('/auth/webauthn/register/verify', {
+      method: 'POST',
+      body: { challenge_id, credential },
+    }),
+  webauthnDisable: (password: string) =>
+    request<{ enabled: boolean; removed: boolean }>('/auth/webauthn/credential', {
+      method: 'DELETE',
+      body: { password },
+    }),
+  webauthnLoginOptions: (username: string, remember: boolean) =>
+    request<WebAuthnChallenge<AuthenticationOptionsJSON>>('/auth/webauthn/login/options', {
+      method: 'POST',
+      auth: false,
+      body: { username, remember },
+    }),
+  webauthnLoginVerify: (
+    username: string,
+    challenge_id: string,
+    credential: SerializedCredential,
+  ) =>
+    request<{ session_state: 'AUTHENTICATED' } & AuthenticatedSession>(
+      '/auth/webauthn/login/verify',
+      { method: 'POST', auth: false, body: { username, challenge_id, credential } },
+    ),
+  webauthnReauthOptions: () =>
+    request<WebAuthnChallenge<AuthenticationOptionsJSON>>('/auth/webauthn/reauth/options', {
+      method: 'POST',
+    }),
+  webauthnReauthVerify: (challenge_id: string, credential: SerializedCredential) =>
+    request<{ security_validation_token: string; expires_in: number }>(
+      '/auth/webauthn/reauth/verify',
+      { method: 'POST', body: { challenge_id, credential } },
+    ),
   logout: (refresh: string) =>
     request<{ status: string }>('/auth/logout', {
       method: 'POST',

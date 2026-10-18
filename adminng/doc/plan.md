@@ -32,9 +32,9 @@ running it) · **validated** (verified by running the acceptance checks).
 | 0 — Scaffolding & wiring | **validated** (CI pending remote run) | per-task table below |
 | 1 — Core catalogue API | **validated** | per-task table below; full suite 59 passed / 0 failed |
 | 2 — Security model | **validated** | per-task table below; full suite 67 passed / 0 failed |
-| 3 — PWA frontend | **validated** | implemented and built; served at :8083; containerized browser suite (`pwa-test`) 3/3 flows + Lighthouse 97/100/96 + axe clean (see notes) |
+| 3 — PWA frontend | **validated** | implemented and built; served at :8083; containerized browser suite (`pwa-test`) 4/4 specs including WebAuthn + Lighthouse 97/100/96 + WCAG 2.1 A/AA audit clean (see notes) |
 | 4 — APK pipeline | **partial → validated (pipeline)** | first real signed APK built locally with a throwaway keystore: apksigner v2/v3, `cu.maild.adminng` 0.1.0, minSdk 24; only the operator-keystore CI run and the on-device install remain |
-| 5 — Hardening & decision | **partial** | headers/CSP + docs; full `test.sh` 67/67 green, containerized browser + a11y gates, per-feature PostfixAdmin table recorded; WebAuthn deferred, fresh-cycle run and APK CI run still open |
+| 5 — Hardening & decision | **partial** | headers/CSP + docs; WebAuthn delivered and validated with a Chromium virtual platform authenticator; fresh-cycle run and APK CI run still open |
 
 ### Phase 0 — task status
 
@@ -119,7 +119,8 @@ running it) · **validated** (verified by running the acceptance checks).
   NAT is unaffected, and `adminng.py --reset-ratelimit <user>` clears it from another process.
 - **Backup credentials:** `~/.pgpass` needs one line per database; the script now writes both
   (catalogue + adminng) — the first attempt failed with `fe_sendauth: no password supplied`.
-- **WebAuthn/passkeys** remain Phase 5; TOTP is the enforced second factor for now.
+- **WebAuthn/passkeys** are an optional Phase 6.1 platform-authenticator path;
+  password + TOTP remains available as the fallback.
 
 ### Phase 3 — task status
 
@@ -141,8 +142,8 @@ running it) · **validated** (verified by running the acceptance checks).
   image, so a missing Spanish key fails the image build.
 - Browser suite: **`adminng/pwa-test`** — a dev-only one-shot container (service `pwa-test`)
   with Playwright 1.64.1 + Chromium and Lighthouse 12.8.2 baked in. `./adminng/pwa-test/run.sh
-  verify` runs `flows`, `installable`, `superadmin` and the Lighthouse budget; no host Node or
-  `npx playwright install` is involved. **3/3 passing.**
+  verify` runs `flows`, `installable`, `superadmin`, `webauthn` and the Lighthouse budget; no
+  host Node or `npx playwright install` is involved. **4/4 passing.**
 - The container tunnels `http://localhost:8083` to `http://adminng:80`: `localhost` is a secure
   context, so the service worker / installability / offline assertions behave exactly as on the
   host or behind the production ingress. (Verified the hard way: `http://adminng` makes
@@ -171,8 +172,8 @@ running it) · **validated** (verified by running the acceptance checks).
   runtime server address. The runtime setting exists for bundled-asset builds
   (`VITE_REQUIRE_SERVER_URL=1`) and to repoint a build from Settings; it clears the session and
   the device identity on change.
-- Session storage is `localStorage` (device id + token pair); the PKCE/WebAuthn upgrade is the
-  Phase-5 credential work.
+- Session storage is `localStorage` (device id + token pair); the WebAuthn credential flow is
+  implemented in Phase 6.1.
 - Artifacts are host-owned: the harness runs as root (docker socket, Chromium sandbox off) and
   `entrypoint.sh` chowns `ldata/e2e` back to the invoking uid/gid on exit.
 
@@ -280,9 +281,9 @@ archives.
 
 ## Phase 3 — PWA frontend
 
-**Status:** validated — implemented, built, and exercised in the `pwa-test` container by three
-Playwright specs (flows, installability, superadmin) plus the Lighthouse budget and an axe audit
-(see the task table at the top of this document and the verification block below).
+**Status:** validated — implemented, built, and exercised in the `pwa-test` container by four
+Playwright specs (flows, installability, superadmin, WebAuthn) plus the Lighthouse budget and an
+axe audit (see the task table at the top of this document and the verification block below).
 
 **Goal:** the complete AdminNG experience against the finished API — the
 everyday admin work is fully doable from a phone.
@@ -376,19 +377,18 @@ phone against the dev stack reaches a working login (and the device shows up
 
 ## Phase 5 — Hardening, integration & the deprecation decision
 
-**Status:** partial — hardening done; the browser E2E/Lighthouse and accessibility gates are
-containerized (`pwa-test`) and green, the full `./test.sh` suite passes (67/67), and the
-per-feature PostfixAdmin decision table is recorded below. Open: WebAuthn (deliberately
-deferred), the fresh `down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle, and the first APK
-build with the operator keystore.
+**Status:** partial — hardening done; browser E2E/Lighthouse and accessibility gates are
+containerized (`pwa-test`) and green, WebAuthn is implemented and browser-validated, and the
+per-feature PostfixAdmin decision table is recorded below. Open: the fresh `down` →
+`rm -rf ldata/` → `bootstrap-dev.sh` cycle and the first APK build with the operator keystore.
 
 **Goal:** production-grade confidence and an explicit, informed decision on
 PostfixAdmin's future.
 
 Tasks:
-1. WebAuthn/passkeys (Android platform authenticator as the biometric
-   shortcut in login + re-auth; `python-fido2`/`py_webauthn` — the original
-   draft's "Moshi" reference was an error).
+1. ~~WebAuthn/passkeys (Android platform authenticator as the biometric shortcut in login +
+   re-auth)~~ — implemented in Phase 6.1 using the `webauthn` package; physical-phone validation
+   remains a manual check on the operator's HTTPS DNS origin.
 2. Security audit pass: headers, CORS (none needed — same origin via nginx),
    token lifetimes, lockout policy, `ADMINNG_SECRET_KEY` handling, the
    read-only vmail mount surface, nginx hardening review.
@@ -480,14 +480,14 @@ is recorded and its follow-up plan exists.
 
 | # | Task | Status | Decision / evidence |
 |---|---|---|---|
-| 1 | WebAuthn / passkeys | **deferred (decision)** | TOTP is enforced for superadmins and fully tested; passkeys need a platform-authenticator harness (browser/phone) that this environment cannot provide. Tracked as Phase 6 in the roadmap below. |
+| 1 | WebAuthn / passkeys | **implemented + browser-validated** | API origin-policy tests and the CDP virtual platform authenticator flow cover password-proven enrollment, superadmin login without TOTP, biometric re-auth and the armed delete confirmation. The physical Android authenticator remains a manual check on the operator's HTTPS DNS origin. |
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
-| 3 | `test.sh` consolidation | **validated** | **71 checks**; full **71 passed / 0 failed / 0 skipped** run against the current stack; 36 API unit/integration tests passed (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
+| 3 | `test.sh` consolidation | **validated** | **71 checks**; full **71 passed / 0 failed / 0 skipped** run against the current stack; 41 API unit/integration tests passed (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
 | 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** installed as the escape hatch, but each feature now has an explicit port/dead/keep call in the table below. AdminNG is the primary UI for domains/accounts/aliases/admins/devices/logs. |
 
-**Phase 5 follow-ups (explicitly open):** WebAuthn/passkeys; APK CI first run with the operator
-keystore; fresh-cycle `test.sh` run. Closed here: browser E2E + Lighthouse installability
+**Phase 5 follow-ups (explicitly open):** APK CI first run with the operator keystore;
+fresh-cycle `test.sh` run. Closed here: WebAuthn/passkeys, browser E2E + Lighthouse installability
 (dev-only `pwa-test` service, `run.sh verify`), automated i18n key-completeness check (inside
 `npm run build`, so the image build and CI gate it), the axe accessibility audit (`run.sh a11y`)
 and the per-feature PostfixAdmin decision table (below).
@@ -504,11 +504,22 @@ the TOTP flow. The client stores the checkbox preference per device and tracks
 the selected session's idle window. Password re-authentication and the armed
 confirmation remain mandatory for destructive operations.
 
-### Phase 6.1 — biometric sign-in (planned)
+### Phase 6.1 — biometric sign-in (implemented)
 
-WebAuthn/passkeys will support device-bound login and re-auth, with password
-fallback. The proposed data model is `webauthn_credential` plus a challenge
-store, and the browser uses `navigator.credentials.*`.
+Migration `006_webauthn.sql` stores public credentials scoped to
+`(username, device_id)` and one-use challenges with purpose, configured origin,
+RP ID, and expiry. The API uses `webauthn` to require a verified platform
+authenticator for registration, login, and re-authentication. Registration and
+removal require password proof; biometric login works on the same approved
+device without the password/TOTP screens, while password + TOTP remains the
+fallback. Successful biometric re-auth returns the existing 30-second
+destructive-action token, so `ConfirmDelete` retains its armed confirmation.
+Revoking a device removes its WebAuthn credentials. `ADMINNG_WEBAUTHN_RP_ID`,
+`ADMINNG_WEBAUTHN_ORIGINS`, and `ADMINNG_WEBAUTHN_CHALLENGE_TTL` configure the
+RP and ceremony policy; production origins must be exact HTTPS origins. API
+policy tests and `webauthn.spec.ts` exercise the service and full ceremony
+through Chromium's CDP virtual platform authenticator. A real phone check
+requires a trusted HTTPS DNS origin (not the dev LAN IP).
 
 ### Phase 6.2 — domain aliases (implemented)
 
@@ -522,17 +533,16 @@ delivery through an alias domain and refusal after deactivation.
 
 ### Other follow-ups
 
-1. WebAuthn/passkeys for login and re-auth (data model: `webauthn_credential`, challenge store).
+1. ~~WebAuthn/passkeys for login and re-auth~~ — implemented in Phase 6.1 and validated with
+   the `pwa-test` virtual platform authenticator.
 2. ~~Browser E2E + Lighthouse in CI~~ — done in Phase 3: `adminng/pwa-test` + `run.sh verify`,
    wired into `.github/workflows/pwa-e2e.yml`; the a11y run publishes its JSON reports.
 3. Automated i18n completeness check — done: `npm run i18n:check` runs inside `npm run build`,
    which is the frontend image build (and the CI gate).
 4. Per-feature PostfixAdmin decision table — **recorded below**; the remaining work is the
    Phase-7 implementation of the "port" rows.
-5. WebAuthn/passkey login and re-auth (Phase 6.1) — design: `webauthn_credential` table
-   (credential id, public key, sign count, transports, device binding), a challenge store in
-   the `adminng` DB and `py_webauthn` on the API; the PWA calls `navigator.credentials.*` for
-   login **and** the re-auth step, falling back to the password when unavailable.
+5. ~~WebAuthn/passkey login and re-auth (Phase 6.1)~~ — implemented; see the Phase 6.1
+   notes for the schema, origin configuration and device-revocation behavior.
 
 ### Phase 6 table — the PostfixAdmin feature decisions
 

@@ -137,8 +137,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   compose network (`/api/v1/` proxy).
 - Two databases on `db`: the PostfixAdmin catalogue `POSTGRES_DB` (read/write, **zero
   DDL** — it writes rows exactly like PostfixAdmin: md5crypt, `maildir = domain/local/`,
-  quota in bytes) and its own `ADMINNG_DB` (devices, sessions, TOTP credentials, audit
-  trail), whose schema it migrates at boot from `adminng/api/migrations/`.
+  quota in bytes) and its own `ADMINNG_DB` (devices, sessions, TOTP credentials,
+  device-scoped WebAuthn credentials/challenges, audit trail), whose schema it migrates at
+  boot from `adminng/api/migrations/`.
 - Mounts the vmail volume **read-only**: quota usage comes from the Maildir++ `.maildirsize`
   files (never a Dovecot secret, never a write). Because maildirs are `0700 vmail:vmail`,
   the process runs as **uid/gid 5000** (the vmail owner): read-only mount + matching uid =
@@ -160,6 +161,12 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `ADMINNG_SECRET_KEY`), refresh rotation, the 30-second re-auth token required by
   every destructive route (`POST /auth/reauth-confirm`) and the audit trail
   (`GET /logs`). Lockout: 5 failures per username+IP → 429 for 15 minutes.
+- Phase 6.1 adds `/auth/webauthn/*`: password-proven platform-credential enrollment/removal,
+  device-scoped biometric login (including superadmin TOTP bypass after user verification),
+  and biometric destructive-action re-auth that mints the existing short-lived validation
+  token. Challenges are single-use and expire after `ADMINNG_WEBAUTHN_CHALLENGE_TTL`; the
+  exact `ADMINNG_WEBAUTHN_ORIGINS` allowlist and `ADMINNG_WEBAUTHN_RP_ID` must match the
+  browser. Device revocation deletes its credentials. Password + TOTP remains the fallback.
 - `ADMINNG_SECRET_KEY` is **mandatory** (compose `${ADMINNG_SECRET_KEY:?}` guard):
   it signs the JWTs and encrypts the TOTP seeds; rotating it invalidates sessions
   and enrolled seeds (admins re-enroll).
@@ -167,8 +174,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `--totp-reset`) — the server-side device-authorization path (`adminng/README.md`).
 - HEALTHCHECK: `GET /health`, 200 only when the adminng database answers.
 - env: defaults baked in `adminng/api/Dockerfile` (`POSTGRES_*`, `ADMINNG_DB`,
-  `ADMINNG_*` TTLs/toggles); the operator file is the `env_file:` and overrides any of them;
-  `POSTGRES_PASSWORD` is passed explicitly with the compose `${POSTGRES_PASSWORD:?}` guard.
+  `ADMINNG_*` TTLs/toggles and localhost-only WebAuthn development origins); production
+  operators must override the WebAuthn RP ID/origin allowlist for their public HTTPS host.
+  The operator file is the `env_file:` and overrides image defaults; `POSTGRES_PASSWORD` is
+  passed explicitly with the compose `${POSTGRES_PASSWORD:?}` guard.
 
 ## adminng — AdminNG frontend (PWA)
 

@@ -42,6 +42,8 @@
     "password": "Password",
     "remember": "Remember this device for 24 hours",
     "submit": "Continue",
+    "biometric": "Sign in with biometrics",
+    "biometricFailed": "Biometric sign-in failed or is not enabled on this device. Use your password instead.",
     "code": "Authenticator code",
     "verify": "Verify",
     "wrong": "Invalid credentials",
@@ -168,10 +170,22 @@
     "title": "Security confirmation",
     "body": "This action is permanent. Re-authenticate to continue.",
     "password": "Administrator password",
+    "biometric": "Use biometrics",
+    "passwordMethod": "Use password",
     "armed": "Confirm in {{seconds}}s…",
     "proceed": "Delete",
     "type": "Type the name to confirm"
   },
-  "settings": { "superadmin": "superadmin" },
+  "settings": {
+    "superadmin": "superadmin",
+    "biometricTitle": "Biometric sign-in",
+    "biometricUnavailable": "Biometric sign-in is not configured by the server administrator.",
+    "biometricEnabled": "A platform credential is enabled for this device.",
+    "biometricDisabled": "No biometric credential is registered for this device.",
+    "biometricPassword": "Administrator password to enable or disable",
+    "biometricEnable": "Enable on this device",
+    "biometricDisable": "Disable on this device",
+    "biometricFailure": "The biometric operation could not be completed."
+  },
   "quota": { "of": "of" }
 }

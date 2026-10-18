@@ -18,6 +18,20 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-17 1.6.0-dev
+- Added: **AdminNG Phase 6.1 — device-scoped WebAuthn sign-in**. Migration
+  `006_webauthn.sql` stores platform credentials per administrator/device and short-lived,
+  single-use challenges. Password-proven setup/removal, user-verified biometric login (also
+  bypassing superadmin TOTP on that device), and biometric destructive-action re-auth are
+  available in the PWA; password/TOTP fallback and the armed confirmation remain.
+- Security: WebAuthn ceremonies validate exact configured origins and RP ID, require user
+  verification, and respect device approval/revocation; revoking a device deletes its
+  credentials. Production operators configure `ADMINNG_WEBAUTHN_RP_ID` and
+  `ADMINNG_WEBAUTHN_ORIGINS`; the localhost image defaults are development-only.
+- Tests: API origin-policy coverage and `pwa-test`'s Chromium CDP virtual platform
+  authenticator exercise registration, superadmin biometric login, and re-authenticated
+  account deletion.
+
 ## 2026-10-16 1.6.0-dev
 - Added: **AdminNG Phase 0 scaffolding** — the next-generation PWA admin interface
   (`adminng/`): a FastAPI backend (`adminng/api/`, service `api`, internal only, no published

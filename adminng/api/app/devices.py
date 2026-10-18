@@ -114,6 +114,9 @@ def set_state(device_id: str, state: str, approved_by: str) -> dict:
         if row is None:
             conn.rollback()
             raise not_found("device", device_id)
+        if state == "REVOKED":
+            cur.execute("DELETE FROM webauthn_challenge WHERE device_id = %s", (device_id,))
+            cur.execute("DELETE FROM webauthn_credential WHERE device_id = %s", (device_id,))
         conn.commit()
     if state == "REVOKED":
         revoke_sessions(device_id)

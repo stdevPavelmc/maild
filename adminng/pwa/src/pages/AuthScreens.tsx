@@ -18,13 +18,15 @@ function ErrorText({ code }: { code: string | null }) {
           ? t('login.rateLimited')
           : code === 'revoked'
             ? t('device.revoked')
+            : code === 'biometric'
+              ? t('login.biometricFailed')
             : t('login.network')
   return <ErrorBanner message={text} />
 }
 
 export function LoginPage() {
   const { t } = useTranslation()
-  const { phase, login, submitCode, enroll, enrollment, loginError, busy } = useAuth()
+  const { phase, login, loginBiometric, submitCode, enroll, enrollment, loginError, busy } = useAuth()
   const [username, setUsername] = useState(localStorage.getItem('adminng.username') ?? '')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
@@ -78,6 +80,20 @@ export function LoginPage() {
             <Button type="submit" className="w-full" disabled={busy}>
               {t('login.submit')}
             </Button>
+            {username.trim().length >= 3 && typeof PublicKeyCredential !== 'undefined' && (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full"
+                disabled={busy}
+                onClick={() => {
+                  localStorage.setItem('adminng.username', username)
+                  void loginBiometric(username, remember)
+                }}
+              >
+                {t('login.biometric')}
+              </Button>
+            )}
           </form>
         )}
 

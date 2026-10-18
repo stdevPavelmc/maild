@@ -333,9 +333,12 @@ self-approve safely. The full how-to lives in `adminng/README.md`.
    (default `superadmin`); a domain admin with an enrolled credential gets
    step 2 enforced, one without (and `none`/not required) authenticates at
    step 1 alone.
-5. WebAuthn/passkeys — the Android biometric shortcut in login and re-auth —
-   are the Phase-5 addition (`python-fido2`/`py_webauthn`; the original
-   draft's "Moshi" reference was an error: Moshi is a serialization library).
+5. Optional WebAuthn platform credentials provide Android biometric login and
+   destructive-action re-auth (implemented in AdminNG Phase 6.1). Challenges
+   are single-use, RP/origin-validated, and device-scoped; password + TOTP
+   remains the fallback. The `webauthn` package is used by the API; the
+   original draft's "Moshi" reference was an error (Moshi is a serialization
+   library).
 
 ### 4.4 Sessions & tokens
 
@@ -359,8 +362,8 @@ applies. Phase 1's plain bearer endpoint is gone.
 
 Destructive routes (delete a domain/mailbox/alias/admin, revoke a device,
 demote an admin) require, **on the final request**, a scoped JWT obtained
-seconds before via `POST /auth/reauth-confirm` (password re-entry, or the
-WebAuthn assertion once passkeys land), with `ADMINNG_REAUTH_TTL`
+seconds before via `POST /auth/reauth-confirm` (password re-entry) or the
+device-bound WebAuthn re-authentication ceremony, with `ADMINNG_REAUTH_TTL`
 (30 s) lifetime, bound to the **same `device_id`** and the specific action
 scope. Missing, expired, scope- or device-mismatched ⇒
 `403 OPERATION_NOT_VERIFIED`. The UI pairs it with the 5-second armed
@@ -412,7 +415,12 @@ confirm button (§6.3) so no destructive click can be a reflex.
 | `POST /auth/login-step2` | device + flow token | `{code}` → `{access_token, refresh_token, expires_in, user{...}}` |
 | `POST /auth/refresh` | refresh token | rotated jti; reuse ⇒ session destroyed |
 | `POST /auth/logout` | access | destroys the session |
-| `POST /auth/reauth-confirm` | access | `{password}` (or WebAuthn assertion, Phase 5) → `{security_validation_token}` (30 s, scoped) |
+| `POST /auth/reauth-confirm` | access | `{password}` → `{security_validation_token}` (30 s, scoped) |
+| `GET /auth/webauthn/status` | access | reports whether WebAuthn is configured and enabled on this device |
+| `POST /auth/webauthn/register/options` · `POST /auth/webauthn/register/verify` | access (+ password proof to start) | enroll a platform credential for this device |
+| `DELETE /auth/webauthn/credential` | access + password proof | remove this device's platform credential |
+| `POST /auth/webauthn/login/options` · `POST /auth/webauthn/login/verify` | device | device-bound biometric login; options may request a remembered session |
+| `POST /auth/webauthn/reauth/options` · `POST /auth/webauthn/reauth/verify` | access | mint the existing short-lived destructive-action validation token |
 | `GET /admin/devices` | superadmin | cursor list; `?state=PENDING` is the pending queue (drives the UI alert) |
 | `PUT /admin/devices/{device_id}/state` | superadmin + reauth | `{action:"APPROVE"\|"REVOKE"}` → `{device_id, new_state, authorized_by}` |
 | `GET /search?q=` | access | mixed user/alias/domain results, tenant-scoped, `ADMINNG_SEARCH_LIMIT` per type |
@@ -644,8 +652,6 @@ Every phase must respect these MailD core principles:
 
 *End of the consolidated draft. Companion: [plan.md](plan.md) (implementation
 roadmap) · [../README.md](../README.md) (device authorization).*
-
-
 
 
 

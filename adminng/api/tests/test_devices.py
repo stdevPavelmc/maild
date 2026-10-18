@@ -46,6 +46,30 @@ class DeviceLifecycle(unittest.TestCase):
                 "INSERT INTO session (jti, username, device_id) VALUES (%s, %s, %s)",
                 (uuid.uuid4().hex, USERNAME, DEVICE),
             )
+            cur.execute(
+                """
+                INSERT INTO webauthn_credential
+                       (credential_id, username, device_id, public_key)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (uuid.uuid4().hex, USERNAME, DEVICE, b"test-public-key"),
+            )
+            cur.execute(
+                """
+                INSERT INTO webauthn_challenge
+                       (challenge_id, challenge, username, device_id, purpose,
+                        expected_origin, rp_id, expires_at)
+                VALUES (%s, %s, %s, %s, 'login', %s, %s, now() + interval '5 minutes')
+                """,
+                (
+                    uuid.uuid4(),
+                    "test-challenge",
+                    USERNAME,
+                    DEVICE,
+                    "http://localhost:8083",
+                    "localhost",
+                ),
+            )
             conn.commit()
 
         revoked = devices.set_state(DEVICE, "REVOKED", "unit-test")
@@ -57,6 +81,17 @@ class DeviceLifecycle(unittest.TestCase):
             rows = cur.fetchall()
         self.assertEqual(len(rows), 1)
         self.assertIsNotNone(rows[0]["revoked_at"])
+        with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT count(*) AS n FROM webauthn_credential WHERE device_id = %s",
+                (DEVICE,),
+            )
+            self.assertEqual(cur.fetchone()["n"], 0)
+            cur.execute(
+                "SELECT count(*) AS n FROM webauthn_challenge WHERE device_id = %s",
+                (DEVICE,),
+            )
+            self.assertEqual(cur.fetchone()["n"], 0)
 
     def test_revoked_device_cannot_re_register(self):
         devices.register(DEVICE, "web", "Unit test", None)

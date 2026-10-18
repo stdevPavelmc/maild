@@ -22,6 +22,7 @@ import {
   type DeviceState,
   type User,
 } from '../lib/api'
+import { getPlatformCredential } from '../lib/webauthn'
 
 type Phase = 'boot' | 'pending' | 'login' | 'enroll' | 'twofa' | 'ready'
 
@@ -34,6 +35,7 @@ type AuthContextValue = {
   busy: boolean
   shielded: boolean
   login: (username: string, password: string, remember?: boolean) => Promise<void>
+  loginBiometric: (username: string, remember?: boolean) => Promise<void>
   submitCode: (code: string) => Promise<void>
   enroll: (code: string) => Promise<void>
   enrollment: { secret: string; otpauth_uri: string } | null
@@ -186,6 +188,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const loginBiometric = useCallback(
+    async (username: string, remember = false) => {
+      setBusy(true)
+      setLoginError(null)
+      try {
+        const options = await api.webauthnLoginOptions(username, remember)
+        const credential = await getPlatformCredential(options.public_key)
+        const result = await api.webauthnLoginVerify(
+          username,
+          options.challenge_id,
+          credential,
+        )
+        saveTokens({
+          access: result.access_token,
+          refresh: result.refresh_token,
+          remember: result.remember,
+          idle_timeout: result.idle_timeout,
+        })
+        setUser(result.user)
+        setDeviceState('APPROVED')
+        credentials.current = null
+        setPhase('ready')
+      } catch (error) {
+        guard(error)
+        if (error instanceof ApiError && error.code === 'RATE_LIMITED') {
+          setLoginError('RATE_LIMITED')
+        } else {
+          setLoginError('biometric')
+        }
+      } finally {
+        setBusy(false)
+      }
+    },
+    [guard],
+  )
+
   const submitCode = useCallback(
     async (code: string) => {
       if (!flow.current || flow.current.kind !== '2fa') return
@@ -289,6 +327,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       busy,
       shielded,
       login,
+      loginBiometric,
       submitCode,
       enroll,
       enrollment,
@@ -305,6 +344,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       busy,
       shielded,
       login,
+      loginBiometric,
       submitCode,
       enroll,
       enrollment,

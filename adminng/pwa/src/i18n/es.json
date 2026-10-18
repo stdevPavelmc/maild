@@ -42,6 +42,8 @@
     "password": "Contraseña",
     "remember": "Recordar este dispositivo durante 24 horas",
     "submit": "Continuar",
+    "biometric": "Iniciar sesión con biometría",
+    "biometricFailed": "No se pudo iniciar sesión con biometría o no está activada en este dispositivo. Usa tu contraseña.",
     "code": "Código del autenticador",
     "verify": "Verificar",
     "wrong": "Credenciales inválidas",
@@ -168,10 +170,22 @@
     "title": "Confirmación de seguridad",
     "body": "Esta acción es permanente. Vuelve a autenticarte para continuar.",
     "password": "Contraseña del administrador",
+    "biometric": "Usar biometría",
+    "passwordMethod": "Usar contraseña",
     "armed": "Confirma en {{seconds}}s…",
     "proceed": "Eliminar",
     "type": "Escribe el nombre para confirmar"
   },
-  "settings": { "superadmin": "superadministrador" },
+  "settings": {
+    "superadmin": "superadministrador",
+    "biometricTitle": "Inicio de sesión biométrico",
+    "biometricUnavailable": "El administrador del servidor no ha configurado el inicio biométrico.",
+    "biometricEnabled": "Hay una credencial de plataforma activada para este dispositivo.",
+    "biometricDisabled": "No hay ninguna credencial biométrica registrada para este dispositivo.",
+    "biometricPassword": "Contraseña del administrador para activar o desactivar",
+    "biometricEnable": "Activar en este dispositivo",
+    "biometricDisable": "Desactivar en este dispositivo",
+    "biometricFailure": "No se pudo completar la operación biométrica."
+  },
   "quota": { "of": "de" }
 }
