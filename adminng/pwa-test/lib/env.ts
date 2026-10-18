@@ -84,9 +84,13 @@ export function adminngCli(...args: string[]): string {
 /**
  * The current TOTP code for an enrolled admin, read from the stored (encrypted)
  * seed by `tests/totp_code.py` — the same helper test.sh uses. Nothing is
- * reset, so an authenticator enrolled by a human keeps working. `next` asks for
- * the following 30-second step (the API accepts ±1), which covers a step already
- * consumed by another login.
+ * reset, so an authenticator enrolled by a human keeps working.
+ *
+ * `next` asks for the following 30-second step. The API accepts it (±1 window)
+ * but records a step *ahead of the clock*, so a login right after finds its
+ * natural codes already consumed — prefer waiting out the window (see
+ * `loginSuperadmin`). Kept for parity with `tests/totp_code.py --next`, which
+ * test.sh uses for the one post-enrollment login.
  */
 export function totpCode(user: string, next = false): string {
   const args = ['tests/totp_code.py', user, ...(next ? ['--next'] : [])]

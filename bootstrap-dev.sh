@@ -260,6 +260,12 @@ fi
 # ------------------------------------------------------------ bind mounts ----
 step "fresh bind mounts"
 
+# Docker auto-creates missing bind-mount host paths (parents included) as root: on a truly
+# fresh tree (no ldata/ yet) the first bind_prep below would leave ldata/ itself root-owned
+# and every later mkdir (ldata/certs, …) would fail with EACCES. Create it as the invoking
+# user up front.
+mkdir -p "${SCRIPT_DIR}/ldata"
+
 # Unlike a named volume (which docker pre-populates from the image), a fresh *bind* mount is
 # created empty: the amavis TEMPBASE disappears (amavisd-new then dies with "No TEMPBASE
 # directory") and clamav cannot write its freshclam.dat. Re-create the missing pieces from a

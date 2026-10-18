@@ -85,16 +85,24 @@ export async function loginSuperadmin(page: Page): Promise<void> {
     await verify.click()
   } else {
     await expect(verify).toBeVisible()
-    await codeInput.fill(totpCode(SYSADMIN))
-    await verify.click()
 
-    // The current step may already be consumed (a human on the phone, test.sh).
-    // One retry with the next step stays inside the API's ±1 window; the
-    // 5-attempt lockout is not at risk.
-    await domains.waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {})
-    if (!(await domains.isVisible().catch(() => false))) {
-      await codeInput.fill(totpCode(SYSADMIN, true))
+    // Replay protection refuses a step at or below the last consumed one, and a
+    // previous login (this suite, test.sh, a phone) may hold the current 30 s
+    // window. So retry only after the window rolls over, with the then-current
+    // code — guaranteed ahead of whatever was consumed. Never submit a *future*
+    // (--next) code: it is accepted (±1 window) but records a step ahead of the
+    // clock, and the next login inside that window finds both its natural codes
+    // already consumed — the flake this loop replaces. The api container and
+    // this harness share the host clock, so Date.now() is the TOTP window.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) await page.waitForTimeout(30_000 - (Date.now() % 30_000) + 500)
+      await codeInput.fill(totpCode(SYSADMIN))
       await verify.click()
+      const signedIn = await domains
+        .waitFor({ state: 'visible', timeout: 6_000 })
+        .then(() => true)
+        .catch(() => false)
+      if (signedIn) return
     }
   }
 

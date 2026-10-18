@@ -6,18 +6,21 @@
  * where a mouse — not a thumb — is the pointer).
  */
 
-import { type ReactNode } from 'react'
+import { Children, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '../lib/utils'
 
-/** The responsive card list: 1 column on phones, 2/3/4 on wider screens. */
+/** Keep catalogue cards readable: 1 column on phones, 2 columns on wider screens. */
 export function CardGrid({ children, className }: { children: ReactNode; className?: string }) {
+  // An empty <ul role="list"> is zero-height (invisible) and pure noise for assistive
+  // tech — the pages render their own empty-state copy next to the grid.
+  if (Children.count(children) === 0) return null
   return (
     <ul
       role="list"
       className={cn(
         'grid grid-cols-1 gap-3',
-        'sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4',
+        'sm:grid-cols-2',
         className,
       )}
     >
@@ -215,4 +218,3 @@ export function ActionRow({ children, label }: { children: ReactNode; label: str
     </div>
   )
 }
-

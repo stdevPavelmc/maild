@@ -19,6 +19,18 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## 2026-10-17 1.6.0-dev
+- Fixed: `bootstrap-dev.sh` aborted with `mkdir: Permission denied` on a truly fresh tree
+  (or after `rm -rf ldata/`): docker auto-creates the missing bind-mount parents as root,
+  so `ldata/` itself ended up root-owned before the script could create `ldata/certs`. The
+  script now creates `ldata/` as the invoking user before the first bind-mount preparation.
+- Fixed: the AdminNG browser suite's TOTP login retry could deadlock a sign-in for up to a
+  minute: retrying with the *next* 30-second step is accepted through the ±1 window but
+  records a step ahead of the clock, so the immediately following login in that window found
+  both of its natural codes already consumed. The helper now waits for the window to roll
+  and submits the fresh current code (`pwa-test/lib/login.ts`).
+- Fixed: empty AdminNG card grids no longer render an invisible empty `role="list"` element.
+- Changed: widened the AdminNG domain, account, alias, administrator, and device cards by
+  keeping catalogue grids to two columns on larger screens (one on phones).
 - Added: **AdminNG Phase 6.1 — device-scoped WebAuthn sign-in**. Migration
   `006_webauthn.sql` stores platform credentials per administrator/device and short-lived,
   single-use challenges. Password-proven setup/removal, user-verified biometric login (also

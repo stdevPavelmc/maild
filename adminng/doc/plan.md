@@ -34,7 +34,7 @@ running it) · **validated** (verified by running the acceptance checks).
 | 2 — Security model | **validated** | per-task table below; full suite 67 passed / 0 failed |
 | 3 — PWA frontend | **validated** | implemented and built; served at :8083; containerized browser suite (`pwa-test`) 4/4 specs including WebAuthn + Lighthouse 97/100/96 + WCAG 2.1 A/AA audit clean (see notes) |
 | 4 — APK pipeline | **partial → validated (pipeline)** | first real signed APK built locally with a throwaway keystore: apksigner v2/v3, `cu.maild.adminng` 0.1.0, minSdk 24; only the operator-keystore CI run and the on-device install remain |
-| 5 — Hardening & decision | **partial** | headers/CSP + docs; WebAuthn delivered and validated with a Chromium virtual platform authenticator; fresh-cycle run and APK CI run still open |
+| 5 — Hardening & decision | **validated** | headers/CSP + docs; WebAuthn validated with a Chromium virtual platform authenticator; full suite green on a fresh `down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle (2026-10-17, details in the task table); only operator-side legs remain (release-keystore APK CI run, physical-phone checks — Phase 4) |
 
 ### Phase 0 — task status
 
@@ -142,8 +142,18 @@ running it) · **validated** (verified by running the acceptance checks).
   image, so a missing Spanish key fails the image build.
 - Browser suite: **`adminng/pwa-test`** — a dev-only one-shot container (service `pwa-test`)
   with Playwright 1.64.1 + Chromium and Lighthouse 12.8.2 baked in. `./adminng/pwa-test/run.sh
-  verify` runs `flows`, `installable`, `superadmin`, `webauthn` and the Lighthouse budget; no
-  host Node or `npx playwright install` is involved. **4/4 passing.**
+  verify` runs `flows`, `installable`, `superadmin`, `webauthn`, `card-layout` and the
+  Lighthouse budget; no host Node or `npx playwright install` is involved. **5/5 passing.**
+- The catalogue card grids are two columns from the 640 px breakpoint up and one on phones;
+  `card-layout.spec.ts` gates the column count on both viewports. `CardGrid` renders nothing
+  when it has no items — an empty `role="list"` is invisible to users yet still matched
+  locators and assistive tech (caught by the first card-layout run).
+- The harness TOTP login retry is window-aware. Retrying with the *next* step (`--next`) is
+  accepted through the API's ±1 window but records a step **ahead of the clock**, so the login
+  immediately after found both of its natural codes already consumed (observed 2026-10-17:
+  superadmin's retry consumed step N+1 at :34; the webauthn login 20 s later failed twice).
+  `loginSuperadmin` now waits for the 30 s window to roll and submits the fresh current code —
+  never a future one.
 - The container tunnels `http://localhost:8083` to `http://adminng:80`: `localhost` is a secure
   context, so the service worker / installability / offline assertions behave exactly as on the
   host or behind the production ingress. (Verified the hard way: `http://adminng` makes
@@ -333,6 +343,7 @@ cd adminng/pwa && npm run i18n:check
 #      ES/EN switch -> offline lockdown
 #   -> installable: manifest fields, active service worker, boot with the network down
 #   -> superadmin: TOTP enrollment + devices panel authorize/revoke through the UI
+#   -> card-layout: catalogue grids render 2 columns on desktop, 1 on phones
 #   -> Lighthouse: performance >= 0.85, accessibility >= 0.9, best-practices >= 0.9
 
 # Review tools (artifacts under ldata/e2e/)
@@ -377,10 +388,13 @@ phone against the dev stack reaches a working login (and the device shows up
 
 ## Phase 5 — Hardening, integration & the deprecation decision
 
-**Status:** partial — hardening done; browser E2E/Lighthouse and accessibility gates are
-containerized (`pwa-test`) and green, WebAuthn is implemented and browser-validated, and the
-per-feature PostfixAdmin decision table is recorded below. Open: the fresh `down` →
-`rm -rf ldata/` → `bootstrap-dev.sh` cycle and the first APK build with the operator keystore.
+**Status:** validated — hardening done; browser E2E/Lighthouse and accessibility gates are
+containerized (`pwa-test`) and green, WebAuthn is implemented and browser-validated, the
+per-feature PostfixAdmin decision table is recorded below, and the fresh
+`down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle is green (2026-10-17: `test.sh`
+71/0/0, browser suite 5/5, Lighthouse in budget). The only open legs are operator-side:
+the first APK build with the operator keystore in CI (Phase 4) and the physical-phone
+install/WebAuthn checks.
 
 **Goal:** production-grade confidence and an explicit, informed decision on
 PostfixAdmin's future.
@@ -482,12 +496,13 @@ is recorded and its follow-up plan exists.
 |---|---|---|---|
 | 1 | WebAuthn / passkeys | **implemented + browser-validated** | API origin-policy tests and the CDP virtual platform authenticator flow cover password-proven enrollment, superadmin login without TOTP, biometric re-auth and the armed delete confirmation. The physical Android authenticator remains a manual check on the operator's HTTPS DNS origin. |
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
-| 3 | `test.sh` consolidation | **validated** | **71 checks**; full **71 passed / 0 failed / 0 skipped** run against the current stack; 41 API unit/integration tests passed (the fresh `down` → `rm -rf ldata/` → bootstrap cycle is still open) |
+| 3 | `test.sh` consolidation | **validated** | **71 checks**; **71 passed / 0 failed / 0 skipped** on a fresh `down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle (2026-10-17), with the browser suite 5/5 + Lighthouse in budget on the same cycle; 41 API unit/integration tests passed. The cycle caught a real fresh-tree bug — docker auto-created the missing `ldata/` bind parent root-owned, so the bootstrap died at `mkdir ldata/certs`; `bootstrap-dev.sh` now creates `ldata/` as the invoking user first |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
 | 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** installed as the escape hatch, but each feature now has an explicit port/dead/keep call in the table below. AdminNG is the primary UI for domains/accounts/aliases/admins/devices/logs. |
 
-**Phase 5 follow-ups (explicitly open):** APK CI first run with the operator keystore;
-fresh-cycle `test.sh` run. Closed here: WebAuthn/passkeys, browser E2E + Lighthouse installability
+**Phase 5 follow-ups (explicitly open):** the APK CI first run with the operator keystore
+(operator-side: repository secrets + a release). Closed here: WebAuthn/passkeys, browser E2E +
+Lighthouse installability, the fresh-cycle `test.sh` run
 (dev-only `pwa-test` service, `run.sh verify`), automated i18n key-completeness check (inside
 `npm run build`, so the image build and CI gate it), the axe accessibility audit (`run.sh a11y`)
 and the per-feature PostfixAdmin decision table (below).
