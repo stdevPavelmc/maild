@@ -55,19 +55,27 @@ def decode(token: str, purpose: str) -> dict:
     return payload
 
 
-def access_token(username: str, device_id: str, superadmin: bool, domains: list[str]) -> str:
+def access_token(
+    username: str,
+    device_id: str,
+    superadmin: bool,
+    domains: list[str],
+    ttl: int | None = None,
+) -> str:
     return encode(
         "access",
         username,
         device_id,
-        settings.ADMINNG_ACCESS_TTL,
+        ttl if ttl is not None else settings.ADMINNG_ACCESS_TTL,
         role="superadmin" if superadmin else "domain_admin",
         domains=domains,
     )
 
 
-def flow_token(username: str, device_id: str) -> str:
-    return encode("2fa", username, device_id, settings.ADMINNG_FLOW_TTL)
+def flow_token(username: str, device_id: str, remember: bool = False) -> str:
+    # `remember` rides the step1 -> step2 token so the choice survives the 2FA
+    # screen without the client sending it twice.
+    return encode("2fa", username, device_id, settings.ADMINNG_FLOW_TTL, remember=remember)
 
 
 def enroll_token(username: str, device_id: str) -> str:

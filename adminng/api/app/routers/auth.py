@@ -12,6 +12,9 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class Step1Request(BaseModel):
     username: str = Field(min_length=3)
     password: str = Field(min_length=1)
+    # "Keep me signed in on this device": mints a 24h access token and a 24h
+    # idle window for this session. Destructive actions still re-auth.
+    remember: bool = False
 
 
 class Step2Request(BaseModel):
@@ -42,7 +45,11 @@ def login_step1(
     device_id: str = Depends(device_header),
 ) -> dict:
     return auth.login_step1(
-        payload.username, payload.password, device_id, audit.client_ip(request)
+        payload.username,
+        payload.password,
+        device_id,
+        audit.client_ip(request),
+        remember=payload.remember,
     )
 
 

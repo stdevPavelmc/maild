@@ -45,6 +45,9 @@ ADMINNG_DB = os.environ.get("ADMINNG_DB", "adminng")
 ADMINNG_API_PORT = _int("ADMINNG_API_PORT", 8080)
 ADMINNG_ACCESS_TTL = _int("ADMINNG_ACCESS_TTL", 600)
 ADMINNG_REFRESH_IDLE_TTL = _int("ADMINNG_REFRESH_IDLE_TTL", 900)
+# A "remember this device" login opts into a 24h window: both the access-token
+# TTL and the refresh idle purge use it; ordinary sessions keep 600/900.
+ADMINNG_REMEMBER_TTL = _int("ADMINNG_REMEMBER_TTL", 86400)
 ADMINNG_REAUTH_TTL = _int("ADMINNG_REAUTH_TTL", 30)
 ADMINNG_AUTO_APPROVE_FIRST = _bool("ADMINNG_AUTO_APPROVE_FIRST", False)
 ADMINNG_TOTP_REQUIRED = os.environ.get("ADMINNG_TOTP_REQUIRED", "superadmin")

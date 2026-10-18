@@ -224,6 +224,14 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   on networks whose IPv4 route to `dl.google.com` answers 404 (`DOCKER_NETWORK=host` +
   `JAVA_TOOL_OPTIONS` are documented for that case). `minSdkVersion` is 24 because
   `androidbrowserhelper` 2.7.4 refuses to merge with 21.
+- Added: **remember this device for 24 hours** in the AdminNG login screen.
+  Migration `005_session_remember.sql` records the choice per refresh session;
+  `ADMINNG_REMEMBER_TTL` (86400 seconds by default) applies to access-token
+  expiry and refresh idle expiry, including after refresh rotation and TOTP.
+  The PWA retains the preference per device and tracks that session's idle
+  timeout. Destructive actions still require password re-authentication and
+  the armed confirmation; `test.sh` covers the remembered TTL and the re-auth
+  negative.
 
 ## 2026-10-17 1.5.1-rc
 - Changed: **the `mua` (webmail) base image moved from `php:8.3-apache` to `php:8.5-apache`**

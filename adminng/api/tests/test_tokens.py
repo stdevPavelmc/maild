@@ -34,9 +34,16 @@ class TokenTests(unittest.TestCase):
     def test_flow_and_reauth_ttls(self):
         flow = tokens.flow_token("a@b.co", DEVICE)
         self.assertEqual(tokens.decode(flow, "2fa")["did"], DEVICE)
+        remembered_flow = tokens.flow_token("a@b.co", DEVICE, remember=True)
+        self.assertTrue(tokens.decode(remembered_flow, "2fa")["remember"])
         reauth = tokens.reauth_token("a@b.co", DEVICE)
         claims = tokens.decode(reauth, "reauth")
         self.assertEqual(claims["scope"], "destructive")
+
+    def test_access_token_custom_ttl(self):
+        token = tokens.access_token("a@b.co", DEVICE, False, [], ttl=86400)
+        claims = tokens.decode(token, "access")
+        self.assertEqual(claims["exp"] - claims["iat"], 86400)
 
 
 if __name__ == "__main__":

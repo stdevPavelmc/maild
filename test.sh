@@ -1330,7 +1330,7 @@ else
 
     # I3 — TOTP policy: superadmin must enroll on the first login
     adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
-        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\",\"remember\":true}"
     NEED_NEXT=0
     if printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_TOTP_ENROLLMENT ; then
         ET="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf enrollment_token)"
@@ -1342,7 +1342,7 @@ else
             "{\"enrollment_token\":\"$ET\",\"code\":\"$CODE\"}"
         I3_C="$ADMINNG_CODE"
         adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
-            "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
+            "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\",\"remember\":true}"
         if [ "$I3_C" = 200 ] && printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_2FA ; then
             t_ok "I3 superadmin enrolls TOTP (QR/otpauth) and step1 then requires the 2FA code"
             NEED_NEXT=1
@@ -1366,17 +1366,22 @@ else
         # replay/window guard: retry once with the next step
         FLOW="$(curl -s -X POST "$API_BASE/auth/login-step1" -H "X-Device-ID: $ADMINNG_DEVICE" \
             -H 'Content-Type: application/json' \
-            --data "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}" | adminng_jqf flow_token)"
+            --data "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\",\"remember\":true}" | adminng_jqf flow_token)"
         CODE="$(adminng_code "$DEPLOY_ADMIN" --next)"
         adminng_call POST /auth/login-step2 "$ADMINNG_DEVICE" "" \
             "{\"flow_token\":\"$FLOW\",\"code\":\"$CODE\"}"
     fi
     ADMINNG_TOKEN="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
     ADMINNG_REFRESH="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf refresh_token)"
+    I4_LOGIN="$ADMINNG_BODY"
+    REMEMBER_TTL="$(dcx api python -c 'from app import settings; print(settings.ADMINNG_REMEMBER_TTL)' 2>/dev/null | tr -d ' \r\n')"
     adminng_call GET /auth/me "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
-    if [ -n "$ADMINNG_TOKEN" ] && [ -n "$ADMINNG_REFRESH" ] &&
+    if [ -n "$ADMINNG_TOKEN" ] && [ -n "$ADMINNG_REFRESH" ] && [ -n "$REMEMBER_TTL" ] &&
+       printf '%s' "$I4_LOGIN" | grep -q "\"remember\":true" &&
+       printf '%s' "$I4_LOGIN" | grep -q "\"expires_in\":$REMEMBER_TTL" &&
+       printf '%s' "$I4_LOGIN" | grep -q "\"idle_timeout\":$REMEMBER_TTL" &&
        printf '%s' "$ADMINNG_BODY" | grep -q '"superadmin":true' ; then
-        t_ok "I4 login-step2 issues the device-bound token pair and /auth/me is the superadmin"
+        t_ok "I4 remembered login carries its configured token and refresh idle TTL through TOTP"
     else
         t_fail "I4 step2/login (body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
     fi
@@ -1447,7 +1452,7 @@ else
     SV="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
     if [ "$I10_NO" = 403 ] && printf '%s' "$I10_B" | grep -q OPERATION_NOT_VERIFIED &&
        [ -n "$SV" ] ; then
-        t_ok "I10 DELETE without X-Security-Validation-Token is refused (403 OPERATION_NOT_VERIFIED); reauth mints the 30 s token"
+        t_ok "I10 remembered login still requires password re-auth + the armed confirm for DELETE"
     else
         t_fail "I10 re-auth negative (delete=$I10_NO token_len=${#SV})"
     fi
@@ -1500,13 +1505,22 @@ else
     fi
 
     # I13 — refresh rotation + reuse detection
+    REFRESH_HASH="$(dcx api python -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' \
+        "$ADMINNG_REFRESH" 2>/dev/null | tr -d ' \r\n')"
+    dcx db psql -U maild -d adminng -q -c \
+        "UPDATE session SET last_used_at=now()-interval '16 minutes' WHERE jti='$REFRESH_HASH';" \
+        > /dev/null 2>&1
     adminng_call POST /auth/refresh "$ADMINNG_DEVICE" "" "{\"refresh_token\":\"$ADMINNG_REFRESH\"}"
     I13_OK="$ADMINNG_CODE"
     NEW_AT="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
     NEW_RT="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf refresh_token)"
+    I13_BODY="$ADMINNG_BODY"
     adminng_call POST /auth/refresh "$ADMINNG_DEVICE" "" "{\"refresh_token\":\"$ADMINNG_REFRESH\"}"
-    if [ "$I13_OK" = 200 ] && [ -n "$NEW_AT" ] && [ "$ADMINNG_CODE" = 401 ] ; then
-        t_ok "I13 refresh rotates the jti and a replayed refresh token is rejected"
+    if [ "$I13_OK" = 200 ] && [ -n "$NEW_AT" ] &&
+       printf '%s' "$I13_BODY" | grep -q "\"remember\":true" &&
+       printf '%s' "$I13_BODY" | grep -q "\"idle_timeout\":$REMEMBER_TTL" &&
+       [ "$ADMINNG_CODE" = 401 ] ; then
+        t_ok "I13 remembered refresh survives >15 min idle, rotates the jti and rejects reuse"
         ADMINNG_TOKEN="$NEW_AT" ; ADMINNG_REFRESH="$NEW_RT"
     else
         t_fail "I13 refresh rotation (first=$I13_OK reuse=$ADMINNG_CODE)"
@@ -1580,6 +1594,4 @@ if [ "$T_FAIL" -gt 0 ] ; then
 fi
 printf '  %sOK: every executed check passed%s\n' "$C_OK" "$C_OFF"
 exit 0
-
-
 

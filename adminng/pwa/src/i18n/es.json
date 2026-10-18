@@ -40,6 +40,7 @@
     "title": "Iniciar sesión",
     "username": "Dirección del administrador",
     "password": "Contraseña",
+    "remember": "Recordar este dispositivo durante 24 horas",
     "submit": "Continuar",
     "code": "Código del autenticador",
     "verify": "Verificar",

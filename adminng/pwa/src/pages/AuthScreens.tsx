@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useTranslation } from 'react-i18next'
+import { loadRememberPreference, saveRememberPreference } from '../lib/api'
 import { useAuth } from '../store/AuthContext'
 import { Button } from '../components/ui/button'
 import { ErrorBanner, Field, Input } from '../components/kit'
@@ -27,11 +28,12 @@ export function LoginPage() {
   const [username, setUsername] = useState(localStorage.getItem('adminng.username') ?? '')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
+  const [remember, setRemember] = useState(loadRememberPreference)
 
   const submitPassword = (event: React.FormEvent): void => {
     event.preventDefault()
     localStorage.setItem('adminng.username', username)
-    void login(username, password)
+    void login(username, password, remember)
   }
 
   return (
@@ -60,6 +62,19 @@ export function LoginPage() {
                 autoComplete="current-password"
               />
             </Field>
+            <label className="flex items-center gap-2 text-sm text-slate-300">
+              <input
+                type="checkbox"
+                checked={remember}
+                onChange={(event) => {
+                  const checked = event.target.checked
+                  setRemember(checked)
+                  saveRememberPreference(checked)
+                }}
+                className="h-4 w-4 accent-blue-600"
+              />
+              {t('login.remember')}
+            </label>
             <Button type="submit" className="w-full" disabled={busy}>
               {t('login.submit')}
             </Button>

@@ -12,6 +12,7 @@
 const DEVICE_KEY = 'adminng.device'
 const TOKENS_KEY = 'adminng.tokens'
 const BASE_KEY = 'adminng.baseUrl'
+const REMEMBER_KEY = 'adminng.remember'
 
 /**
  * Server base URL. Empty string means "same origin as the PWA" (the normal web
@@ -56,11 +57,25 @@ export async function probeServer(url: string): Promise<void> {
 export function clearSession(): void {
   localStorage.removeItem(TOKENS_KEY)
   localStorage.removeItem(DEVICE_KEY)
+  localStorage.removeItem(REMEMBER_KEY)
   localStorage.removeItem('adminng.lastActivity')
   localStorage.removeItem('adminng.domain')
 }
 
-export type Tokens = { access: string; refresh: string }
+export type Tokens = {
+  access: string
+  refresh: string
+  remember?: boolean
+  idle_timeout?: number
+}
+
+export function loadRememberPreference(): boolean {
+  return localStorage.getItem(REMEMBER_KEY) === 'true'
+}
+
+export function saveRememberPreference(remember: boolean): void {
+  localStorage.setItem(REMEMBER_KEY, String(remember))
+}
 export type SessionState = 'REQUIRES_TOTP_ENROLLMENT' | 'REQUIRES_2FA' | 'AUTHENTICATED'
 export type DeviceState = 'PENDING' | 'APPROVED' | 'REVOKED'
 export type Page<T> = { items: T[]; next_cursor: string | null }
@@ -231,8 +246,18 @@ async function refreshTokens(): Promise<boolean> {
     saveTokens(null)
     return false
   }
-  const data = (await response.json()) as { access_token: string; refresh_token: string }
-  saveTokens({ access: data.access_token, refresh: data.refresh_token })
+  const data = (await response.json()) as {
+    access_token: string
+    refresh_token: string
+    remember?: boolean
+    idle_timeout?: number
+  }
+  saveTokens({
+    access: data.access_token,
+    refresh: data.refresh_token,
+    remember: data.remember ?? tokens.remember ?? false,
+    idle_timeout: data.idle_timeout ?? tokens.idle_timeout,
+  })
   return true
 }
 
@@ -283,12 +308,20 @@ export const api = {
     request<{ device_id: string; authorization_state: DeviceState }>('/device/status', {
       auth: false,
     }),
-  loginStep1: (username: string, password: string) =>
+  loginStep1: (username: string, password: string, remember: boolean) =>
     request<
       | { session_state: 'REQUIRES_TOTP_ENROLLMENT'; enrollment_token: string }
       | { session_state: 'REQUIRES_2FA'; flow_token: string }
-      | { session_state: 'AUTHENTICATED'; access_token: string; refresh_token: string; user: User }
-    >('/auth/login-step1', { method: 'POST', auth: false, body: { username, password } }),
+      | {
+          session_state: 'AUTHENTICATED'
+          access_token: string
+          refresh_token: string
+          expires_in: number
+          remember: boolean
+          idle_timeout: number
+          user: User
+        }
+    >('/auth/login-step1', { method: 'POST', auth: false, body: { username, password, remember } }),
   totpEnroll: (enrollment_token: string) =>
     request<{ secret: string; otpauth_uri: string; issuer: string }>('/auth/totp-enroll', {
       method: 'POST',
@@ -302,7 +335,14 @@ export const api = {
       body: { enrollment_token, code },
     }),
   loginStep2: (flow_token: string, code: string) =>
-    request<{ access_token: string; refresh_token: string; user: User }>('/auth/login-step2', {
+    request<{
+      access_token: string
+      refresh_token: string
+      expires_in: number
+      remember: boolean
+      idle_timeout: number
+      user: User
+    }>('/auth/login-step2', {
       method: 'POST',
       auth: false,
       body: { flow_token, code },
@@ -387,5 +427,4 @@ export const api = {
       { method: 'PUT', body: { action }, vtoken },
     ),
 }
-
 

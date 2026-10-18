@@ -494,6 +494,24 @@ and the per-feature PostfixAdmin decision table (below).
 
 ## Phase 6 — follow-ups & the PostfixAdmin decision table
 
+### Phase 6.0 — remember this device (implemented)
+
+The login checkbox can opt a device into a configurable remembered session:
+`ADMINNG_REMEMBER_TTL` defaults to 86400 seconds and sets both access-token
+expiry and the refresh idle limit. Migration `005_session_remember.sql` stores
+the choice with the refresh session and carries it through refresh rotation and
+the TOTP flow. The client stores the checkbox preference per device and tracks
+the selected session's idle window. Password re-authentication and the armed
+confirmation remain mandatory for destructive operations.
+
+### Phase 6.1 — biometric sign-in (planned)
+
+WebAuthn/passkeys will support device-bound login and re-auth, with password
+fallback. The proposed data model is `webauthn_credential` plus a challenge
+store, and the browser uses `navigator.credentials.*`.
+
+### Other follow-ups
+
 1. WebAuthn/passkeys for login and re-auth (data model: `webauthn_credential`, challenge store).
 2. ~~Browser E2E + Lighthouse in CI~~ — done in Phase 3: `adminng/pwa-test` + `run.sh verify`,
    wired into `.github/workflows/pwa-e2e.yml`; the a11y run publishes its JSON reports.
@@ -544,5 +562,4 @@ the docs updated.
 **Explicitly out of scope for v1** (tracked in §11 of the draft): vacation,
 fetchmail, welcome templates, backup/restore UI, scratch TOTP codes, PostfixAdmin
 feature parity beyond the catalogue, a stack-wide password-scheme migration.
-
 

@@ -80,7 +80,7 @@ every DB consumer and is never baked.
 |---------|----------------------------------|----------------------------------|-----------------------------------------------|
 | db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=contacts` `ADMINNG_DB=adminng` | `POSTGRES_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB`, `ADMINNG_DB` (advanced; `ADMINNG_DB` must match the api's) |
 | admin | `POSTGRES_HOST/DB/USER` `POSTFIXADMIN_DB_TYPE=pgsql` `POSTFIXADMIN_SMTP_SERVER=mta` `POSTFIXADMIN_SMTP_PORT=25` `POSTFIXADMIN_ENCRYPT=md5crypt` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `MAIL_ADMIN_PASSWORD` (empty ⇒ OTP), `PROVISION_*`, `POSTFIXADMIN_*` |
-| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `ADMINNG_API_PORT=8080` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) | every `ADMINNG_*` knob |
+| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `ADMINNG_API_PORT=8080` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REMEMBER_TTL=86400` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) | every `ADMINNG_*` knob |
 | adminng | (none — static PWA + nginx proxy) | — | — (no `env_file`); dev publishes 8083 (HTTP) and 8084 (HTTPS, local CA) |
 | mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST/DB/USER` `POSTGRES_EXTRA_DB=contacts` `MUA_ADMIN_USER=maild` `MUA_CONFIG_WAIT_TIMEOUT=120` `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `MUA_ADMIN_PASSWORD` (empty ⇒ generated + logged), `BANNER_TITLE`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT` |
 | mda | `POSTGRES_HOST/DB/USER` `DEFAULT_MAILBOX_SIZE=200M` `QUOTA_REPORT_HOUR=0` `QUOTA_REPORT_MINUTE=1` `COUNTRY=JM` `STATE=Kingston` `CITY=Kingston` `ORG=MailD` `OU=MailD` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, cert subject (`COUNTRY/STATE/CITY/ORG/OU`) |
@@ -88,6 +88,13 @@ every DB consumer and is never baked.
 | amavis | `POSTGRES_HOST/DB/USER` `MTA=mta` `CLAMAV=clamav` `CRON=cron` `SPAM_FILTER_ENABLED=yes` `AV_ENABLED=yes` `DKIM_SIGNING=yes` `SA_AUTOLEARN_NONSPAM=0.1` `SA_AUTOLEARN_SPAM=10` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `AV_ENABLED`, `SPAM_FILTER_ENABLED`, `DKIM_SIGNING`, `SA_*`, `JUNK_RETENTION_DAYS` |
 | cron | `POSTGRES_HOST/DB/USER` `MTA=mta` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `JUNK_RETENTION_DAYS`, `SA_HAM_SAMPLE_*` (the entrypoint dumps the env into `/etc/environment`, from where the cron jobs source it) |
 | clamav | (none — both knobs unset by design) | — | `ALTERNATE_MIRROR`, `CLAMAV_DEBUG` (passed by the compose files as explicit entries) |
+
+AdminNG's login checkbox opts this browser/device into `ADMINNG_REMEMBER_TTL`
+(default 86400 seconds): both the access token and that session's refresh idle
+window use this value. The ordinary access and refresh idle TTLs remain
+`ADMINNG_ACCESS_TTL` and `ADMINNG_REFRESH_IDLE_TTL`. The preference is stored
+locally per device, and destructive operations still require password
+re-authentication and the armed confirmation.
 
 Debug switches (all off by default, never baked): `DEBUG` (mta alias-file
 dump), `MTA_DEBUG`, `MDA_DEBUG_INIT/AUTH/AUTH_PASSWORD/MAIL/SSL`, `MUA_DEBUG`,

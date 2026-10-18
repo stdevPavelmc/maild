@@ -40,6 +40,7 @@
     "title": "Sign in",
     "username": "Administrator address",
     "password": "Password",
+    "remember": "Remember this device for 24 hours",
     "submit": "Continue",
     "code": "Authenticator code",
     "verify": "Verify",

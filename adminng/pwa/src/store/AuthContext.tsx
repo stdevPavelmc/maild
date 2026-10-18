@@ -1,6 +1,6 @@
 /**
  * Auth state machine: device → pending → login → (enroll) → 2FA → ready, plus
- * the 15-minute idle purge and the 2-minute background privacy shield.
+ * the session-specific idle purge and the 2-minute background privacy shield.
  */
 
 import {
@@ -33,7 +33,7 @@ type AuthContextValue = {
   loginError: string | null
   busy: boolean
   shielded: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string, remember?: boolean) => Promise<void>
   submitCode: (code: string) => Promise<void>
   enroll: (code: string) => Promise<void>
   enrollment: { secret: string; otpauth_uri: string } | null
@@ -43,7 +43,7 @@ type AuthContextValue = {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
-const IDLE_MS = 15 * 60 * 1000
+const DEFAULT_IDLE_SECONDS = 900
 const SHIELD_MS = 2 * 60 * 1000
 const LAST_ACTIVITY = 'adminng.lastActivity'
 
@@ -56,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [shielded, setShielded] = useState(false)
   const [enrollment, setEnrollment] = useState<{ secret: string; otpauth_uri: string } | null>(null)
   const flow = useRef<{ token: string; kind: '2fa' | 'enroll' } | null>(null)
-  const credentials = useRef<{ username: string; password: string } | null>(null)
+  const credentials = useRef<{ username: string; password: string; remember: boolean } | null>(null)
   const device = deviceId()
 
   const guard = useCallback((error: unknown) => {
@@ -111,7 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [guard, refreshUser])
 
-  // Idle purge + activity tracking (15 minutes).
+  // Idle purge + activity tracking follows the server's session policy.
   useEffect(() => {
     if (phase !== 'ready') return
     const touch = (): void => localStorage.setItem(LAST_ACTIVITY, String(Date.now()))
@@ -120,7 +120,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     events.forEach((event) => window.addEventListener(event, touch, { passive: true }))
     const timer = window.setInterval(() => {
       const last = Number(localStorage.getItem(LAST_ACTIVITY) ?? Date.now())
-      if (Date.now() - last > IDLE_MS) void logout()
+      const idleSeconds = loadTokens()?.idle_timeout ?? DEFAULT_IDLE_SECONDS
+      if (Date.now() - last > idleSeconds * 1000) void logout()
     }, 30_000)
     return () => {
       events.forEach((event) => window.removeEventListener(event, touch))
@@ -140,12 +141,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('visibilitychange', onVisibility)
   }, [phase])
 
-  const login = useCallback(async (username: string, password: string) => {
+  const login = useCallback(async (username: string, password: string, remember = false) => {
     setBusy(true)
     setLoginError(null)
-    credentials.current = { username, password }
+    credentials.current = { username, password, remember }
     try {
-      const result = await api.loginStep1(username, password)
+      const result = await api.loginStep1(username, password, remember)
       if (result.session_state === 'REQUIRES_TOTP_ENROLLMENT') {
         const info = await api.totpEnroll(result.enrollment_token)
         flow.current = { token: result.enrollment_token, kind: 'enroll' }
@@ -155,7 +156,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         flow.current = { token: result.flow_token, kind: '2fa' }
         setPhase('twofa')
       } else {
-        saveTokens({ access: result.access_token, refresh: result.refresh_token })
+        saveTokens({
+          access: result.access_token,
+          refresh: result.refresh_token,
+          remember: result.remember,
+          idle_timeout: result.idle_timeout,
+        })
         setUser(result.user)
         setDeviceState('APPROVED')
         credentials.current = null
@@ -187,7 +193,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoginError(null)
       try {
         const result = await api.loginStep2(flow.current.token, code)
-        saveTokens({ access: result.access_token, refresh: result.refresh_token })
+        saveTokens({
+          access: result.access_token,
+          refresh: result.refresh_token,
+          remember: result.remember,
+          idle_timeout: result.idle_timeout,
+        })
         setUser(result.user)
         credentials.current = null
         setPhase('ready')
@@ -215,7 +226,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // so the user does not retype them (and the code they just used can be the
         // one they confirm with, thanks to the enrollment step allowance).
         const saved = credentials.current
-        if (saved) await login(saved.username, saved.password)
+        if (saved) await login(saved.username, saved.password, saved.remember)
         else setPhase('login')
       } catch (error) {
         setLoginError(
@@ -311,4 +322,3 @@ export function useAuth(): AuthContextValue {
   if (!context) throw new Error('useAuth outside AuthProvider')
   return context
 }
-

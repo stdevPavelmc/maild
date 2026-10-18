@@ -88,27 +88,35 @@ def _totp_required(superadmin: bool) -> bool:
     return superadmin
 
 
-def _create_session(username: str, device_id: str) -> str:
+def _create_session(username: str, device_id: str, remember: bool = False) -> str:
     """Mint an opaque refresh token; only its hash is stored."""
     refresh = secrets.token_urlsafe(48)
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO session (jti, username, device_id) VALUES (%s, %s, %s)",
-            (token_hash(refresh), username, device_id),
+            "INSERT INTO session (jti, username, device_id, remember) VALUES (%s, %s, %s, %s)",
+            (token_hash(refresh), username, device_id, remember),
         )
         conn.commit()
     return refresh
 
 
-def _issue(username: str, device_id: str, admin: dict) -> dict:
+def _issue(username: str, device_id: str, admin: dict, remember: bool = False) -> dict:
     domains = _domains_of(username, admin["superadmin"])
+    ttl = settings.ADMINNG_REMEMBER_TTL if remember else settings.ADMINNG_ACCESS_TTL
+    idle_timeout = (
+        settings.ADMINNG_REMEMBER_TTL
+        if remember
+        else settings.ADMINNG_REFRESH_IDLE_TTL
+    )
     return {
         "access_token": tokens.access_token(
-            username, device_id, admin["superadmin"], domains
+            username, device_id, admin["superadmin"], domains, ttl=ttl
         ),
-        "refresh_token": _create_session(username, device_id),
+        "refresh_token": _create_session(username, device_id, remember),
         "token_type": "bearer",
-        "expires_in": settings.ADMINNG_ACCESS_TTL,
+        "expires_in": ttl,
+        "remember": remember,
+        "idle_timeout": idle_timeout,
         "user": {
             "username": username,
             "superadmin": admin["superadmin"],
@@ -233,7 +241,9 @@ def ensure_domain_allowed(principal: Principal, domain: str) -> None:
         raise forbidden_tenant()
 
 # --------------------------------------------------------------------- flows
-def login_step1(username: str, password: str, device_id: str, ip: str | None) -> dict:
+def login_step1(
+    username: str, password: str, device_id: str, ip: str | None, remember: bool = False
+) -> dict:
     """Verify password + device state; decide enrollment / 2FA / direct issue."""
     ratelimit.check(username, ip)
     device = _device_or_error(device_id)
@@ -317,7 +327,7 @@ def login_step1(username: str, password: str, device_id: str, ip: str | None) ->
     if credential and credential["confirmed"]:
         return {
             "session_state": "REQUIRES_2FA",
-            "flow_token": tokens.flow_token(username, device_id),
+            "flow_token": tokens.flow_token(username, device_id, remember=remember),
         }
 
     ratelimit.success(username, ip)
@@ -328,13 +338,14 @@ def login_step1(username: str, password: str, device_id: str, ip: str | None) ->
         ip=ip,
         endpoint="POST /api/v1/auth/login-step1",
     )
-    return {"session_state": "AUTHENTICATED", **_issue(username, device_id, admin)}
+    return {"session_state": "AUTHENTICATED", **_issue(username, device_id, admin, remember=remember)}
 
 def login_step2(flow_token: str, code: str, device_id: str, ip: str | None) -> dict:
     """Second factor: verify the TOTP code and mint the token pair."""
     claims = tokens.decode(flow_token, "2fa")
     if claims.get("did") != device_id:
         raise ApiError(401, "TOKEN_INVALID", "the flow token belongs to another device")
+    remember = bool(claims.get("remember", False))
     device = _device_or_error(device_id)
     _require_approved(device)
 
@@ -380,7 +391,7 @@ def login_step2(flow_token: str, code: str, device_id: str, ip: str | None) -> d
         ip=ip,
         endpoint="POST /api/v1/auth/login-step2",
     )
-    return _issue(username, device_id, admin)
+    return _issue(username, device_id, admin, remember=remember)
 
 
 def enroll_start(enroll_token: str, device_id: str) -> dict:
@@ -453,7 +464,7 @@ def refresh_session(refresh_token: str, device_id: str) -> dict:
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT jti, username, device_id, revoked_at,
+            SELECT jti, username, device_id, revoked_at, remember,
                    EXTRACT(EPOCH FROM (now() - last_used_at))::int AS idle_seconds
               FROM session WHERE jti = %s
             """,
@@ -464,7 +475,14 @@ def refresh_session(refresh_token: str, device_id: str) -> dict:
             raise ApiError(401, "TOKEN_INVALID", "refresh token unknown or revoked")
         if str(session["device_id"]) != device_id:
             raise ApiError(401, "TOKEN_INVALID", "the session belongs to another device")
-        if session["idle_seconds"] > settings.ADMINNG_REFRESH_IDLE_TTL:
+        # A remembered session tolerates the remember window (24h), an ordinary
+        # one the short idle TTL (15 min).
+        idle_limit = (
+            settings.ADMINNG_REMEMBER_TTL
+            if session["remember"]
+            else settings.ADMINNG_REFRESH_IDLE_TTL
+        )
+        if session["idle_seconds"] > idle_limit:
             cur.execute("UPDATE session SET revoked_at = now() WHERE jti = %s", (jti,))
             conn.commit()
             raise ApiError(401, "SESSION_EXPIRED", "session expired from inactivity")
@@ -476,7 +494,7 @@ def refresh_session(refresh_token: str, device_id: str) -> dict:
     admin = _admin_row(session["username"])
     if admin is None or not admin["active"]:
         raise ApiError(401, "UNAUTHENTICATED", "account disabled")
-    return _issue(session["username"], device_id, admin)
+    return _issue(session["username"], device_id, admin, remember=session["remember"])
 
 
 def logout_session(refresh_token: str) -> None:
@@ -515,7 +533,6 @@ def reauth_confirm(password: str, principal: Principal, ip: str | None) -> dict:
         ),
         "expires_in": settings.ADMINNG_REAUTH_TTL,
     }
-
 
 
 
