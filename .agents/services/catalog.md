@@ -98,6 +98,17 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 - SMTP 25, submission 587 (auth), SMTPS 465. SPF (`SPF_ENABLE`) and DNSBL (`DNSBL_ENABLE`,
   `DNSBL_LIST`) checks; `RELAY` / `ALWAYS_BCC` optional; max size `MAX_MESSAGESIZE`.
+- Anti-enumeration (audit F-07): `smtpd_recipient_restrictions` sleeps `SMTP_TARPIT_DELAY`
+  seconds (image default 2; `0` makes the entrypoint strip the line) before the
+  unknown-recipient `550`, and the list was reordered — `permit_sasl_authenticated` +
+  `reject_unauth_destination` come first, so relay attempts and authenticated clients skip
+  the map/policy lookups *and* the tarpit; only external mail addressed to the hosted
+  domains pays the delay. Submission/smtps and the amavis reinjection override
+  `smtpd_recipient_restrictions` in `master.cf`, so only the public MX port is affected.
+  The 250/550 oracle itself is kept by design (reject-at-RCPT is Postfix best practice;
+  accept-then-bounce would create backscatter). Error limits: `smtpd_soft_error_limit=10`
+  / `smtpd_hard_error_limit=60` (progressive 1s slowdown, then cut-off) — they used to be
+  inverted at 60/10, where the slowdown never engaged.
 - Postfix's PostgreSQL maps include the PostfixAdmin alias-domain maps:
   `virtual_alias_domains.cf` recognizes active alias domains, and
   `virtual_alias_domain_maps.cf` preserves the local part while rewriting to the target.

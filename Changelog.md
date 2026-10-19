@@ -18,6 +18,20 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-19 1.6.1-dev
+- Security: **SMTP local-part harvesting on :25 is now tarpitted** (2026-10 audit F-07). The
+  mta sleeps `SMTP_TARPIT_DELAY` seconds (image default 2, `0` disables) before the
+  `reject_unlisted_recipient` 550, and `smtpd_recipient_restrictions` was reordered —
+  `permit_sasl_authenticated` + `reject_unauth_destination` now come first, so relay attempts
+  and authenticated clients skip the quota/SPF policy lookups, the DB lookups *and* the
+  tarpit; only external mail addressed to your own domains pays the delay (submission/smtps
+  and the amavis reinjection override the list in `master.cf`). The inverted error limits
+  were fixed too (`soft=60` > `hard=10` meant the progressive slowdown never fired): now
+  `soft=10`/`hard=60` — 1s slower per reply after 10 errors, session cut at 60. The 250/550
+  oracle itself stays by design (reject-at-RCPT is Postfix best practice; accept-then-bounce
+  would be backscatter), so the finding is "accepted & mitigated". `test.sh` gains the tarpit
+  timing check (A7b) and an env-schema signal for the baked default.
+
 ## 2026-10-18 1.6.1-dev
 - Changed: **AdminNG approval is now device-scoped** (migration `008_device_trust.sql`). The
   superadmin approves a *browser* once (`device.state` = `PENDING`/`APPROVED`/`REVOKED`) and any

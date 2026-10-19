@@ -397,8 +397,9 @@ fi
 
 # env schema (new): the defaults are baked as ENV inside each image (per service); env.dev
 # carries only the deployment values (domain, admin user, fake secrets) and any deviation
-# from an image default. Three signals: an untouched default (mda), an override (mua's
-# BANNER_TITLE, set in env.dev) and a baked peer hostname the env file never mentions (mta).
+# from an image default. Four signals: an untouched default (mda), an override (mua's
+# BANNER_TITLE, set in env.dev), a baked peer hostname the env file never mentions (mta)
+# and the baked F-07 tarpit delay (mta's SMTP_TARPIT_DELAY).
 if [ "$HAVE_DC" = 1 ] ; then
     ENV_WHY=""
     [ "$(dcx mda printenv DEFAULT_MAILBOX_SIZE 2>/dev/null | tr -d '\r\n')" = "200M" ] ||
@@ -407,6 +408,8 @@ if [ "$HAVE_DC" = 1 ] ; then
         ENV_WHY="$ENV_WHY env.dev-override(BANNER_TITLE);"
     [ "$(dcx mta printenv AMAVIS 2>/dev/null | tr -d '\r\n')" = "amavis" ] ||
         ENV_WHY="$ENV_WHY mta-image-default(AMAVIS);"
+    [ "$(dcx mta printenv SMTP_TARPIT_DELAY 2>/dev/null | tr -d '\r\n')" = "2" ] ||
+        ENV_WHY="$ENV_WHY mta-image-default(SMTP_TARPIT_DELAY);"
     if [ -n "$ENV_WHY" ] ; then
         t_fail "image ENV defaults are baked and env.dev overrides win (${ENV_WHY# })"
     else
@@ -473,20 +476,73 @@ else
 fi
 
 # A6 — port 25 refuses mail for a non-existent local user
+# External sender on purpose: a local sender is refused earlier by
+# reject_unauthenticated_sender_login_mismatch with a 553 ("not logged in"), which
+# would let this check pass without ever exercising reject_unlisted_recipient
+# (the path audit F-07 is about).
 NOSUCH="no-such-user-$RANDOM$RANDOM"
-swx -s "$SERVER" --protocol SMTP -t "$NOSUCH@$DOMAIN" -f "$ADMINMAIL" --header "Subject: $(chrono)"
+swx -s "$SERVER" --protocol SMTP -t "$NOSUCH@$DOMAIN" -f "$FROM" --header "Subject: $(chrono)"
 if [ "$SW_RC" -eq 24 ] ; then
     t_ok "port 25 refuses mail for a non-existent local user"
 else
     t_fail "port 25 refuses mail for a non-existent local user (rc=$SW_RC, want 24)" ; dump_swaks
 fi
 
-# A7 — port 25 refuses a bad local recipient
-swx -s "$SERVER" --protocol SMTP -t "fake_account.mee@$DOMAIN" -f "$ADMINMAIL" --header "Subject: $(chrono)"
+# A7 — port 25 refuses a bad local recipient (external sender, same reason as A6)
+swx -s "$SERVER" --protocol SMTP -t "fake_account.mee@$DOMAIN" -f "$FROM" --header "Subject: $(chrono)"
 if [ "$SW_RC" -eq 24 ] ; then
     t_ok "port 25 refuses unknown recipients"
 else
     t_fail "port 25 refuses unknown recipients (rc=$SW_RC, want 24)" ; dump_swaks
+fi
+
+# A7b — F-07: the unknown-recipient 550 on :25 is tarpitted. The probe times ONLY the
+# RCPT round trip (the suite's connect/DNS baseline would drown a wall-clock check) and
+# uses an external sender so the reply really is the virtual-mailbox miss behind the
+# sleep; the latency must reach the mta's configured delay.
+TARPIT_DELAY="$(dcx mta printenv SMTP_TARPIT_DELAY 2>/dev/null | tr -d '\r\n')"
+case "$TARPIT_DELAY" in ''|*[!0-9]*) TARPIT_DELAY=0 ;; esac
+if [ "$TARPIT_DELAY" -eq 0 ] ; then
+    t_skip "tarpit delay on :25 (SMTP_TARPIT_DELAY=0)"
+elif ! command -v python3 > /dev/null 2>&1 ; then
+    t_skip "tarpit delay on :25 (python3 is not installed)"
+else
+    cat > "$TMPRUN/rcpt_latency.py" <<'PY'
+import socket, sys, time
+host, port, sender, rcpt = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+s = socket.create_connection((host, port), timeout=20)
+f = s.makefile("rb")
+def line():
+    while True:
+        l = f.readline().decode("utf-8", "replace").rstrip("\r\n")
+        if len(l) > 3 and l[3] == "-":
+            continue
+        return l
+line()                                              # banner
+s.sendall(b"EHLO probe.local\r\n"); line()          # ehlo
+s.sendall(("MAIL FROM:<%s>\r\n" % sender).encode())
+m = line()
+if not m.startswith("250"):
+    print("MAILFAIL: %s" % m); sys.exit(2)
+t0 = time.monotonic()
+s.sendall(("RCPT TO:<%s>\r\n" % rcpt).encode())
+r = line()
+ms = int((time.monotonic() - t0) * 1000)
+s.sendall(b"QUIT\r\n")
+print("%d %s" % (ms, r))
+PY
+    _OUT="$(python3 "$TMPRUN/rcpt_latency.py" "$SERVER" 25 "$FROM" \
+            "tarpit.probe.$RANDOM$RANDOM@$DOMAIN" 2>&1)"
+    _MS="${_OUT%% *}"; _REPLY="${_OUT#* }"
+    case "$_MS" in ''|*[!0-9]*) _MS=0 ;; esac
+    # 250ms slack: the sleep itself is exact, the reply may arrive a hair early on a
+    # signal; anything below the delay minus slack means the tarpit is not running.
+    if [ "$_MS" -ge $((TARPIT_DELAY * 1000 - 250)) ] && \
+       printf '%s' "$_REPLY" | grep -q "User unknown in virtual mailbox table" ; then
+        t_ok "port 25 tarpits the unknown-recipient 550 (RCPT took ${_MS}ms, delay ${TARPIT_DELAY}s)"
+    else
+        t_fail "port 25 tarpits the unknown-recipient 550 (RCPT took ${_MS}ms, want >= $((TARPIT_DELAY * 1000 - 250))ms; reply: ${_REPLY})"
+    fi
 fi
 
 # A8 — port 25 is not an open relay

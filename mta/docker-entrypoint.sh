@@ -25,6 +25,17 @@ fi
 if [ -z "${DNSBL_ENABLE}" ] ; then
     DNSBL_ENABLE='no'
 fi
+# F-07 tarpit: seconds slept before the unknown-recipient 550 on :25 (image bakes the
+# same default; this only guards an explicitly empty value). 0 disables it.
+if [ -z "${SMTP_TARPIT_DELAY}" ] ; then
+    SMTP_TARPIT_DELAY=2
+fi
+case "${SMTP_TARPIT_DELAY}" in
+    *[!0-9]*)
+        echo "WARNING: mta: SMTP_TARPIT_DELAY='${SMTP_TARPIT_DELAY}' is not a whole number of seconds, tarpit disabled" 1>&2
+        SMTP_TARPIT_DELAY=0
+        ;;
+esac
 
 # mandatory
 HOSTNAME=`hostname -f`
@@ -117,6 +128,8 @@ echo "POSTGRES_USER=${POSTGRES_USER}" >> "${CFILE}"
 echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
 # dnsbl
 echo "DNSBL_LIST='${DNSBL_LIST}'" >> "${CFILE}"
+# F-07 tarpit (placeholder _SMTP_TARPIT_DELAY_ in main.cf.s)
+echo "SMTP_TARPIT_DELAY=${SMTP_TARPIT_DELAY}" >> "${CFILE}"
 
 # config dump
 if [ "${MTA_DEBUG}" ] ; then
@@ -145,6 +158,13 @@ for v in `echo "${VARS}" | xargs` ; do
     # pgsql files
     find /etc/postfix/pgsql/ -type f -exec sed s/"\_${v}\_"/"${CONT}"/g -i {} \;
 done
+
+# F-07 tarpit disabled (SMTP_TARPIT_DELAY=0): drop the sleep restriction line entirely so
+# the rendered main.cf carries no delay at all (the placeholder was already substituted
+# with 0 in the loop above).
+if [ "${SMTP_TARPIT_DELAY}" = "0" ] ; then
+    sed -i '/^[[:space:]]*sleep /d' ${MAIN}
+fi
 
 # check for SPF activation
 if [ -z "${SPF_ENABLE}" -o "${SPF_ENABLE}" == "no" -o "${SPF_ENABLE}" == "No" -o "${SPF_ENABLE}" == "False" -o "${SPF_ENABLE}" == "false"  ] ; then

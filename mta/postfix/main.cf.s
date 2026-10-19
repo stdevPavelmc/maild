@@ -104,10 +104,13 @@ smtpd_helo_restrictions =
 smtpd_sender_login_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_email2user.cf
 relay_recipient_maps = proxy:pgsql:/etc/postfix/pgsql/virtual_email2user.cf
 
-# error misc
+# error misc: restriction rejects count as errors; past the soft limit every reply is
+# delayed by smtpd_error_sleep_time, at the hard limit the session is cut. soft must stay
+# BELOW hard — the previous 60/10 pair was inverted (the slowdown never engaged, only the
+# cut-off after 10 errors fired).
 smtpd_error_sleep_time = 1s
-smtpd_soft_error_limit = 60
-smtpd_hard_error_limit = 10
+smtpd_soft_error_limit = 10
+smtpd_hard_error_limit = 60
 
 # disable verify
 disable_vrfy_command = yes
@@ -162,6 +165,13 @@ smtpd_recipient_restrictions =
     # me and trusted hosts
     permit_mynetworks
 
+    # relay if auth (must be decided before reject_unauth_destination below)
+    permit_sasl_authenticated
+
+    # close open relay: decided BEFORE any map/policy lookup, so relay attempts to
+    # foreign domains skip the quota/SPF services, the DB lookups and the tarpit
+    reject_unauth_destination
+
     # quota policy
     check_policy_service inet:_MDAIP_:12340
 
@@ -174,14 +184,17 @@ smtpd_recipient_restrictions =
     # rejectt if the recipient domain is nor resolved
     reject_unknown_recipient_domain
 
+    # F-07 tarpit: slow down address harvesting on :25 — sleep before the unlisted-
+    # recipient 550. Postfix's sleep returns DUNNO and evaluation continues, so every
+    # recipient reaching this line (valid local parts included) pays the delay; the
+    # relay gate above keeps foreign-domain traffic and authenticated clients out of
+    # it. SMTP_TARPIT_DELAY=0 strips this line (entrypoint). Submission/smtps and the
+    # amavis reinjection override smtpd_recipient_restrictions in master.cf, so only
+    # the public MX port pays the delay.
+    sleep _SMTP_TARPIT_DELAY_
+
     # reject if not a valid user
     reject_unlisted_recipient
-
-    # cclose open relay
-    reject_unauth_destination
-
-    # relay if auth
-    permit_sasl_authenticated
 
 # Security shadow copy must be a valid user
 always_bcc = _ALWAYSBCC_
