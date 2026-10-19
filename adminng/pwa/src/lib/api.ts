@@ -7,7 +7,9 @@ import type {
 /**
  * AdminNG API client (technical-draft §5).
  *
- * - generates and persists the device UUID (`X-Device-ID`) on first run;
+ * - mints and persists the browser identity on first run: the device UUID
+ *   (`X-Device-ID`) and its secret (`X-Device-Secret`, a possession factor the
+ *   server binds on first verified login);
  * - attaches the Bearer access token and, when a destructive call needs it, the
  *   `X-Security-Validation-Token`;
  * - refreshes the token pair once on `TOKEN_EXPIRED`/`SESSION_EXPIRED`;
@@ -16,9 +18,11 @@ import type {
  */
 
 const DEVICE_KEY = 'adminng.device'
+const DEVICE_SECRET_KEY = 'adminng.deviceSecret'
 const TOKENS_KEY = 'adminng.tokens'
 const BASE_KEY = 'adminng.baseUrl'
 const REMEMBER_KEY = 'adminng.remember'
+const USERNAME_KEY = 'adminng.username'
 
 /**
  * Server base URL. Empty string means "same origin as the PWA" (the normal web
@@ -63,9 +67,21 @@ export async function probeServer(url: string): Promise<void> {
 export function clearSession(): void {
   localStorage.removeItem(TOKENS_KEY)
   localStorage.removeItem(DEVICE_KEY)
+  localStorage.removeItem(DEVICE_SECRET_KEY)
   localStorage.removeItem(REMEMBER_KEY)
   localStorage.removeItem('adminng.lastActivity')
   localStorage.removeItem('adminng.domain')
+  localStorage.removeItem(USERNAME_KEY)
+}
+
+/** Remember the last admin typed on this browser (the pending screen polls it). */
+export function loadUsername(): string {
+  return localStorage.getItem(USERNAME_KEY) ?? ''
+}
+
+export function saveUsername(username: string): void {
+  if (username) localStorage.setItem(USERNAME_KEY, username)
+  else localStorage.removeItem(USERNAME_KEY)
 }
 
 export type Tokens = {
@@ -156,10 +172,12 @@ export type Quota = {
 }
 export type Device = {
   device_id: string
-  client_type: string
+  username: string
+  usernames: string[]
+  client_type: string | null
   device_name: string | null
-  associated_user: string | null
   authorization_state: DeviceState
+  fingerprint: string | null
   first_seen: string
   last_seen: string
   approved_at: string | null
@@ -222,6 +240,27 @@ export function deviceId(): string {
   return id
 }
 
+/**
+ * The browser secret: 32 random bytes, base64url. `crypto.getRandomValues` is
+ * available in insecure contexts too (unlike `randomUUID`/`subtle`), so this
+ * works over the dev HTTP origin as well. Sent as `X-Device-Secret`; the server
+ * stores only its SHA-256 and binds it on the first verified login.
+ */
+export function deviceSecret(): string {
+  let secret = localStorage.getItem(DEVICE_SECRET_KEY)
+  if (!secret) {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    let binary = ''
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte)
+    })
+    secret = btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+    localStorage.setItem(DEVICE_SECRET_KEY, secret)
+  }
+  return secret
+}
+
 export function loadTokens(): Tokens | null {
   const raw = localStorage.getItem(TOKENS_KEY)
   if (!raw) return null
@@ -264,7 +303,11 @@ async function refreshTokens(): Promise<boolean> {
   if (!tokens) return false
   const response = await fetch(`${getBaseUrl()}/api/v1/auth/refresh`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Device-ID': deviceId() },
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Device-ID': deviceId(),
+      'X-Device-Secret': deviceSecret(),
+    },
     body: JSON.stringify({ refresh_token: tokens.refresh }),
   })
   if (!response.ok) {
@@ -288,7 +331,10 @@ async function refreshTokens(): Promise<boolean> {
 
 export async function request<T>(path: string, options: Options = {}): Promise<T> {
   const { method = 'GET', body, auth = true, vtoken, retry = true } = options
-  const headers: Record<string, string> = { 'X-Device-ID': deviceId() }
+  const headers: Record<string, string> = {
+    'X-Device-ID': deviceId(),
+    'X-Device-Secret': deviceSecret(),
+  }
   if (auth) {
     const tokens = loadTokens()
     if (tokens) headers.Authorization = `Bearer ${tokens.access}`
@@ -323,16 +369,13 @@ export const qs = (params: Record<string, string | number | boolean | undefined>
 }
 
 export const api = {
-  handshake: (deviceName: string) =>
-    request<Device>('/device/handshake', {
-      method: 'POST',
-      auth: false,
-      body: { client_type: 'web', device_name: deviceName },
-    }),
-  deviceStatus: () =>
-    request<{ device_id: string; authorization_state: DeviceState }>('/device/status', {
-      auth: false,
-    }),
+  deviceStatus: (username: string) =>
+    request<{
+      device_id: string
+      username: string
+      authorization_state: DeviceState
+      fingerprint: string | null
+    }>(`/device/status${qs({ username })}`, { auth: false }),
   loginStep1: (username: string, password: string, remember: boolean) =>
     request<
       | { session_state: 'REQUIRES_TOTP_ENROLLMENT'; enrollment_token: string }
@@ -346,7 +389,17 @@ export const api = {
           idle_timeout: number
           user: User
         }
-    >('/auth/login-step1', { method: 'POST', auth: false, body: { username, password, remember } }),
+    >('/auth/login-step1', {
+      method: 'POST',
+      auth: false,
+      body: {
+        username,
+        password,
+        remember,
+        client_type: 'web',
+        device_name: navigator.userAgent.slice(0, 100),
+      },
+    }),
   totpEnroll: (enrollment_token: string) =>
     request<{ secret: string; otpauth_uri: string; issuer: string }>('/auth/totp-enroll', {
       method: 'POST',
@@ -501,8 +554,8 @@ export const api = {
     request<{ query: string; results: SearchHit[] }>(`/search${qs({ q })}`),
   logs: (params: { actor?: string; domain?: string; action?: string; cursor?: string }) =>
     request<Page<AuditEvent>>(`/logs${qs(params)}`),
-  devices: (state?: string, cursor?: string) =>
-    request<Page<Device>>(`/admin/devices${qs({ state, cursor })}`),
+  devices: (state?: string, cursor?: string, username?: string) =>
+    request<Page<Device>>(`/admin/devices${qs({ state, cursor, username })}`),
   setDeviceState: (device: string, action: 'APPROVE' | 'REVOKE', vtoken: string) =>
     request<{ device_id: string; new_state: DeviceState }>(
       `/admin/devices/${device}/state`,

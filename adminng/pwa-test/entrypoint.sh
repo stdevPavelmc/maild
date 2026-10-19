@@ -82,7 +82,13 @@ case "$mode" in
     a11y | visual)
         wait_for_stack
         start_tunnel
-        PWA_TEST_ALL=1 npx playwright test "tests/${mode}.spec.ts" "$@"
+        # These two are artifact-review modes (they write their own JSON/PNG
+        # reports) and each opens a second browser context for the superadmin
+        # step. With tracing on, Playwright 1.64 finalises that context's trace
+        # into the shared artifacts dir and can throw `browserContext.close:
+        # ENOENT … .trace` at teardown even when every assertion passed, so
+        # tracing is off here (callers can still override with `--trace=…`).
+        PWA_TEST_ALL=1 npx playwright test "tests/${mode}.spec.ts" --trace=off "$@"
         ;;
     lighthouse)
         wait_for_stack

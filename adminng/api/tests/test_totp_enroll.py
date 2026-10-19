@@ -9,16 +9,19 @@ usable exactly once; the successful login consumes it.
 
 import unittest
 
-from app import auth, crypto, settings, tokens, totp
+from app import auth, crypto, devices, settings, tokens, totp
 from app.db import connect
 
 USER = "enroll-test@example.net"
 DEVICE = "99999999-9999-4999-8999-999999999999"
+SECRET = "enroll-test-secret-0123456789abcdef"
 
 
 def _cleanup() -> None:
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM totp_credential WHERE username = %s", (USER,))
+        # device_grant / session / webauthn_* cascade from the device row.
+        cur.execute("DELETE FROM device WHERE device_id = %s", (DEVICE,))
         conn.commit()
 
 
@@ -26,6 +29,9 @@ class EnrollmentFlow(unittest.TestCase):
     def setUp(self):
         _cleanup()
         self.secret = totp.generate_secret()
+        # The enrollment token is only honoured for a bound browser with an
+        # APPROVED grant (audit F-11), exactly like a real first login.
+        devices.ensure_grant(DEVICE, USER, devices.hash_secret(SECRET), "unit-test")
         with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO totp_credential (username, secret) VALUES (%s, %s)",
@@ -38,7 +44,9 @@ class EnrollmentFlow(unittest.TestCase):
 
     def test_enrollment_code_is_usable_once_for_the_immediate_login(self):
         code = totp.code_at(self.secret)
-        auth.enroll_confirm(tokens.enroll_token(USER, DEVICE), code, "127.0.0.1")
+        auth.enroll_confirm(
+            tokens.enroll_token(USER, DEVICE), code, DEVICE, SECRET, "127.0.0.1"
+        )
 
         credential = auth._credential(USER)
         self.assertTrue(credential["confirmed"])

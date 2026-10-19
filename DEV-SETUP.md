@@ -113,7 +113,7 @@ Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh pa
 ./test.sh --skip-docker    # only wire-level checks (no `docker compose exec` assertions)
 ```
 
-- 68 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
+- 76 checks: mail-path container health, SMTP policy (25/465/587, the two open-relay negatives, spoofing, size limit), TLS/AUTH,
   aliases, fan-out and plus-addressing, IMAP/POP3 read-back, content filters, mailbox quota, Sieve redirect,
   DKIM, the deployment domain, the AdminNG catalogue API (login, CRUD, IMAPS login of the
   API-created mailbox, suspension and tenant isolation), the cron jobs (the daily database
@@ -181,9 +181,10 @@ cd adminng/pwa && npm run i18n:check     # en/es keys, placeholders, empty value
 ./adminng/pwa-test/run.sh a11y           # axe-core WCAG 2.1 A/AA audit under ldata/e2e/a11y
 ```
 
-- The harness approves its own device with `adminng.py --approve-device` inside the api
-  container (it mounts the docker socket), so `bootstrap-dev.sh` must have run. The UI path
-  (devices panel, re-auth + armed authorize) is covered by `run.sh superadmin`.
+- The harness approves its own browser with
+  `adminng.py --approve-device <id>` inside the api container (it mounts the
+  docker socket), so `bootstrap-dev.sh` must have run. The UI path (devices panel, re-auth +
+  armed authorize) is covered by `run.sh superadmin`.
 - Reports: `ldata/e2e/report/` (Playwright HTML), `ldata/e2e/results/` (traces/videos on
   failure), `ldata/e2e/screens/` and `ldata/e2e/lighthouse.report.{json,html}`.
 - Lighthouse gates performance ≥ 0.85, accessibility ≥ 0.9 and best-practices ≥ 0.9. SEO is

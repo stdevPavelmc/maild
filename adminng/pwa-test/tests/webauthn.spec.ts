@@ -18,7 +18,7 @@ test('a platform credential signs in and re-authenticates through the virtual au
       automaticPresenceSimulation: true,
     },
   })
-  const deviceId = await approveThisDevice(page)
+  const deviceId = await approveThisDevice(page, SYSADMIN)
 
   try {
     await loginSuperadmin(page)

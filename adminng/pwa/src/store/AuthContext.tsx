@@ -1,6 +1,10 @@
 /**
- * Auth state machine: device → pending → login → (enroll) → 2FA → ready, plus
+ * Auth state machine: boot → pending → login → (enroll) → 2FA → ready, plus
  * the session-specific idle purge and the 2-minute background privacy shield.
+ *
+ * The browser identity is minted locally (`deviceId()` + `deviceSecret()`); the
+ * server registers it lazily on the first verified login and answers PENDING
+ * until a superadmin approves this admin's grant (audit F-11).
  */
 
 import {
@@ -18,7 +22,9 @@ import {
   api,
   deviceId,
   loadTokens,
+  loadUsername,
   saveTokens,
+  saveUsername,
   type DeviceState,
   type User,
 } from '../lib/api'
@@ -31,6 +37,8 @@ type AuthContextValue = {
   user: User | null
   deviceState: DeviceState | null
   device: string
+  deviceFingerprint: string | null
+  pendingUser: string | null
   loginError: string | null
   busy: boolean
   shielded: boolean
@@ -53,6 +61,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [phase, setPhase] = useState<Phase>('boot')
   const [user, setUser] = useState<User | null>(null)
   const [deviceState, setDeviceState] = useState<DeviceState | null>(null)
+  const [deviceFingerprint, setDeviceFingerprint] = useState<string | null>(null)
+  const [pendingUser, setPendingUser] = useState<string | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [shielded, setShielded] = useState(false)
@@ -61,57 +71,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const credentials = useRef<{ username: string; password: string; remember: boolean } | null>(null)
   const device = deviceId()
 
-  const guard = useCallback((error: unknown) => {
+  /** Route a device error to the right screen. Returns true when handled. */
+  const guard = useCallback((error: unknown): boolean => {
     if (error instanceof ApiError) {
       if (error.code === 'DEVICE_NOT_AUTHORIZED') {
         setDeviceState('PENDING')
+        setPendingUser((current) => current ?? (loadUsername() || null))
         setPhase('pending')
-      } else if (error.code === 'DEVICE_REVOKED') {
+        return true
+      }
+      if (error.code === 'DEVICE_REVOKED') {
         setDeviceState('REVOKED')
         saveTokens(null)
         setPhase('login')
+        return true
       }
     }
+    return false
   }, [])
 
-  const refreshUser = useCallback(async () => {
+  const refreshUser = useCallback(async (): Promise<'ready' | 'guarded' | 'failed'> => {
     try {
       const me = await api.me()
       setUser({ username: me.username, superadmin: me.superadmin, domains: me.domains })
+      setDeviceState('APPROVED')
       setPhase('ready')
-      return true
+      return 'ready'
     } catch (error) {
-      guard(error)
-      return false
+      return guard(error) ? 'guarded' : 'failed'
     }
   }, [guard])
 
-  // Boot: register/refresh the device, resume a stored session when possible.
+  // Boot: resume a stored session when possible; otherwise go to login. The
+  // device is not registered until the first verified login, so there is no
+  // anonymous handshake here.
   useEffect(() => {
     let cancelled = false
     const boot = async () => {
-      try {
-        const device = await api.handshake(navigator.userAgent.slice(0, 100))
-        if (cancelled) return
-        setDeviceState(device.authorization_state)
-        if (device.authorization_state !== 'APPROVED') {
-          setPhase('pending')
-          return
-        }
-        if (loadTokens() && (await refreshUser())) return
-        setPhase('login')
-      } catch (error) {
-        if (!cancelled) {
-          guard(error)
-          setPhase('login')
-        }
-      }
+      const result = loadTokens() ? await refreshUser() : 'failed'
+      if (cancelled) return
+      if (result === 'failed') setPhase('login')
     }
     void boot()
     return () => {
       cancelled = true
     }
-  }, [guard, refreshUser])
+  }, [refreshUser])
 
   // Idle purge + activity tracking follows the server's session policy.
   useEffect(() => {
@@ -147,6 +152,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setBusy(true)
     setLoginError(null)
     credentials.current = { username, password, remember }
+    saveUsername(username)
     try {
       const result = await api.loginStep1(username, password, remember)
       if (result.session_state === 'REQUIRES_TOTP_ENROLLMENT') {
@@ -166,12 +172,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         setUser(result.user)
         setDeviceState('APPROVED')
+        setDeviceFingerprint(null)
         credentials.current = null
         setPhase('ready')
       }
     } catch (error) {
       if (error instanceof ApiError && error.code === 'DEVICE_NOT_AUTHORIZED') {
         setDeviceState('PENDING')
+        setPendingUser(username)
         setPhase('pending')
       } else if (error instanceof ApiError && error.code === 'DEVICE_REVOKED') {
         setDeviceState('REVOKED')
@@ -192,6 +200,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     async (username: string, remember = false) => {
       setBusy(true)
       setLoginError(null)
+      saveUsername(username)
       try {
         const options = await api.webauthnLoginOptions(username, remember)
         const credential = await getPlatformCredential(options.public_key)
@@ -208,6 +217,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         })
         setUser(result.user)
         setDeviceState('APPROVED')
+        setDeviceFingerprint(null)
         credentials.current = null
         setPhase('ready')
       } catch (error) {
@@ -278,17 +288,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const deviceStatus = useCallback(async () => {
+    const username = pendingUser ?? loadUsername()
+    if (!username) return
     try {
-      const status = await api.deviceStatus()
+      const status = await api.deviceStatus(username)
       setDeviceState(status.authorization_state)
+      setDeviceFingerprint(status.fingerprint ?? null)
+      setPendingUser(status.username)
       if (status.authorization_state === 'APPROVED') {
-        setPhase(loadTokens() ? 'ready' : 'login')
-        await refreshUser()
+        if (loadTokens()) {
+          await refreshUser()
+        } else {
+          setPhase('login')
+        }
       }
     } catch {
       /* keep the pending screen */
     }
-  }, [refreshUser])
+  }, [pendingUser, refreshUser])
 
   const unlock = useCallback(async (password: string) => {
     setBusy(true)
@@ -323,6 +340,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       deviceState,
       device,
+      deviceFingerprint,
+      pendingUser,
       loginError,
       busy,
       shielded,
@@ -340,6 +359,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       deviceState,
       device,
+      deviceFingerprint,
+      pendingUser,
       loginError,
       busy,
       shielded,

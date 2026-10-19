@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './store/AuthContext'
 import { OnlineProvider } from './lib/online'
 import { getBaseUrl, needsServerSetup } from './lib/api'
 import { Shell } from './components/Shell'
+import { BiometricPrompt } from './components/BiometricPrompt'
 import { LoginPage } from './pages/AuthScreens'
 import { PendingScreen, PrivacyShield } from './pages/DeviceScreens'
 import { ServerScreen } from './pages/ServerScreen'
@@ -31,6 +32,7 @@ function Gate() {
   return (
     <Shell>
       {shielded && <PrivacyShield />}
+      <BiometricPrompt />
       <Routes>
         <Route path="/" element={<Navigate to="/domains" replace />} />
         <Route path="/domains" element={<DomainsPage password="" />} />

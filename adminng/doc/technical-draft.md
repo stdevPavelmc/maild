@@ -24,8 +24,13 @@ AdminNG deprecates it only later, by explicit decision (plan.md, Phase 5).
    flip an alias, suspend an account) in seconds, on desktop and on phone.
 2. **PWA-first, Android-capable** — installable, offline-safe (read-only),
    shipped as a signed APK artifact of every release.
-3. **Zero-trust devices** — every client carries an `X-Device-ID`; the API is
-   unreachable until the device is explicitly approved **server-side**.
+3. **Zero-trust devices** — every client carries an `X-Device-ID` plus a
+   client-minted `X-Device-Secret`; the API is unreachable until the *browser*
+   is explicitly approved **server-side**. (Implementation note: since
+   `008_device_trust.sql` approval is device-scoped — `device.state` — so one
+   approval authorizes the browser for every admin; the per-`(browser, admin)`
+   grant below is retained as the activity log + trust window. This document
+   keeps the original per-grant wording in §4 as the design history.)
 4. **Two-step auth** — password + TOTP (mandatory for superadmins), with a
    proper enrollment flow on first login.
 5. **Full audit trail** — every mutation logged, with domain-scoped visibility.
@@ -214,8 +219,11 @@ must be indistinguishable from a row written by PostfixAdmin:
 
 ### 3.2 The `adminng` database — DDL draft
 
-First migration (`adminng/api/migrations/001_adminng_core.sql`, applied by the
-api entrypoint, idempotent):
+Migrations under `adminng/api/migrations/`, applied in numeric order by the api
+entrypoint (each file idempotent). The shape below is the early one
+(`001_adminng_core.sql` … `008_device_trust.sql`); since 008 `device.state` is
+the authoritative approval and `device_grant.trusted_until` carries the 24h
+"skip the code" window:
 
 ```sql
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -227,13 +235,25 @@ CREATE TABLE IF NOT EXISTS device (
   device_id       uuid PRIMARY KEY,
   client_type     text NOT NULL DEFAULT 'web',   -- 'web' | 'android_pwa' | ...
   device_name     text,
-  associated_user text,                          -- last verified username
-  state           text NOT NULL DEFAULT 'PENDING'
-                  CHECK (state IN ('PENDING','APPROVED','REVOKED')),
+  secret_hash     text,                          -- sha256(client-minted secret); NULL until first login
   first_seen      timestamptz NOT NULL DEFAULT now(),
   last_seen       timestamptz NOT NULL DEFAULT now(),
-  approved_at     timestamptz,
-  approved_by     text                           -- username | 'cli' | 'auto-first'
+  last_ip         text
+);
+
+-- Authorization is per (browser, administrator): the device row above is the
+-- browser identity, this is the approval (migration 007, audit F-11).
+CREATE TABLE IF NOT EXISTS device_grant (
+  device_id   uuid NOT NULL REFERENCES device(device_id) ON DELETE CASCADE,
+  username    text NOT NULL,
+  state       text NOT NULL DEFAULT 'PENDING'
+              CHECK (state IN ('PENDING','APPROVED','REVOKED')),
+  first_seen  timestamptz NOT NULL DEFAULT now(),
+  last_seen   timestamptz NOT NULL DEFAULT now(),
+  approved_at timestamptz,
+  approved_by text,                              -- username | 'cli' | 'auto-first'
+  last_ip     text,
+  PRIMARY KEY (device_id, username)
 );
 
 CREATE TABLE IF NOT EXISTS session (
@@ -283,19 +303,32 @@ lands — never baked); the audit indexes serve the Logs UI filters
 
 ### 4.1 Device trust (zero-trust)
 
-- Every client generates a UUID v4 (`crypto.randomUUID()`) on first run and
-  sends it as `X-Device-ID` on **every** request except `GET /api/v1/health`.
-- A middleware rejects any request whose device is missing, `PENDING` or
-  `REVOKED` — the API surface is unreachable until the device is approved.
-  `PENDING` allows exactly two things: `POST /auth/login-step1` (so the
-  credentials can be verified and the device linked to a user) and
-  `GET /device/status`. `REVOKED` allows nothing (hard `401 DEVICE_REVOKED`).
-- State transitions:
+- Every client generates a UUID v4 (`crypto.randomUUID()`) **and a secret**
+  (32 random bytes, `crypto.getRandomValues`) on first run and sends them as
+  `X-Device-ID` / `X-Device-Secret` on **every** request except
+  `GET /api/v1/health`. The id is a public identifier (shown on the lock
+  screen); the secret is a possession factor the server stores only as
+  `sha256`, so a leaked id alone can neither be polled nor reused from another
+  host (audit F-11).
+- **Registration is not anonymous.** There is no handshake endpoint: a `device`
+  row (and its `device_grant` for the admin) is created *inside* a
+  `POST /auth/login-step1` whose password verified. Random callers cannot mint
+  rows.
+- The gate rejects any request whose device is missing, whose secret does not
+  match, or whose `(device, user)` grant is missing/`PENDING`. `PENDING` allows
+  exactly two things: `POST /auth/login-step1` (verify creds, link the grant)
+  and `GET /device/status?username=` (the pending-screen poll, secret required).
+  A mismatched secret or a foreign device id answers the same `404/403` as an
+  unknown device — no enumeration oracle.
+- State transitions (per grant):
   - `PENDING → APPROVED`: by a superadmin via the devices panel, or by the CLI
-    (§4.2). Recorded in `device.approved_by`.
+    (§4.2). Recorded in `device_grant.approved_by`.
   - `APPROVED → REVOKED`: superadmin/CLI; **immediately destroys every
-    `session` row bound to the device** — the revoked client wipes its cached
-    credentials on the next failed call and drops back to the lock screen.
+    `session` row bound to that `(device, user)`** — the revoked client wipes
+    its cached credentials on the next failed call and drops back to the lock
+    screen. Revoking the whole browser (`--revoke-device`) revokes all grants.
+  - Stale `PENDING` grants are purged after `ADMINNG_PENDING_TTL_DAYS`
+    (default 3) at boot and hourly.
 - The nginx access log is the transport-level corroboration of who talked to
   the exterior; `audit_event` is the application-level record.
 
@@ -309,14 +342,17 @@ is root authority:
 ```bash
 docker compose exec api adminng.py --list-devices
 docker compose exec api adminng.py --approve-device '<uuid>'
-docker compose exec api adminng.py --revoke-device '<uuid>'
+docker compose exec api adminng.py --revoke-device '<uuid>'          # whole browser
+docker compose exec api adminng.py --revoke-grant '<uuid>' --user '<admin>'
+docker compose exec api adminng.py --purge-pending                   # stale PENDING
 docker compose exec api adminng.py --totp-reset '<username>'   # lost authenticator
 ```
 
-The client's lock screen shows the device ID with a copy button, so the admin
-can relay it over a trusted channel; the operator verifies the requester's
-identity before approving (the devices panel later shows the associated user
-— set at the first `login-step1` — as an extra check).
+The client's lock screen shows the device ID with a copy button (and, once
+registered, a short **fingerprint** derived from the secret), so the admin can
+relay it over a trusted channel; the operator verifies the requester's identity
+before approving. Each grant carries the approving admin's name in
+`device_grant.approved_by`.
 
 `ADMINNG_AUTO_APPROVE_FIRST=yes` (**off by default**) is the documented
 escape hatch for unattended first boots: the **first** successful superadmin
@@ -328,27 +364,29 @@ self-approve safely. The full how-to lives in `adminng/README.md`.
 
 ### 4.3 Authentication flow (two steps + TOTP enrollment)
 
-1. `POST /device/handshake` (no auth): registers the device `PENDING`.
-2. `POST /auth/login-step1` — username + password, verified against the
+1. `POST /auth/login-step1` — username + password, verified against the
    catalogue `admin` table (Argon2id, or legacy md5crypt during the window —
-   `app/passwords.py`, §3.1):
-   - device `PENDING` ⇒ `403 DEVICE_NOT_AUTHORIZED` (lock screen; poll
-     `GET /device/status`) — the payload shape from the original draft is the
-     contract of record (`detail`, `device_id`, `associated_user`);
-   - device `APPROVED`, user has **no confirmed TOTP credential** but TOTP is
+   `app/passwords.py`, §3.1). On the **first** verified login from a browser the
+   device is registered and its secret bound; the `(device, admin)` grant opens
+   `PENDING`:
+   - grant `PENDING` ⇒ `403 DEVICE_NOT_AUTHORIZED` (lock screen; poll
+     `GET /device/status?username=`) — the payload carries `device_id` and
+     `username`;
+   - grant `REVOKED` ⇒ `401 DEVICE_REVOKED`;
+   - grant `APPROVED`, user has **no confirmed TOTP credential** but TOTP is
      required for this role ⇒ **enrollment flow**: `REQUIRES_TOTP_ENROLLMENT`
      + a one-time enrollment token; the client renders the QR
      (`otpauth://` URI), the user scans it, enters a code, and
      `POST /auth/totp-confirm` stores the credential as `confirmed`;
    - otherwise ⇒ `REQUIRES_2FA` + a short-lived `flow_token`.
-3. `POST /auth/login-step2` — `flow_token` + TOTP code (RFC 6238, ±1 time
+2. `POST /auth/login-step2` — `flow_token` + TOTP code (RFC 6238, ±1 time
    step accepted, replayed codes rejected): success issues the token pair
    bound to `(username, device_id)`.
-4. TOTP policy (`ADMINNG_TOTP_REQUIRED`): **mandatory for superadmins**
+3. TOTP policy (`ADMINNG_TOTP_REQUIRED`): **mandatory for superadmins**
    (default `superadmin`); a domain admin with an enrolled credential gets
    step 2 enforced, one without (and `none`/not required) authenticates at
    step 1 alone.
-5. Optional WebAuthn platform credentials provide Android biometric login and
+4. Optional WebAuthn platform credentials provide Android biometric login and
    destructive-action re-auth (implemented in AdminNG Phase 6.1). Challenges
    are single-use, RP/origin-validated, and device-scoped; password + TOTP
    remains the fallback. The `webauthn` package is used by the API; the
@@ -388,8 +426,9 @@ confirm button (§6.3) so no destructive click can be a reflex.
 
 - Per `username` + `ip`: 5 failed `login-step1`/`step2` attempts ⇒ 15-minute
   lockout (`LOGIN_LOCKOUT` audit event; the login screen says so).
-- Per `ip`: global handshake-spam cap; `reauth-confirm` rate-limited per
-  access token.
+- Per `ip`: global device-registration/login-spam cap; `reauth-confirm`
+  rate-limited per access token. (Anonymous handshake spam is gone: a device
+  row is only created by a verified login.)
 - Implemented in-process (MailD's single-replica deployment shape); every
   decision is auditable in the logs.
 
@@ -397,12 +436,13 @@ confirm button (§6.3) so no destructive click can be a reflex.
 
 **Conventions.**
 
-- Every route except `GET /health` requires `X-Device-ID`; authenticated routes
-  require `Authorization: Bearer <access token>`.
+- Every route except `GET /health` requires `X-Device-ID` and `X-Device-Secret`;
+  authenticated routes also require `Authorization: Bearer <access token>`.
 - Errors are uniform: `{"detail": "<CODE>", "message": "...", ...}` with the
   fitting status: `401 UNAUTHENTICATED`, `401 DEVICE_REVOKED`,
   `403 DEVICE_NOT_AUTHORIZED`, `403 OPERATION_NOT_VERIFIED`,
   `403 FORBIDDEN_TENANT` (entity outside the caller's domains),
+  `404 DEVICE_UNKNOWN` (status poll: unknown device / wrong secret / no grant),
   `404 NOT_FOUND`, `409 CONFLICT` (duplicate entity), `422 VALIDATION`,
   `429 RATE_LIMITED` (+ `Retry-After`).
 - Destructive routes additionally require `X-Security-Validation-Token` (§4.5).
@@ -414,17 +454,17 @@ confirm button (§6.3) so no destructive click can be a reflex.
   superadmin-only.
 - Full request/response schemas are generated from the Pydantic models at
   FastAPI's built-in `/docs` once Phase 1 lands; the JSON examples in the
-  original Spanish drafts remain the contract of record for the flows they
-  defined (handshake, login-step1, device status, device state change, search).
+  original Spanish drafts remain the contract of record where they still apply
+  (login-step1, device status, device state change, search); the retired
+  handshake example is superseded by §4.1/§4.3.
 
 **Route table:**
 
 | Method & path | Auth | Notes |
 |---|---|---|
 | `GET /health` | none | liveness (healthcheck + the onboarding "test connection") |
-| `POST /device/handshake` | device | `{client_type, device_name}` → `201 {device_id, authorization_state:"PENDING", ...}` |
-| `GET /device/status` | device | `{device_id, authorization_state}` — the pending-screen poll |
-| `POST /auth/login-step1` | device | §4.3; `REQUIRES_2FA` + `flow_token`, `REQUIRES_TOTP_ENROLLMENT` + enroll token, or `403 DEVICE_NOT_AUTHORIZED` |
+| `GET /device/status?username=` | device + secret | `{device_id, username, authorization_state, fingerprint}` — the pending-screen poll; the secret must match or `404 DEVICE_UNKNOWN` |
+| `POST /auth/login-step1` | device + secret | §4.3; registers the browser on the first verified login; `REQUIRES_2FA` + `flow_token`, `REQUIRES_TOTP_ENROLLMENT` + enroll token, or `403 DEVICE_NOT_AUTHORIZED` |
 | `POST /auth/totp-enroll` | device + enroll token | `{secret_uri}` (the `otpauth://` QR payload) |
 | `POST /auth/totp-confirm` | device + enroll token | `{code}` → credential `confirmed` |
 | `POST /auth/login-step2` | device + flow token | `{code}` → `{access_token, refresh_token, expires_in, user{...}}` |
@@ -436,8 +476,8 @@ confirm button (§6.3) so no destructive click can be a reflex.
 | `DELETE /auth/webauthn/credential` | access + password proof | remove this device's platform credential |
 | `POST /auth/webauthn/login/options` · `POST /auth/webauthn/login/verify` | device | device-bound biometric login; options may request a remembered session |
 | `POST /auth/webauthn/reauth/options` · `POST /auth/webauthn/reauth/verify` | access | mint the existing short-lived destructive-action validation token |
-| `GET /admin/devices` | superadmin | cursor list; `?state=PENDING` is the pending queue (drives the UI alert) |
-| `PUT /admin/devices/{device_id}/state` | superadmin + reauth | `{action:"APPROVE"\|"REVOKE"}` → `{device_id, new_state, authorized_by}` |
+| `GET /admin/devices` | superadmin | cursor list of `(browser, admin)` grants; `?state=PENDING` is the pending queue (drives the UI alert) |
+| `PUT /admin/devices/{device_id}/state` | superadmin + reauth | `{action:"APPROVE"\|"REVOKE", username}` → `{device_id, username, new_state, authorized_by}` |
 | `GET /search?q=` | access | mixed user/alias/domain results, tenant-scoped, `ADMINNG_SEARCH_LIMIT` per type |
 | `GET /domains` · `POST /domains` | access | create returns the restart advisory (§10.9) |
 | `GET /domains/{d}` · `PUT /domains/{d}` · `DELETE /domains/{d}` | access (+ reauth on DELETE) | DELETE cascades per §3.1 |
@@ -498,15 +538,17 @@ confirm button (§6.3) so no destructive click can be a reflex.
 ### 6.3 Screens & flows (from the UI/UX draft, refined)
 
 - **Onboarding "server URL" screen — APK only** (the web app is same-origin):
-  base URL input → `[⚙️ TEST CONNECTION]` → `GET /health` → device UUID
-  generated (`crypto.randomUUID()`) + handshake. On the web this collapses to
-  the handshake on first visit.
+  base URL input → `[⚙️ TEST CONNECTION]` → `GET /health` → the browser mints its
+  UUID (`crypto.randomUUID()`) and secret (`crypto.getRandomValues`). On the web
+  the mint happens silently on first visit; the browser registers on the first
+  successful login (§4.1).
 - **Login:** password first; on mobile the biometric (passkey) shortcut once
   enrolled; desktop adds the clean second 2FA screen.
 - **TOTP enrollment:** QR + code confirmation, once per admin (per §4.3).
-- **Device-pending lock screen:** valid credentials but unapproved device —
-  the copyable device ID, an explanation, and `[🔄 CHECK APPROVAL]`
-  (re-polls `GET /device/status` without re-entering credentials).
+- **Device-pending lock screen:** valid credentials but an unapproved grant —
+  the copyable device ID, the fingerprint derived from the secret, an
+  explanation, and `[🔄 CHECK APPROVAL]` (re-polls
+  `GET /device/status?username=` without re-entering credentials).
 - **Privacy shield:** returning to the app after >2 min backgrounded covers
   the screen until a biometric/unlock; >15 min idle ⇒ tokens purged ⇒ full
   re-login.

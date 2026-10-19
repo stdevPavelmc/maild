@@ -1310,14 +1310,31 @@ ADMINNG_USER="probe@$ADMINNG_DOMAIN"
 ADMINNG_PW="$(chrono)"
 ADMINNG_DEVICE="aaaaaaaa-0000-4000-8000-0000000000a1"
 ADMINNG_DEVICE_2="aaaaaaaa-0000-4000-8000-0000000000a2"
+ADMINNG_DEVICE_3="aaaaaaaa-0000-4000-8000-0000000000a3"
+# Client-minted secrets for the two fixture browsers (the server stores only
+# sha256). Every device-scoped call must present the matching one.
+ADMINNG_DEVICE_SECRET="testsh-device-secret-aaaaaaaa-0000-4000-8000-0000000000a1"
+ADMINNG_DEVICE_SECRET_2="testsh-device-secret-aaaaaaaa-0000-4000-8000-0000000000a2"
+ADMINNG_DEVICE_SECRET_3="testsh-device-secret-aaaaaaaa-0000-4000-8000-0000000000a3"
 ADMIN_PW="${CRED[${DEPLOY_ADMIN,,}]:-}"
 ADMINNG_TOKEN=""
 ADMINNG_REFRESH=""
 
+adminng_secret() { # <device-id> → the fixture secret for that browser
+    case "$1" in
+        "$ADMINNG_DEVICE")   printf '%s' "$ADMINNG_DEVICE_SECRET" ;;
+        "$ADMINNG_DEVICE_2") printf '%s' "$ADMINNG_DEVICE_SECRET_2" ;;
+        "$ADMINNG_DEVICE_3") printf '%s' "$ADMINNG_DEVICE_SECRET_3" ;;
+        *)                   printf '' ;;
+    esac
+}
+
 adminng_call() { # <method> <path> <device> <token> [json] [vtoken] → ADMINNG_CODE/ADMINNG_BODY
     local method="$1" path="$2" device="$3" token="$4" data="${5:-}" vtoken="${6:-}"
-    local out="$TMPRUN/adminng.json"
+    local out="$TMPRUN/adminng.json" secret
+    secret="$(adminng_secret "$device")"
     local args=(-s -o "$out" -w '%{http_code}' -X "$method" -H "X-Device-ID: $device")
+    [ -n "$secret" ] && args+=(-H "X-Device-Secret: $secret")
     [ -n "$token" ] && args+=(-H "Authorization: Bearer $token")
     [ -n "$vtoken" ] && args+=(-H "X-Security-Validation-Token: $vtoken")
     [ -n "$data" ] && args+=(-H 'Content-Type: application/json' --data "$data")
@@ -1337,31 +1354,62 @@ if [ "$HAVE_DC" = 0 ] || [ -z "$ADMIN_PW" ] ; then
 else
     # Deterministic clean slate for the fixtures this section owns.
     dcx db psql -U maild -d adminng -q -c \
-        "DELETE FROM device WHERE device_id IN ('$ADMINNG_DEVICE','$ADMINNG_DEVICE_2');" \
+        "DELETE FROM device WHERE device_id IN ('$ADMINNG_DEVICE','$ADMINNG_DEVICE_2','$ADMINNG_DEVICE_3');" \
         > /dev/null 2>&1 || true
     dcx db psql -U maild -d mailddb -q -c \
         "DELETE FROM alias WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM domain_admins WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM mailbox WHERE domain='$ADMINNG_DOMAIN'; DELETE FROM domain WHERE domain='$ADMINNG_DOMAIN';" \
         > /dev/null 2>&1 || true
 
-    # I1 — handshake + pending login refusal
-    adminng_call POST /device/handshake "$ADMINNG_DEVICE" "" '{"client_type":"web","device_name":"test.sh"}'
-    I1_H="$ADMINNG_CODE"
+    # I1 — no anonymous registration: a fresh browser is only written by a login
+    # whose password verifies, and that login stays PENDING (audit F-11)
+    adminng_call GET "/device/status?username=$DEPLOY_ADMIN" "$ADMINNG_DEVICE" ""
+    I1_PRE="$ADMINNG_CODE"
     adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
-        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
-    if [ "$I1_H" = 200 ] && [ "$ADMINNG_CODE" = 403 ] &&
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\",\"client_type\":\"web\",\"device_name\":\"test.sh\"}"
+    if [ "$I1_PRE" = 404 ] && [ "$ADMINNG_CODE" = 403 ] &&
        printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_NOT_AUTHORIZED ; then
-        t_ok "I1 new device is PENDING: login-step1 refused with DEVICE_NOT_AUTHORIZED"
+        t_ok "I1 a fresh browser (unknown to /device/status) is registered PENDING by a verified login"
     else
-        t_fail "I1 device gate (handshake=$I1_H step1=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+        t_fail "I1 device gate (status=$I1_PRE step1=$ADMINNG_CODE body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
     fi
 
-    # I2 — CLI approval turns the device APPROVED
-    dcx api adminng.py --approve-device "$ADMINNG_DEVICE" > /dev/null 2>&1
-    adminng_call GET /device/status "$ADMINNG_DEVICE" ""
+    # I1b — only the secret holder may read the status; a wrong secret is a 404
+    adminng_call GET "/device/status?username=$DEPLOY_ADMIN" "$ADMINNG_DEVICE" ""
+    I1B_OK="$ADMINNG_CODE" ; I1B_BODY="$ADMINNG_BODY"
+    ADMINNG_DEVICE_SECRET_SAVE="$ADMINNG_DEVICE_SECRET"
+    ADMINNG_DEVICE_SECRET="aaaaaaaa-bogus-secret-bogus-0000000000000000"
+    adminng_call GET "/device/status?username=$DEPLOY_ADMIN" "$ADMINNG_DEVICE" ""
+    ADMINNG_DEVICE_SECRET="$ADMINNG_DEVICE_SECRET_SAVE"
+    if [ "$I1B_OK" = 200 ] && printf '%s' "$I1B_BODY" | grep -q '"authorization_state":"PENDING"' &&
+       printf '%s' "$I1B_BODY" | grep -q '"fingerprint":"' &&
+       [ "$ADMINNG_CODE" = 404 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_UNKNOWN ; then
+        t_ok "I1b the status poll needs the secret (wrong secret → 404 DEVICE_UNKNOWN, no enumeration)"
+    else
+        t_fail "I1b status secret gate (ok=$I1B_OK wrong=$ADMINNG_CODE)"
+    fi
+
+    # I2 — CLI approval is device-scoped: it flips the browser to APPROVED
+    dcx api adminng.py --approve-device "$ADMINNG_DEVICE" --user "$DEPLOY_ADMIN" > /dev/null 2>&1
+    adminng_call GET "/device/status?username=$DEPLOY_ADMIN" "$ADMINNG_DEVICE" ""
     if printf '%s' "$ADMINNG_BODY" | grep -q APPROVED ; then
         t_ok "I2 the server-side CLI approval flips the device to APPROVED"
     else
         t_fail "I2 device approval (body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+    fi
+
+    # I2b — a leaked device id alone is useless: a known browser presenting a
+    # foreign secret is refused *before* the credentials are even read (the
+    # password is deliberately wrong, yet the answer must stay 403, not 401)
+    ADMINNG_DEVICE_SECRET_SAVE="$ADMINNG_DEVICE_SECRET"
+    ADMINNG_DEVICE_SECRET="$ADMINNG_DEVICE_SECRET_2"
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"not-the-real-password\"}"
+    ADMINNG_DEVICE_SECRET="$ADMINNG_DEVICE_SECRET_SAVE"
+    if [ "$ADMINNG_CODE" = 403 ] && printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_NOT_AUTHORIZED ; then
+        t_ok "I2b a known device id with a foreign secret is refused before the password check"
+    else
+        t_fail "I2b foreign secret (got $ADMINNG_CODE: $(printf '%s' "$ADMINNG_BODY" | head -c 120))"
     fi
 
     # I3 — TOTP policy: superadmin must enroll on the first login
@@ -1401,6 +1449,7 @@ else
     if [ "$ADMINNG_CODE" != 200 ] ; then
         # replay/window guard: retry once with the next step
         FLOW="$(curl -s -X POST "$API_BASE/auth/login-step1" -H "X-Device-ID: $ADMINNG_DEVICE" \
+            -H "X-Device-Secret: $ADMINNG_DEVICE_SECRET" \
             -H 'Content-Type: application/json' \
             --data "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\",\"remember\":true}" | adminng_jqf flow_token)"
         CODE="$(adminng_code "$DEPLOY_ADMIN" --next)"
@@ -1421,6 +1470,28 @@ else
     else
         t_fail "I4 step2/login (body=$(printf '%s' "$ADMINNG_BODY" | head -c 140))"
     fi
+    # I4b — the secret is enforced on every authenticated call, not only at login
+    ADMINNG_DEVICE_SECRET_SAVE="$ADMINNG_DEVICE_SECRET"
+    ADMINNG_DEVICE_SECRET="$ADMINNG_DEVICE_SECRET_2"
+    adminng_call GET /auth/me "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    ADMINNG_DEVICE_SECRET="$ADMINNG_DEVICE_SECRET_SAVE"
+    if [ "$ADMINNG_CODE" = 403 ] && printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_NOT_AUTHORIZED ; then
+        t_ok "I4b an authenticated call with the wrong device secret is refused (403)"
+    else
+        t_fail "I4b authenticated secret gate (got $ADMINNG_CODE: $(printf '%s' "$ADMINNG_BODY" | head -c 120))"
+    fi
+
+    # I4c — the remembered login armed a fixed 24h window: the next login on this
+    # (device, admin) is issued straight away, without asking for the code again
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\",\"remember\":true}"
+    if [ "$ADMINNG_CODE" = 200 ] &&
+       printf '%s' "$ADMINNG_BODY" | grep -q '"session_state":"AUTHENTICATED"' ; then
+        t_ok "I4c a remembered device skips the TOTP challenge on the next login"
+    else
+        t_fail "I4c remembered skip (get $ADMINNG_CODE: $(printf '%s' "$ADMINNG_BODY" | head -c 140))"
+    fi
+
     # I5 — catalogue writes through the device-bound API
     adminng_call POST /domains "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
         "{\"domain\":\"$ADMINNG_DOMAIN\",\"description\":\"AdminNG e2e\"}"
@@ -1524,7 +1595,10 @@ else
     if [ "$(sql "SELECT superadmin FROM admin WHERE username='$ADMINMAIL'")" = "t" ] ; then
         t_skip "I11 tenant isolation (the fixture admin $ADMINMAIL is a superadmin)"
     else
-        adminng_call POST /device/handshake "$ADMINNG_DEVICE_2" "" '{"client_type":"web","device_name":"test.sh tenant"}'
+        # The browser is approved once (device-scoped): the CLI needs no --user,
+        # and any admin may then sign in from it.
+        adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
+            "{\"username\":\"$ADMINMAIL\",\"password\":\"$PASS\"}"
         dcx api adminng.py --approve-device "$ADMINNG_DEVICE_2" > /dev/null 2>&1
         adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
             "{\"username\":\"$ADMINMAIL\",\"password\":\"$PASS\"}"
@@ -1605,17 +1679,42 @@ else
         t_fail "I14 audit logs (code=$ADMINNG_CODE)"
     fi
 
+    # I15b — revoking one admin's access on a shared browser leaves the browser
+    # (and the other admins) alone: only that admin is deny-listed and its
+    # sessions die; the sysadmin keeps working on the same browser.
+    dcx api adminng.py --approve-device "$ADMINNG_DEVICE" --user "$ADMINMAIL" > /dev/null 2>&1
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE" "" \
+        "{\"username\":\"$ADMINMAIL\",\"password\":\"$PASS\"}"
+    A1_TOKEN="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
+    if [ -z "$A1_TOKEN" ] && printf '%s' "$ADMINNG_BODY" | grep -q REQUIRES_2FA ; then
+        A1_FLOW="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf flow_token)"
+        A1_CODE="$(adminng_code "$ADMINMAIL" --next)"
+        adminng_call POST /auth/login-step2 "$ADMINNG_DEVICE" "" \
+            "{\"flow_token\":\"$A1_FLOW\",\"code\":\"$A1_CODE\"}"
+        A1_TOKEN="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf access_token)"
+    fi
+    dcx api adminng.py --revoke-grant "$ADMINNG_DEVICE" --user "$ADMINMAIL" > /dev/null 2>&1
+    adminng_call GET /auth/me "$ADMINNG_DEVICE" "$A1_TOKEN"
+    I15B_A="$ADMINNG_CODE" ; I15B_BODY="$ADMINNG_BODY"
+    adminng_call GET /auth/me "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
+    if [ "$I15B_A" = 401 ] && printf '%s' "$I15B_BODY" | grep -q DEVICE_REVOKED &&
+       [ "$ADMINNG_CODE" = 200 ] ; then
+        t_ok "I15b --revoke-grant kills only that admin's sessions on a shared browser"
+    else
+        t_fail "I15b grant-scoped revoke (alice=$I15B_A sysadmin=$ADMINNG_CODE)"
+    fi
+
     # I15 — device revocation kills the sessions
     adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
         "{\"password\":\"$ADMIN_PW\"}"
     SV2="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
     adminng_call PUT "/admin/devices/$ADMINNG_DEVICE/state" "$ADMINNG_DEVICE" "$ADMINNG_TOKEN" \
-        '{"action":"REVOKE"}' "$SV2"
+        "{\"action\":\"REVOKE\",\"username\":\"$DEPLOY_ADMIN\"}" "$SV2"
     I15_R="$ADMINNG_CODE"
     adminng_call GET /auth/me "$ADMINNG_DEVICE" "$ADMINNG_TOKEN"
     if [ "$I15_R" = 200 ] && [ "$ADMINNG_CODE" = 401 ] &&
        printf '%s' "$ADMINNG_BODY" | grep -q DEVICE_REVOKED ; then
-        t_ok "I15 revoking the device kills its sessions immediately (DEVICE_REVOKED)"
+        t_ok "I15 revoking the device grant kills its sessions immediately (DEVICE_REVOKED)"
     else
         t_fail "I15 device revoke (revoke=$I15_R me=$ADMINNG_CODE)"
     fi
@@ -1623,7 +1722,6 @@ else
     # I16 — lockout: five failed logins lock that username+IP for 15 minutes
     # (a non-existent account, so no real fixture is affected)
     LOCK_USER="nobody@adminng-lockout.test"
-    adminng_call POST /device/handshake "$ADMINNG_DEVICE_2" "" '{"client_type":"web","device_name":"test.sh lockout"}'
     for _ in 1 2 3 4 5 ; do
         adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_2" "" \
             "{\"username\":\"$LOCK_USER\",\"password\":\"wrong\"}"
@@ -1647,6 +1745,27 @@ else
         fi
     else
         t_fail "I17 --reset-ratelimit command failed"
+    fi
+
+    # I18 — a PENDING browser older than ADMINNG_PENDING_TTL_DAYS is purged (the
+    # client re-enrolls from zero); the device row is backdated so it is instant.
+    # A third fixture browser is used so the approved a1/a2 stay untouched.
+    adminng_call POST /auth/login-step1 "$ADMINNG_DEVICE_3" "" \
+        "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"$ADMIN_PW\"}"
+    I18_LOGIN="$ADMINNG_CODE"
+    I18_STATE="$(dcx db psql -U maild -d adminng -tAc \
+        "SELECT state FROM device WHERE device_id='$ADMINNG_DEVICE_3';" 2>/dev/null | tr -d ' \r\n')"
+    dcx db psql -U maild -d adminng -q -c \
+        "UPDATE device SET first_seen = now() - interval '10 days' WHERE device_id='$ADMINNG_DEVICE_3';" \
+        > /dev/null 2>&1
+    dcx api adminng.py --purge-pending > /dev/null 2>&1
+    I18_N="$(dcx db psql -U maild -d adminng -tAc \
+        "SELECT count(*) FROM device WHERE device_id='$ADMINNG_DEVICE_3';" \
+        2>/dev/null | tr -d ' \r\n')"
+    if [ "$I18_LOGIN" = 403 ] && [ "$I18_STATE" = "PENDING" ] && [ "$I18_N" = "0" ] ; then
+        t_ok "I18 --purge-pending drops PENDING browsers older than the TTL (backdated 10d)"
+    else
+        t_fail "I18 pending TTL purge (login=$I18_LOGIN state=$I18_STATE rows=$I18_N)"
     fi
 fi
 

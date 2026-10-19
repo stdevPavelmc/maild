@@ -537,19 +537,27 @@ chmod 600 "$CREDS_FILE"
 ok "$CREDS_FILE written ($(stat -c '%a' "$CREDS_FILE"), ${#ADDRESSES[@]} mailboxes, ${#NEW_PASSWORDS[@]} new password(s))"
 
 # --- AdminNG dev device -------------------------------------------------------
-# Pre-approve one well-known device so tooling (curl, test.sh, the docs) can drive
-# the API without a manual CLI approval. Browsers/phones generate their own UUID
-# and still need a superadmin to approve them (adminng/README.md).
+# Pre-approve one well-known *device* so tooling (curl, the docs) can drive the
+# API without a manual CLI approval. Approval is device-scoped: this browser is
+# usable by any admin, and --user only records who asked for it. Browsers/phones
+# still mint their own UUID + secret and need a superadmin to approve them
+# (adminng/README.md). The secret is a fixed DEV-ONLY value, like the fixtures'
+# passwords; the device row stores only its SHA-256.
 ADMINNG_DEV_DEVICE="00000000-0000-4000-8000-0000000000d1"
-if timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py --add-device "$ADMINNG_DEV_DEVICE" > /dev/null 2>&1; then
-	timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py --approve-device "$ADMINNG_DEV_DEVICE" > /dev/null 2>&1 || true
+ADMINNG_DEV_SECRET="devfixture-device-secret-0000000000d1-not-a-production-secret"
+SYSADMIN_ADDR="${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}"
+if timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T api adminng.py \
+		--approve-device "$ADMINNG_DEV_DEVICE" --user "$SYSADMIN_ADDR" \
+		--secret "$ADMINNG_DEV_SECRET" > /dev/null 2>&1; then
 	if ! grep -q '^# AdminNG dev device' "$CREDS_FILE" 2>/dev/null; then
 		{
-			printf '\n# AdminNG dev device (pre-approved by bootstrap-dev.sh; no TOTP enrolled)\n'
+			printf '\n# AdminNG dev device (pre-approved by bootstrap-dev.sh; requested by %s; no TOTP enrolled)\n' "$SYSADMIN_ADDR"
+			printf '# Send both headers with every call: X-Device-ID / X-Device-Secret\n'
 			printf '# adminng.device=%s\n' "$ADMINNG_DEV_DEVICE"
+			printf '# adminng.secret=%s\n' "$ADMINNG_DEV_SECRET"
 		} >> "$CREDS_FILE"
 	fi
-	ok "AdminNG dev device pre-approved: $ADMINNG_DEV_DEVICE"
+	ok "AdminNG dev device pre-approved: $ADMINNG_DEV_DEVICE (requested by $SYSADMIN_ADDR)"
 else
 	warn "could not pre-approve the AdminNG dev device (is the api container healthy?)"
 fi

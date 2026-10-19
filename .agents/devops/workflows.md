@@ -39,7 +39,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   clamav and mda healthchecks).
 - **AdminNG:** the PWA is on http://localhost:8083 (nginx serves it and proxies `/api/v1/`
   to `api`); `… logs -f adminng api` for its two halves; the adminng DB is
-  `… exec db psql -U maild -d adminng`; devices are authorized from the server side with
+  `… exec db psql -U maild -d adminng`; browsers are authorized from the server side with
   `… exec api adminng.py --list-devices` / `--approve-device <uuid>` (see
   `adminng/README.md`). Health through the proxy: `curl -sf localhost:8083/api/v1/health`.
 - **Mailboxes:** Maildir under `ldata/vmail/` — `find ldata/vmail -name cur -o -name new`;
@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 68 checks
+./test.sh                 # 76 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -146,9 +146,10 @@ cd adminng/pwa && npm run i18n:check    # en/es parity; also inside `npm run bui
 - Inside the container the entrypoint tunnels `http://localhost:8083` to `http://adminng:80`.
   `localhost` is a secure context, so the service worker / installability / offline
   assertions behave exactly as on the host or against a real deployment.
-- Device approval stays out of band: the suite drives `adminng.py --approve-device` in the
-  api container (`docker exec`, socket mounted by the dev compose file). The other specs
-  cover the UI path (devices panel, re-auth + armed authorize).
+- Device approval stays out of band: the suite drives
+  `adminng.py --approve-device <id>` in the api container (`docker exec`, socket
+  mounted by the dev compose file). The other specs cover the UI path (devices panel, re-auth +
+  armed authorize).
 - The superadmin helpers **never reset the TOTP credential**: they read the enrolled seed with
   `tests/totp_code.py` (the same helper `test.sh` uses) and only enroll when the API asks for it,
   so an authenticator enrolled on a phone survives `verify`/`superadmin`/`a11y`/`visual`. A
@@ -194,6 +195,12 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh   # -> dist/android/<pkg>-
   `adminng/pwa/tls-cert-generate.sh` (or `bootstrap-dev.sh`) creates
   `ldata/certs/adminng-{ca,}.crt`; install `adminng-ca.der` on the phone first. The APK runs as
   a Custom Tab on an IP origin (Digital Asset Links need a DNS name).
+- The `APP_URL` host must be in the leaf certificate **SAN**, not just trusted: the generator
+  lists the host name, `localhost` and **every global IPv4** (multi-NIC hosts have several). If
+  a NIC/LAN IP changed after the leaf was issued, Chrome/Node fail with
+  `ERR_TLS_CERT_ALTNAME_INVALID`; re-issue the leaf against the same CA and restart the listener:
+  `cd adminng/pwa && RENEW=1 ./tls-cert-generate.sh --ip <lan-ip>` then
+  `docker compose --env-file env.dev -f docker-compose-dev.yml restart adminng`.
 - Artifacts are git-ignored (`adminng/pwa/dist/`, `android-project/`, `twa-manifest.json`,
   `*.keystore*`).
 - CI: `.github/workflows/android-apk.yml` runs the script with the keystore secrets.

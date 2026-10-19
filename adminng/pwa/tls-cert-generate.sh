@@ -5,9 +5,10 @@
 #
 # Why a separate CA instead of the shared `mail.crt`? The mail certificate is a
 # self-signed leaf with no Subject Alternative Name, so browsers refuse it. This
-# script writes a small local CA plus a leaf with explicit SANs (LAN IP, host
-# name, localhost), which is what Chrome/Android require. It lives in the same
-# shared certs volume (`ldata/certs`) but never touches `mail.crt`/`mail.key`:
+# script writes a small local CA plus a leaf with explicit SANs (the host name,
+# localhost and *every* global IPv4 on the machine — a laptop with ethernet and
+# WiFi has more than one), which is what Chrome/Android require. It lives in the
+# same shared certs volume (`ldata/certs`) but never touches `mail.crt`/`mail.key`:
 # SMTP/IMAP TLS is unaffected.
 #
 # The CA certificate (not the key) must be installed on every client device:
@@ -17,7 +18,9 @@
 #
 # Environment:
 #   OUT_DIR     output directory          (default: <repo>/ldata/certs)
-#   IP          extra IPv4/IPv6 SANs      (space/comma separated, repeatable)
+#   IP          extra IPv4/IPv6 SANs      (space/comma separated, repeatable;
+#                                          every global IPv4 on the host is added
+#                                          automatically, this only adds more)
 #   DNS         extra DNS SANs            (space/comma separated, repeatable)
 #   CA_DAYS     CA validity in days       (default: 3650)
 #   LEAF_DAYS   leaf validity in days     (default: 825)
@@ -59,7 +62,9 @@ die() { echo "tls-cert-generate: $*" >&2; exit 1; }
 log() { printf '==> %s\n' "$*"; }
 
 usage() {
-    sed -n '2,44p' "${BASH_SOURCE[0]}" | sed -e 's/^# \{0,1\}//'
+    # Print the leading comment block (everything after the shebang, up to the
+    # first line of code) without hard-coding its length.
+    awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "${BASH_SOURCE[0]}"
 }
 
 while [ $# -gt 0 ]; do
@@ -95,8 +100,23 @@ san_items=()
 add_ip() { [ -n "${1:-}" ] && san_items+=("IP:$1"); }
 add_dns() { [ -n "${1:-}" ] && san_items+=("DNS:$1"); }
 
+# Primary LAN address (the default route); used for the next-steps hints.
 detect_lan_ip() {
     ip -4 route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}' || true
+}
+
+# Every global IPv4 on the host, minus container/VM bridges. A build machine can
+# have several NICs (ethernet + WiFi); the build origin may name any of them, so
+# all of them must be in the SAN or Chrome/curl fail with
+# ERR_TLS_CERT_ALTNAME_INVALID ("no alternative certificate subject name").
+detect_lan_ips() {
+    ip -4 -o addr show scope global 2>/dev/null | awk '{print $2, $4}' \
+        | while read -r iface cidr; do
+            case "$iface" in
+                docker* | br-* | veth* | lxcbr* | virbr* | tun* | tap* | zt* | wg*) continue ;;
+            esac
+            printf '%s\n' "${cidr%%/*}"
+        done
 }
 
 SHORT_HOST="$(hostname -s 2>/dev/null || hostname 2>/dev/null || true)"
@@ -106,6 +126,7 @@ add_dns localhost
 add_ip 127.0.0.1
 LAN_IP="$(detect_lan_ip)"
 [ -n "$LAN_IP" ] && add_ip "$LAN_IP"
+while read -r addr; do add_ip "$addr"; done < <(detect_lan_ips)
 
 # Word splitting is intentional: IP/DNS accept space- or comma-separated lists.
 for item in ${IP//,/ }; do add_ip "$item"; done
@@ -194,6 +215,8 @@ openssl verify -CAfile "$CA_CRT" "$LEAF_CRT" >/dev/null 2>&1 \
 # --------------------------------------------------------------- summary -----
 FINGERPRINT="$(openssl x509 -in "$CA_CRT" -noout -fingerprint -sha256 | sed 's/^.*=//')"
 NOT_AFTER="$(openssl x509 -in "$LEAF_CRT" -noout -enddate | sed 's/^notAfter=//')"
+LAN_ADDRS="$(detect_lan_ips | tr '\n' ' ')"
+LAN_ADDRS="${LAN_ADDRS% }"
 
 printf '\n'
 log "local CA       : $CA_CRT"
@@ -204,8 +227,10 @@ log "                 valid until: $NOT_AFTER"
 log "CA fingerprint : $FINGERPRINT"
 printf '\n'
 log "next steps:"
+printf '    LAN addresses : %s\n' "${LAN_ADDRS:-<lan-ip>}"
 printf '    1. install the CA on the phone: open http://<%s>:8083/ca.der in Chrome, then\n' "${LAN_IP:-<lan-ip>}"
 printf '       Settings -> Security -> Encryption & credentials -> Install a certificate\n'
 printf '       -> CA certificate -> Install anyway (requires a screen lock).\n'
 printf '    2. open https://<%s>:8084/ and confirm the padlock.\n' "${LAN_IP:-<lan-ip>}"
-printf '    3. build the APK with APP_CA_CERT=%s\n\n' "$CA_CRT"
+printf '    3. build the APK with APP_CA_CERT=%s\n' "$CA_CRT"
+printf '       (any LAN address above works as the APP_URL host; all are in the SAN)\n\n'

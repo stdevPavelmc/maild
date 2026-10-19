@@ -73,10 +73,11 @@ cd adminng/pwa && npm run build           # i18n gate -> tsc --noEmit -> Vite
 - `adminng/pwa-test` drives a real Chromium against `http://localhost:8083`. The entrypoint
   tunnels that origin to `http://adminng:80` inside the Compose network: `localhost` is a
   secure context, so the service worker, installability and offline assertions are real.
-- It approves its own device through `adminng.py --approve-device` in the api container (the
-  UI cannot approve itself by design); `run.sh superadmin` covers the UI path (devices panel,
-  re-auth + 5 s armed authorize). `flows.spec.ts` covers login, account create/delete, the
-  sidebar domain scope, the language switch and the offline write lockdown.
+- It approves its own browser through `adminng.py --approve-device <id>` in the api container
+  (the UI cannot approve itself by design); `run.sh superadmin` covers the
+  UI path (devices panel, re-auth + 5 s armed authorize). `flows.spec.ts` covers
+  registration-on-first-login, account create/delete, the sidebar domain scope, the language
+  switch and the offline write lockdown.
 - `tests/installable.spec.ts` asserts the manifest fields, an active service worker controlling
   the page and the app booting from the cache with the network down.
 - `lighthouse.mjs` gates performance ≥ 0.85, accessibility ≥ 0.9 and best-practices ≥ 0.9;
@@ -129,8 +130,8 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
 ```
 
 - The APK loads `APP_URL`, so it is same-origin with the API and needs no runtime server
-  address; the PWA's handshake → pending → approval → enrollment/2FA flow is what runs on the
-  phone. `APP_URL` must be **https** (a TWA needs a secure origin for the service worker, the
+  address; the PWA's register-on-login → pending → approval → enrollment/2FA flow is what runs
+  on the phone. `APP_URL` must be **https** (a TWA needs a secure origin for the service worker, the
   install prompt and the digital-asset-links check); `app-generate.sh` rejects `http://`. For a
   LAN device, run `adminng/pwa/tls-cert-generate.sh` (`bootstrap-dev.sh` does it), use the 8084
   listener that `docker-compose-dev.yml` mounts, install `ldata/certs/adminng-ca.der` on the
@@ -157,18 +158,30 @@ KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
 ## API (Phase 2: device-bound, two-step auth)
 
 Every request except `GET /health` carries `X-Device-ID` (a UUID the client
-generates once and stores). A fresh device is `PENDING` and only a superadmin
-can approve it — from the CLI (`adminng.py --approve-device`) or the devices
-panel. Then:
+generates once and stores) **and `X-Device-Secret`** (32 random bytes, also
+client-minted). The id is a public identifier; the secret is the possession
+factor that makes it non-transferable — a leaked id alone is useless (audit
+F-11). A device is **registered by the first login whose password verifies**
+(there is no anonymous registration endpoint), and authorization is
+**device-scoped**: a superadmin approves the *browser* once — from the CLI
+(`adminng.py --approve-device <id>`) or the devices panel — after which any
+admin whose password verifies may sign in from it. Then:
 
 ```
-POST /api/v1/device/handshake            # register (PENDING)
-POST /api/v1/auth/login-step1            # password → REQUIRES_TOTP_ENROLLMENT | REQUIRES_2FA
+POST /api/v1/auth/login-step1            # password → REQUIRES_TOTP_ENROLLMENT | REQUIRES_2FA | AUTHENTICATED | 403 (PENDING)
 POST /api/v1/auth/totp-enroll|confirm    # QR/otpauth + code (superadmins must enroll)
 POST /api/v1/auth/login-step2            # TOTP code → access JWT (10 min) + refresh token
 POST /api/v1/auth/refresh                # rotate the refresh jti
 POST /api/v1/auth/reauth-confirm         # password → X-Security-Validation-Token (30 s)
+GET  /api/v1/device/status?username=…    # this browser's state (needs the secret)
 ```
+
+Ticking **“Trust this device for 24 hours”** on the password step arms a fixed
+`ADMINNG_REMEMBER_TTL` window for that `(browser, admin)`: the TOTP code is asked
+once, and the next logins on that browser answer `AUTHENTICATED` directly until
+the window lapses. The window is armed by a TOTP (or biometric) success and is
+not extended by later password-only logins; a logout or a password/device change
+should be treated as a reason to re-verify.
 
 Catalogue routes (`/domains`, `/mailboxes` + `/{u}/quota`, `/aliases`,
 `/admins`, `/search`) require the Bearer access token; **deletes additionally
@@ -176,10 +189,10 @@ require the `X-Security-Validation-Token`** header (else
 `403 OPERATION_NOT_VERIFIED`). `GET /logs` reads the audit trail. Interactive
 docs: `/api/v1/docs`.
 
-Dev fixtures: `bootstrap-dev.sh` pre-approves the device
-`00000000-0000-4000-8000-0000000000d1` and writes it to `test.creds` as
-`adminng.device=<uuid>`; the first superadmin login must enroll TOTP (the
-`sysadmin` credential persists across test runs).
+Dev fixtures: `bootstrap-dev.sh` pre-approves the browser
+`00000000-0000-4000-8000-0000000000d1` and writes both `adminng.device=` and
+`adminng.secret=` to `test.creds`; the first superadmin login must enroll TOTP
+(the `sysadmin` credential persists across test runs).
 
 The catalogue self-test runs inside the container:
 
@@ -194,23 +207,33 @@ docker compose --env-file env.dev -f docker-compose-dev.yml \
 ## Authorizing the first device (server side) — READ THIS FIRST
 
 AdminNG uses a zero-trust device model: every client (browser or Android app)
-carries an `X-Device-ID`, and **nothing works until that device is explicitly
-APPROVED**. On a fresh deployment **no device is pre-approved**: there is no
-silent in-app auto-approval, so whoever reaches a fresh install first never
-gets in automatically.
+mints an `X-Device-ID` **and** an `X-Device-Secret`, and **nothing operational
+works until that browser is explicitly approved**. Approval is **device-scoped**:
+once a browser is approved, any admin whose password verifies may sign in from
+it. On a fresh deployment **no browser is pre-approved**: there is no silent
+in-app auto-approval, so whoever reaches a fresh install first never gets in
+automatically.
 
-The first administrator must be approved **from the server side** — access to
-the container is root authority:
+A browser is registered the moment someone signs in with a valid password, and
+its state starts `PENDING` (there is no anonymous registration endpoint — that
+was the F-11 finding). The first browser must then be approved **from the server
+side** — access to the container is root authority:
 
 ```bash
-# List devices (enrolled, state PENDING/APPROVED/REVOKED)
+# List devices (id + state + admins seen + fingerprint)
 docker compose exec api adminng.py --list-devices
 
-# Authorize a specific device
+# Authorize a browser (any admin may then use it; --user only records the requester)
 docker compose exec api adminng.py --approve-device 'DE793C1A-4F82-411B-9A74-5F1180210A88'
 
-# Revoke immediately (destroys every session/token bound to the device)
+# Revoke a browser: every admin is locked out and its sessions are destroyed
 docker compose exec api adminng.py --revoke-device 'DE793C1A-4F82-411B-9A74-5F1180210A88'
+
+# Revoke one admin on a shared browser (deny-list + kill that admin's sessions)
+docker compose exec api adminng.py --revoke-grant 'DE793C1A-…' --user 'admin@example.com'
+
+# Drop stale PENDING browsers (age: ADMINNG_PENDING_TTL_DAYS, default 3)
+docker compose exec api adminng.py --purge-pending
 
 # Unlock an administrator that lost its TOTP authenticator
 docker compose exec api adminng.py --totp-reset 'admin@example.com'
@@ -219,20 +242,26 @@ docker compose exec api adminng.py --totp-reset 'admin@example.com'
 docker compose exec api adminng.py --reset-ratelimit 'admin@example.com'
 ```
 
-> **`--add-device` does not authorize anything:** it only *registers* a row in the
-> `PENDING` state (used by `bootstrap-dev.sh` for its well-known dev device). The
-> browser/phone generates **its own UUID** and shows it on the lock screen — copy
-> that ID and run `--approve-device <id>` (or use the devices panel once another
-> superadmin device is approved).
+The browser id is shown on the client's lock screen (with a copy button) while
+it waits for authorization, and the sign-in form carries a collapsible panel with
+the same id so an admin can pre-authorize before the first attempt. Once the
+browser is registered, the pending screen also shows a short **fingerprint**
+derived from the secret; the superadmin sees the same code in the devices panel
+and should compare it out-of-band before approving — always verify the identity
+of the requester first.
 
-The device ID is shown on the client's lock screen (with a copy button) while
-it waits for authorization, so the admin can read it to you over a trusted
-channel — always verify the identity of the requester before approving.
+> **Device approval is browser-wide.** `--approve-device <id>` authorizes the
+> browser for every admin, matching the personal-device deployment model (admin
+> workstations are not treated as shared kiosks). `--user <admin>` is optional
+> and only records who asked for it; use `--revoke-grant <id> --user <admin>` to
+> offboard one admin from a browser you no longer want them to use.
+> `--secret <s>` is only for dev fixtures that must pre-bind a known secret (see
+> `bootstrap-dev.sh`); a real browser binds its own secret on first login.
 
 > Optional escape hatch for unattended first boots:
 > `ADMINNG_AUTO_APPROVE_FIRST=yes` (off by default) makes the **first**
 > successful superadmin login (password + completed TOTP enrollment)
-> auto-approve its own device; the window closes permanently after the first
+> auto-approve its browser; the window closes permanently after the first
 > approval. Only use it if you accept that risk. `bootstrap-dev.sh` uses the
 > CLI instead, so the dev fixtures self-approve safely.
 
@@ -248,7 +277,8 @@ channel — always verify the identity of the requester before approving.
   loads `APP_URL`, so it is same-origin and needs no in-app server setting.
   Builds that ship their own assets (`VITE_REQUIRE_SERVER_URL=1`) show the
   server-address screen on first run; the same form lives in Settings → *Change
-  server* and clears the session, the device identity and the log cache.
+  server* and clears the session, the browser identity (UUID + secret) and the
+  log cache.
 
 ## Documentation
 

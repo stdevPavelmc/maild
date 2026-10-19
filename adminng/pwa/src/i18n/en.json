@@ -40,7 +40,7 @@
     "title": "Sign in",
     "username": "Administrator address",
     "password": "Password",
-    "remember": "Remember this device for 24 hours",
+    "remember": "Trust this device for 24 hours (skip the code)",
     "submit": "Continue",
     "biometric": "Sign in with biometrics",
     "biometricFailed": "Biometric sign-in failed or is not enabled on this device. Use your password instead.",
@@ -58,6 +58,10 @@
     "id": "Device identifier",
     "copy": "Copy ID",
     "check": "Check approval",
+    "identityTitle": "This browser's identifier",
+    "identityBody": "Give this identifier to a superadmin so they can pre-authorize this browser, or read them the fingerprint shown after you sign in. Once the browser is approved, any admin may sign in from it.",
+    "fingerprint": "Device fingerprint",
+    "fingerprintHint": "Read this code to the superadmin so they can confirm it matches the request.",
     "cliHint": "Server-side command: docker compose exec api adminng.py --approve-device {{id}}",
     "revoked": "This device was revoked. Ask a superadmin to approve it again."
   },
@@ -150,6 +154,7 @@
     "approve": "Authorize",
     "lastSeen": "Last seen",
     "user": "User",
+    "noUser": "No admin yet",
     "none": "No devices registered"
   },
   "logs": {
@@ -186,6 +191,13 @@
     "biometricEnable": "Enable on this device",
     "biometricDisable": "Disable on this device",
     "biometricFailure": "The biometric operation could not be completed."
+  },
+  "biometricPrompt": {
+    "title": "Sign in faster next time",
+    "body": "Enable biometric sign-in on this device. After that, you can sign in with your fingerprint or face instead of typing your password.",
+    "enable": "Enable biometrics",
+    "confirm": "Enable on this device",
+    "later": "Not now"
   },
   "quota": { "of": "of" }
 }

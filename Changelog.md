@@ -18,7 +18,58 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-18 1.6.1-dev
+- Changed: **AdminNG approval is now device-scoped** (migration `008_device_trust.sql`). The
+  superadmin approves a *browser* once (`device.state` = `PENDING`/`APPROVED`/`REVOKED`) and any
+  admin whose password verifies may then sign in from it — the personal-device deployment model
+  (admin workstations are not treated as shared kiosks). `device_grant` is kept as a per-admin
+  activity log (last seen / last IP) and as the home of the trust window below; the CLI's
+  `--approve-device <id>` no longer needs `--user` (it is optional and only records the
+  requester), and the devices panel lists one card per browser with the admins seen on it.
+  `--revoke-grant <id> --user <admin>` still offboards a single admin (deny-list + session
+  kill) without touching the browser.
+- Added: **“Trust this device for 24 hours” now skips the TOTP challenge**, not just widens the
+  token TTL. A successful TOTP (or biometric) login arms a fixed `ADMINNG_REMEMBER_TTL` window
+  on the `(device, admin)` pair (`device_grant.trusted_until`); while it is in the future
+  `login-step1` answers `AUTHENTICATED` directly. The window is armed only by a full second
+  factor and is not extended by later password-only logins.
+- Added: **biometric sign-in enrollment prompt** — a dismissible offer right after the first
+  login that enables a platform credential on the device (password-gated, same flow as
+  Settings); Settings keeps the control at any time. WebAuthn logins honor the remember window
+  too.
+- Changed: `test.sh` section I covers the new behavior (a remembered login skips the code on
+  the next login, I4c) and prefers a fresh third fixture browser for the pending-TTL purge
+  (I18); the unit suite (`tests/test_devices.py`) now asserts device states, the trust window
+  and the per-admin deny-list.
+- Docs: `adminng/README.md`, `.agents/services/catalog.md`, `.agents/services/configuration.md`,
+  `.agents/devops/workflows.md`, `README.md` and `INSTALL.md` describe the device-scoped model
+  and the new `--approve-device` usage.
+
 ## 2026-10-18 1.6.0-dev
+- Security: **AdminNG device gate hardened (2026-10 security audit F-11)**. The anonymous
+  `POST /device/handshake` is **retired**: a `device` row is now created only inside a
+  `POST /auth/login-step1` whose password verified, so random callers can no longer mint
+  `PENDING` rows. Every browser also mints a **secret** (`X-Device-Secret`, 32 random bytes,
+  sent on every request; the server stores only `sha256`), which makes the public device id
+  non-transferable — a leaked id can no longer be polled or reused from another host.
+  Authorization moves from the device to a **`device_grant` row keyed by `(device_id,
+  username)`** (migration `007_device_grants.sql`), so a shared browser needs one approval per
+  admin; `GET /device/status` requires the matching secret and returns `404 DEVICE_UNKNOWN`
+  for anything else (no enumeration). Stale `PENDING` grants are purged after
+  `ADMINNG_PENDING_TTL_DAYS` (default 3) at boot and hourly. The lock screen and devices panel
+  show a short fingerprint derived from the secret for out-of-band verification. **Hard
+  cutover:** the migration revokes existing sessions, so admins re-login once.
+- Changed: `adminng.py` device commands follow the grant model — `--approve-device <id>
+  --user <admin>` (plus optional `--secret` for dev fixtures), `--revoke-device` (whole
+  browser), new `--revoke-grant <id> --user <admin>`, `--purge-pending`; `--add-device` is
+  removed. The devices panel approves/revokes one `(browser, admin)` grant per card.
+- Changed: `ADMINNG_PENDING_TTL_DAYS` (default 3, `0` disables) is the new stale-grant sweep
+  knob (image `ENV`, `env.sample`, `.agents/services/configuration.md`).
+- Changed: `test.sh` (now **76 checks**) pins the new gate end to end: a known device id with
+  a **foreign secret** is refused before the password check (I2b), the secret is enforced on
+  authenticated calls (I4b), `--revoke-grant` kills only that admin's sessions while the
+  sysadmin keeps working on the same browser (I15b), and `--purge-pending` drops a backdated
+  `PENDING` grant (I18).
 - Security: **mailbox and administrator passwords now use Argon2id instead of MD5-CRYPT
   (2026-10 security audit F-18)**. New hashes (`{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…`)
   keep the `{SCHEME}` prefix Dovecot's SQL passdb requires; the parameters are self-encoded,
@@ -47,6 +98,15 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   work for accounts still on legacy hashes. Accepted by design; an operator who needs it can
   set `PASSWORD_SCHEME=md5crypt` until the deadline. Dev fixtures deliberately stay on
   MD5-CRYPT (`bootstrap-dev.sh`) to exercise the coexistence path.
+- Fixed: the AdminNG APK build failed with `ERR_TLS_CERT_ALTNAME_INVALID` on **multi-NIC
+  hosts** (ethernet + WiFi). `adminng/pwa/tls-cert-generate.sh` only added the default-route
+  IP to the leaf SAN, so building against the other NIC's address failed the manifest
+  preflight. It now lists **every** global IPv4 (container/VM bridges excluded) and the header
+  length no longer drives `--help`. `app-generate.sh` detects a SAN mismatch and prints the
+  exact remediation (`RENEW=1 ./tls-cert-generate.sh --ip <host>` + listener restart). Docs
+  updated (`adminng/pwa/README.md` §2.1, `.agents/devops/workflows.md`,
+  `.agents/services/{catalog,configuration}.md`). Re-issue an existing leaf with `RENEW=1`
+  (the CA is unchanged, so devices do not re-import it).
 
 ## 2026-10-17 1.6.0-dev
 - Fixed: `bootstrap-dev.sh` aborted with `mkdir: Permission denied` on a truly fresh tree

@@ -207,7 +207,7 @@ def registration_options(
 ) -> dict:
     origin, rp_id = origin_config(origin_header)
     auth._verify_credentials(username, password)
-    _require_approved(device_id)
+    _require_grant(device_id, username)
     if status(username, device_id)["enabled"]:
         raise ApiError(409, "WEBAUTHN_ALREADY_ENABLED", "biometric sign-in is already enabled")
 
@@ -241,7 +241,7 @@ def registration_verify(
     ip: str | None,
 ) -> dict:
     challenge = _consume_challenge(challenge_id, username, device_id, "register")
-    _require_approved(device_id)
+    _require_grant(device_id, username)
     try:
         verified = verify_registration_response(
             credential=credential,
@@ -301,16 +301,15 @@ def registration_verify(
 def login_options(
     username: str,
     device_id: str,
+    secret: str,
     ip: str | None,
     origin_header: str | None,
     remember: bool,
 ) -> dict:
     origin, rp_id = origin_config(origin_header)
     ratelimit.check(username, ip)
-    device = devices.get(device_id)
-    if device is None:
-        raise ApiError(403, "DEVICE_NOT_AUTHORIZED", "run the device handshake first")
-    auth._require_approved(device, username)
+    auth._device_or_error(device_id, secret)
+    auth._blocked_or_error(device_id, username)
     admin = auth._admin_row(username)
     if admin is None or not admin["active"]:
         raise ApiError(401, "WEBAUTHN_UNAVAILABLE", "biometric sign-in is not enabled on this device")
@@ -368,13 +367,12 @@ def login_verify(
     challenge_id: uuid.UUID,
     credential: dict,
     device_id: str,
+    secret: str,
     ip: str | None,
 ) -> dict:
     challenge = _consume_challenge(challenge_id, username, device_id, "login")
-    device = devices.get(device_id)
-    if device is None:
-        raise ApiError(403, "DEVICE_NOT_AUTHORIZED", "run the device handshake first")
-    auth._require_approved(device, username)
+    auth._device_or_error(device_id, secret)
+    auth._blocked_or_error(device_id, username)
     admin = auth._admin_row(username)
     if admin is None or not admin["active"]:
         _invalid_login(username, device_id, ip)
@@ -404,7 +402,7 @@ def login_verify(
             (new_sign_count, stored["credential_id"]),
         )
         conn.commit()
-    devices.bind_user(device_id, username, ip)
+    devices.record_login(device_id, username, ip)
     ratelimit.success(username, ip)
     audit.record(
         actor=username,
@@ -414,6 +412,10 @@ def login_verify(
         endpoint="POST /api/v1/auth/webauthn/login/verify",
         method="webauthn",
     )
+    if challenge["remember"]:
+        # Biometrics counts as a full login: a remembered one arms the same 24h
+        # trust window as a TOTP login.
+        devices.arm_trust(device_id, username)
     return {"session_state": "AUTHENTICATED", **auth._issue(
         username, device_id, admin, remember=challenge["remember"]
     )}
@@ -515,6 +517,11 @@ def disable(username: str, password: str, device_id: str, ip: str | None) -> dic
             (username, device_id),
         )
         removed = cur.rowcount
+        cur.execute(
+            "UPDATE device_grant SET trusted_until = NULL "
+            "WHERE username = %s AND device_id = %s",
+            (username, device_id),
+        )
         conn.commit()
     audit.record(
         actor=username,
@@ -526,8 +533,10 @@ def disable(username: str, password: str, device_id: str, ip: str | None) -> dic
     return {"enabled": False, "removed": removed > 0}
 
 
-def _require_approved(device_id: str) -> None:
-    device = devices.get(device_id)
-    if device is None:
-        raise ApiError(403, "DEVICE_NOT_AUTHORIZED", "run the device handshake first")
-    auth._require_approved(device)
+def _require_grant(device_id: str, username: str) -> None:
+    device = devices.device_row(device_id)
+    if device is None or device["state"] != "APPROVED":
+        raise ApiError(
+            403, "DEVICE_NOT_AUTHORIZED", "this device is not approved for this account"
+        )
+    auth._blocked_or_error(device_id, username)

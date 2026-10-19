@@ -80,6 +80,10 @@ ADMINNG_ENROLL_TTL = _int("ADMINNG_ENROLL_TTL", 600)    # TOTP enrollment window
 ADMINNG_LOGIN_MAX_FAILURES = _int("ADMINNG_LOGIN_MAX_FAILURES", 5)
 ADMINNG_LOCKOUT_SECONDS = _int("ADMINNG_LOCKOUT_SECONDS", 900)
 ADMINNG_DEVICE_NAME_MAX = _int("ADMINNG_DEVICE_NAME_MAX", 120)
+# Stale PENDING device grants (a browser that asked for access but was never
+# approved) are purged after this many days (audit F-11): the client re-enrolls
+# from zero. 0 disables the sweep.
+ADMINNG_PENDING_TTL_DAYS = _int("ADMINNG_PENDING_TTL_DAYS", 3)
 ADMINNG_WEBAUTHN_RP_ID = os.environ.get(
     "ADMINNG_WEBAUTHN_RP_ID", "localhost"
 ).strip().lower().rstrip(".")

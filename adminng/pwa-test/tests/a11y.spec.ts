@@ -15,8 +15,8 @@ import { join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { ARTIFACTS } from '../lib/env'
-import { approveThisDevice, login, loginSuperadmin } from '../lib/login'
+import { adminngCli, ARTIFACTS } from '../lib/env'
+import { approveThisDevice, login, loginSuperadmin, registerDevice, ALICE, SYSADMIN } from '../lib/login'
 
 const require = createRequire(import.meta.url)
 const AXE_SOURCE = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8')
@@ -61,12 +61,16 @@ test('every screen passes the WCAG 2.1 A/AA audit (serious/critical)', async ({ 
   await page.setViewportSize({ width: 1440, height: 900 })
 
   await page.goto('/')
-  const pendingFailures = await audit(page, 'pending')
-
-  await approveThisDevice(page)
   const loginFailures = await audit(page, 'login')
 
-  await login(page, 'alice@example.net')
+  // Registration happens inside a real sign-in now (audit F-11), so the pending
+  // screen is captured after submitting credentials.
+  const id = await registerDevice(page, ALICE)
+  const pendingFailures = await audit(page, 'pending')
+  adminngCli('--approve-device', id, '--user', ALICE)
+  await page.getByRole('button', { name: 'Check approval' }).click()
+
+  await login(page, ALICE)
   const failures: AxeViolation[] = [...pendingFailures, ...loginFailures]
 
   for (const screen of ['domains', 'mailboxes', 'aliases', 'admins', 'logs', 'settings']) {
@@ -76,7 +80,7 @@ test('every screen passes the WCAG 2.1 A/AA audit (serious/critical)', async ({ 
 
   const adminContext = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   const adminPage = await adminContext.newPage()
-  await approveThisDevice(adminPage)
+  await approveThisDevice(adminPage, SYSADMIN)
   await loginSuperadmin(adminPage)
   await adminPage.goto('/devices')
   failures.push(...(await audit(adminPage, 'devices')))

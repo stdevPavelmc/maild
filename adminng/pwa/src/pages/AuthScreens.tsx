@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useTranslation } from 'react-i18next'
-import { loadRememberPreference, saveRememberPreference } from '../lib/api'
+import { deviceId, loadRememberPreference, loadUsername, saveRememberPreference, saveUsername } from '../lib/api'
 import { useAuth } from '../store/AuthContext'
 import { Button } from '../components/ui/button'
 import { ErrorBanner, Field, Input } from '../components/kit'
@@ -27,14 +27,16 @@ function ErrorText({ code }: { code: string | null }) {
 export function LoginPage() {
   const { t } = useTranslation()
   const { phase, login, loginBiometric, submitCode, enroll, enrollment, loginError, busy } = useAuth()
-  const [username, setUsername] = useState(localStorage.getItem('adminng.username') ?? '')
+  const [username, setUsername] = useState(loadUsername() ?? '')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [remember, setRemember] = useState(loadRememberPreference)
+  const [copied, setCopied] = useState(false)
+  const device = deviceId()
 
   const submitPassword = (event: React.FormEvent): void => {
     event.preventDefault()
-    localStorage.setItem('adminng.username', username)
+    saveUsername(username)
     void login(username, password, remember)
   }
 
@@ -87,7 +89,7 @@ export function LoginPage() {
                 className="w-full"
                 disabled={busy}
                 onClick={() => {
-                  localStorage.setItem('adminng.username', username)
+                  saveUsername(username)
                   void loginBiometric(username, remember)
                 }}
               >
@@ -95,6 +97,28 @@ export function LoginPage() {
               </Button>
             )}
           </form>
+        )}
+
+        {phase === 'login' && (
+          <details className="rounded-lg border border-slate-800 bg-slate-900/40 p-3 text-xs text-slate-400">
+            <summary className="cursor-pointer select-none">{t('device.identityTitle')}</summary>
+            <p className="mt-2">{t('device.identityBody')}</p>
+            <div className="mt-2 flex items-center gap-2">
+              <code className="flex-1 truncate rounded bg-slate-800 px-2 py-1">{device}</code>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  void navigator.clipboard.writeText(device)
+                  setCopied(true)
+                  window.setTimeout(() => setCopied(false), 1500)
+                }}
+              >
+                {copied ? '✓' : t('device.copy')}
+              </Button>
+            </div>
+          </details>
         )}
 
         {phase === 'twofa' && (

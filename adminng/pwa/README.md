@@ -14,8 +14,8 @@ container) and the **Android packaging pipeline**:
 | `android-project/`, `dist/`, `twa-manifest.json`, `*.keystore*` | generated, git-ignored |
 
 The APK is a **Trusted Web Activity**: it opens `APP_URL` in a Chrome-backed full-screen
-shell. It is same-origin with the API, so the phone runs the normal AdminNG flow (device
-handshake → `PENDING` → superadmin approval → login/2FA).
+shell. It is same-origin with the API, so the phone runs the normal AdminNG flow (register on
+first login → `PENDING` → superadmin approval → login/2FA).
 
 > `APP_URL` must be **https** for a real device: a TWA needs a secure origin (service worker,
 > install prompt, digital asset links and `crypto.randomUUID`). Plain `http` is rejected by
@@ -124,7 +124,8 @@ Nothing Android-related is needed on the host: every step is a container.
 
 > `APP_URL` must be reachable **from the build machine**: Bubblewrap downloads
 > `${APP_URL}/manifest.webmanifest` and the icon to generate the TWA project. Build after the
-> ingress/DNS is live (or point it at the dev stack for an experiment).
+> ingress/DNS is live (or point it at the dev stack for an experiment). On a LAN origin the host
+> must also be listed in the server certificate SAN — see §2.1.
 
 1. checks `${APP_URL}/manifest.webmanifest` over the expected trust chain, then builds the
    root-relative PWA bundle (`node:22-bookworm`);
@@ -162,20 +163,35 @@ serves HTTPS on **8084** with a certificate issued by a **local CA**:
 # once (bootstrap-dev.sh does it automatically), from the repository root:
 ./adminng/pwa/tls-cert-generate.sh
 #   -> ldata/certs/adminng-ca.crt / .der   (the CA: install this on the phone)
-#   -> ldata/certs/adminng.crt / .key      (server cert; SAN = LAN IP + hostname + localhost)
+#   -> ldata/certs/adminng.crt / .key      (server cert; SAN = hostname + localhost
+#                                           + every global IPv4 on the machine)
 
 # build against it:
 cd adminng/pwa
-APP_URL=https://192.168.1.163:8084 \
+APP_URL=https://<lan-ip>:8084 \
 APP_CA_CERT=../../ldata/certs/adminng-ca.crt \
 APP_PKG=cu.maild.adminng \
 KEYSTORE=$PWD/android.keystore KEY_ALIAS=maild-apk \
 KEY_PASSWORD='…' STORE_PASSWORD='…' ./app-generate.sh
 ```
 
-`APP_CA_CERT` is the only LAN-specific knob: it makes the build machine trust the private CA
+`APP_CA_CERT` is the only trust knob: it makes the build machine trust the private CA
 (manifest preflight **and** Bubblewrap). Without it, an HTTPS URL with a private CA fails fast
 with `UNABLE_TO_VERIFY_LEAF_SIGNATURE` instead of after the Gradle build.
+
+The `APP_URL` host must also be in the **certificate SAN**, not just trusted: a multi-NIC host
+(ethernet + WiFi) has more than one LAN IP, and only the ones listed in the SAN verify. The
+generator adds every global IPv4 automatically, so a freshly issued leaf covers them all; if a
+NIC/IP changed after the leaf was issued, re-issue it (same CA, no device action) and restart
+the listener:
+
+```bash
+cd adminng/pwa && RENEW=1 ./tls-cert-generate.sh --ip <new-lan-ip>
+docker compose --env-file env.dev -f docker-compose-dev.yml restart adminng  # reloads the cert
+```
+
+Without that, Chrome/curl fail with `ERR_TLS_CERT_ALTNAME_INVALID` ("no alternative certificate
+subject name matches …"); the `app-generate.sh` preflight detects this and prints the command.
 
 Install the CA on the phone:
 
@@ -262,6 +278,7 @@ it changes nothing inside the APK.
 | `keystore '…' not found` | wrong path, not absolute | pass an absolute `KEYSTORE` |
 | APK opens with a URL bar | IP origin: Digital Asset Links cannot be verified | expected on a LAN IP; a DNS name + `assetlinks.json` is needed for standalone |
 | `UNABLE_TO_VERIFY_LEAF_SIGNATURE` during the build | the build does not trust the local CA | pass `APP_CA_CERT=/path/to/adminng-ca.crt` |
+| `ERR_TLS_CERT_ALTNAME_INVALID` during the build | the cert SAN does not list the `APP_URL` host (e.g. a second NIC / changed LAN IP) | `RENEW=1 ./tls-cert-generate.sh --ip <host>` then `restart adminng` (§2.1); or build against an IP that is already in the SAN |
 | `ERR_CERT_AUTHORITY_INVALID` on the phone | CA not installed, or SAN does not match the URL | install `ca.der`; check `openssl x509 -ext subjectAltName` lists the exact IP/host |
 | `http://` rejected by `app-generate.sh` | TWA needs a secure origin (by design) | use `https://<lan-ip>:8084` with the local CA (§2.1) |
 | `Permission denied` under `android-project/` | files created by the root container | the script reclaims ownership before/after every run |

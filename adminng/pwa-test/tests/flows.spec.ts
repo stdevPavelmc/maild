@@ -19,8 +19,13 @@ const ALICE_PASSWORD = password(ALICE)
 test('the full admin flow works in a real browser', async ({ page }) => {
   const account = `e2e-${Date.now()}@example.net`
 
-  await test.step('a fresh device waits for approval and the CLI approves it', async () => {
+  await test.step('a fresh browser registers on first login and the CLI approves it', async () => {
     await page.goto('/')
+    await page.locator('input[autocomplete="username"]').fill(ALICE)
+    await page.locator('input[autocomplete="current-password"]').fill(ALICE_PASSWORD)
+    await page.getByRole('button', { name: 'Continue' }).click()
+    // Valid credentials, but the browser is not approved yet: the login is what
+    // registers it, and it waits for approval.
     await expect(page.getByRole('heading', { name: /Waiting for approval/ })).toBeVisible()
 
     const deviceId = (await page.locator('code').first().innerText()).trim()
@@ -28,6 +33,8 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     adminngCli('--approve-device', deviceId)
 
     await page.getByRole('button', { name: 'Check approval' }).click()
+    // Approved now; there are no tokens yet, so we return to the sign-in form.
+    await expect(page.locator('input[autocomplete="username"]')).toBeVisible()
   })
 
   await test.step('alice signs in and lands on the domains list', async () => {
@@ -41,7 +48,7 @@ test('the full admin flow works in a real browser', async ({ page }) => {
 
   await test.step('the keyboard shortcut opens the search palette', async () => {
     await page.goto('/domains')
-    // The Shell (and its window listener) mounts after the boot/handshake.
+    // The Shell (and its window listener) mounts after the boot/login.
     await expect(page.getByRole('link', { name: /Domains/ }).first()).toBeVisible()
     await page.keyboard.press('Control+k')
     await expect(page.getByPlaceholder(/Search users, aliases or domains/)).toBeVisible()
@@ -120,13 +127,13 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Create' })).toBeEnabled()
   })
 
-  await test.step('changing the server address clears the session and re-handshakes', async () => {
+  await test.step('changing the server address clears the session and starts over', async () => {
     await page.getByRole('button', { name: /Settings/ }).click()
     await page.getByLabel('Server URL').fill('http://localhost:8083')
     await page.getByRole('button', { name: 'Change server' }).click()
 
-    // The form probes /api/v1/health, wipes tokens + device UUID + the log cache
-    // and reloads: a brand-new device is registered and lands on the pending screen.
-    await expect(page.getByRole('heading', { name: /Waiting for approval/ })).toBeVisible()
+    // The form probes /api/v1/health, wipes tokens + device id + secret + the log
+    // cache and reloads: a brand-new browser starts at the sign-in form.
+    await expect(page.locator('input[autocomplete="username"]')).toBeVisible()
   })
 })

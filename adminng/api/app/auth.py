@@ -1,17 +1,23 @@
 """Phase-2 authentication: device trust + password + TOTP + re-auth tokens.
 
-Flow (technical-draft §4.1-§4.5):
+Flow:
 
-  handshake (X-Device-ID) -> PENDING
-  login-step1 (password; device must be APPROVED) ->
-      REQUIRES_TOTP_ENROLLMENT | REQUIRES_2FA | tokens (no TOTP required)
+  login-step1 (password; creates/binds the device on first success) ->
+      REQUIRES_TOTP_ENROLLMENT | REQUIRES_2FA | tokens | 403
   totp-enroll / totp-confirm (enrollment token)
   login-step2 (flow token + code) -> access JWT (10 min) + opaque refresh token
   refresh (rotates the refresh jti) / logout / reauth-confirm (30 s token)
 
-Sessions are bound to (username, device). Only the SHA-256 of a refresh token is
-stored; access tokens are stateless JWTs carrying the device id, so a token
-minted for one device cannot be used from another.
+Every browser mints a UUID *and* a secret on first run; the secret is a
+possession factor that makes the (public) device id non-transferable. The device
+row is created only inside a verified login; approval is **device-scoped**
+(`device.state`), so once a browser is approved any admin may sign in from it.
+
+A successful login that ticked "remember this device for 24 hours" arms a fixed
+`device_grant.trusted_until` window for that `(device, admin)`: while it is in
+the future, login-step1 answers AUTHENTICATED directly and the TOTP code is not
+requested again. Sessions are bound to (username, device); only the SHA-256 of a
+refresh token is stored.
 """
 
 import hashlib
@@ -132,30 +138,57 @@ def _verify_credentials(username: str, password: str) -> dict:
     return row
 
 
-def _device_or_error(device_id: str) -> dict:
-    device = devices.get(device_id)
-    if device is None:
+def _bound_device_or_error(device_id: str, secret: str) -> dict:
+    """Resolve a browser whose secret matches; anything else is not ours.
+
+    A known device whose stored secret does not match the presented one is
+    treated exactly like an unknown device (no state, no user, no oracle).
+    """
+    device = devices.device_row(device_id)
+    if device is None or not devices.secret_matches(device.get("secret_hash"), secret):
         raise ApiError(
             403,
             "DEVICE_NOT_AUTHORIZED",
-            "the device is not registered; run the handshake first",
+            "this device is not registered for this browser",
             device_id=device_id,
-        )
-    if device["authorization_state"] == "REVOKED":
-        raise ApiError(
-            401, "DEVICE_REVOKED", "this device was revoked", device_id=device_id
         )
     return device
 
 
-def _require_approved(device: dict, username: str | None = None) -> None:
-    if device["authorization_state"] != "APPROVED":
+def _device_or_error(device_id: str, secret: str) -> dict:
+    """Resolve an APPROVED browser (secret + device state), or raise the error."""
+    device = _bound_device_or_error(device_id, secret)
+    if device["state"] == "REVOKED":
+        raise ApiError(
+            401,
+            "DEVICE_REVOKED",
+            "this device was revoked",
+            device_id=device_id,
+        )
+    if device["state"] != "APPROVED":
         raise ApiError(
             403,
             "DEVICE_NOT_AUTHORIZED",
             "this device has not been approved by an administrator yet",
-            device_id=device["device_id"],
-            associated_user=username or device["associated_user"],
+            device_id=device_id,
+        )
+    return device
+
+
+def _blocked_or_error(device_id: str, username: str) -> None:
+    """Refuse an admin who was explicitly revoked on this browser (deny-list).
+
+    Approval is device-scoped, but `--revoke-grant` offboards one admin: their
+    `device_grant` row is REVOKED and every access token stops working at once.
+    """
+    grant = devices.grant_row(device_id, username)
+    if grant is not None and grant["state"] == "REVOKED":
+        raise ApiError(
+            401,
+            "DEVICE_REVOKED",
+            "this admin was revoked on this device",
+            device_id=device_id,
+            username=username,
         )
 
 
@@ -182,11 +215,23 @@ def device_header(x_device_id: str | None = Header(default=None, alias="X-Device
         raise ApiError(422, "VALIDATION", "X-Device-ID must be a UUID") from None
 
 
+def device_secret_header(
+    x_device_secret: str | None = Header(default=None, alias="X-Device-Secret"),
+) -> str:
+    """The client-minted browser secret (never logged, never in the URL)."""
+    if not x_device_secret:
+        raise ApiError(401, "DEVICE_REQUIRED", "missing X-Device-Secret header")
+    if not 16 <= len(x_device_secret) <= 200:
+        raise ApiError(422, "VALIDATION", "X-Device-Secret is malformed")
+    return x_device_secret
+
+
 async def get_principal(
     authorization: str | None = Header(default=None, alias="Authorization"),
     x_device_id: str | None = Header(default=None, alias="X-Device-ID"),
+    x_device_secret: str = Depends(device_secret_header),
 ) -> Principal:
-    """Resolve the access JWT and its device into a Principal."""
+    """Resolve the access JWT into a Principal (device secret + approved grant)."""
     if not x_device_id:
         raise ApiError(401, "DEVICE_REQUIRED", "missing X-Device-ID header")
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -196,8 +241,8 @@ async def get_principal(
     if claims.get("did") != device_id:
         raise ApiError(401, "TOKEN_INVALID", "the token belongs to another device")
 
-    device = _device_or_error(device_id)
-    _require_approved(device)
+    _device_or_error(device_id, x_device_secret)
+    _blocked_or_error(device_id, claims["sub"])
     admin = _admin_row(claims["sub"])
     if admin is None or not admin["active"]:
         raise ApiError(401, "UNAUTHENTICATED", "account disabled")
@@ -242,11 +287,34 @@ def ensure_domain_allowed(principal: Principal, domain: str) -> None:
 
 # --------------------------------------------------------------------- flows
 def login_step1(
-    username: str, password: str, device_id: str, ip: str | None, remember: bool = False
+    username: str,
+    password: str,
+    device_id: str,
+    secret: str,
+    ip: str | None,
+    client_type: str = "web",
+    device_name: str | None = None,
+    remember: bool = False,
 ) -> dict:
-    """Verify password + device state; decide enrollment / 2FA / direct issue."""
+    """Verify password + device state; decide enrollment / 2FA / direct issue.
+
+    The device is registered lazily: a browser is only written (and its secret
+    bound) after a *verified* password, so anonymous callers cannot mint rows.
+    """
     ratelimit.check(username, ip)
-    device = _device_or_error(device_id)
+
+    device = devices.device_row(device_id)
+    # Known browser, but the presented secret does not prove ownership: refuse
+    # uniformly, without touching credentials (no device-id/credential oracle).
+    if device is not None and device.get("secret_hash") is not None and not (
+        devices.secret_matches(device["secret_hash"], secret)
+    ):
+        raise ApiError(
+            403,
+            "DEVICE_NOT_AUTHORIZED",
+            "this device is not registered for this browser",
+            device_id=device_id,
+        )
 
     try:
         admin = _verify_credentials(username, password)
@@ -268,18 +336,38 @@ def login_step1(
             ) from None
         raise
 
-    # First-device bootstrap: only a superadmin, only with TOTP already enrolled,
-    # only while no device is approved, and only when the operator opted in.
+    # First verified login from this browser: create it / bind its secret.
+    if device is None:
+        device = devices.register_device(
+            device_id, client_type, device_name, devices.hash_secret(secret), ip
+        )
+        audit.record(
+            actor=username,
+            action="DEVICE_REGISTER",
+            device_id=device_id,
+            ip=ip,
+            endpoint="POST /api/v1/auth/login-step1",
+            client_type=client_type,
+        )
+    elif device.get("secret_hash") is None:
+        devices.bind_secret(device_id, devices.hash_secret(secret))
+        devices.touch_device(device_id, ip)
+
+    # Log this admin's activity on the browser.
+    devices.record_login(device_id, username, ip)
+
     credential = _credential(username)
+    # First-device bootstrap: only a superadmin, only with TOTP already enrolled,
+    # only while no browser is approved, and only when the operator opted in.
     if (
-        device["authorization_state"] == "PENDING"
+        device["state"] == "PENDING"
         and settings.ADMINNG_AUTO_APPROVE_FIRST
         and admin["superadmin"]
-        and devices.count_approved() == 0
+        and devices.count_approved_devices() == 0
         and credential
         and credential["confirmed"]
     ):
-        devices.set_state(device_id, "APPROVED", "auto-first")
+        devices.set_device_state(device_id, "APPROVED", "auto-first")
         audit.record(
             actor=username,
             action="DEVICE_APPROVE",
@@ -288,10 +376,16 @@ def login_step1(
             endpoint="POST /api/v1/auth/login-step1",
             approved_by="auto-first",
         )
-        device = _device_or_error(device_id)
+        device = devices.device_row(device_id)
 
-    if device["authorization_state"] == "PENDING":
-        devices.bind_user(device_id, username, ip)
+    if device["state"] == "REVOKED":
+        raise ApiError(
+            401,
+            "DEVICE_REVOKED",
+            "this device was revoked",
+            device_id=device_id,
+        )
+    if device["state"] == "PENDING":
         audit.record(
             actor=username,
             action="DEVICE_PENDING_LOGIN",
@@ -305,10 +399,9 @@ def login_step1(
             "DEVICE_NOT_AUTHORIZED",
             "this device has not been approved by an administrator yet",
             device_id=device_id,
-            associated_user=username,
         )
-    _require_approved(device, username)
-    devices.bind_user(device_id, username, ip)
+
+    _blocked_or_error(device_id, username)
 
     if _totp_required(admin["superadmin"]) and not (credential and credential["confirmed"]):
         audit.record(
@@ -325,6 +418,22 @@ def login_step1(
         }
 
     if credential and credential["confirmed"]:
+        # A remembered login armed a fixed 24h window: within it the code is not
+        # asked again for this (browser, admin).
+        if devices.trust_valid(device_id, username):
+            ratelimit.success(username, ip)
+            audit.record(
+                actor=username,
+                action="LOGIN_OK",
+                device_id=device_id,
+                ip=ip,
+                endpoint="POST /api/v1/auth/login-step1",
+                method="remembered",
+            )
+            return {
+                "session_state": "AUTHENTICATED",
+                **_issue(username, device_id, admin, remember=True),
+            }
         return {
             "session_state": "REQUIRES_2FA",
             "flow_token": tokens.flow_token(username, device_id, remember=remember),
@@ -340,16 +449,17 @@ def login_step1(
     )
     return {"session_state": "AUTHENTICATED", **_issue(username, device_id, admin, remember=remember)}
 
-def login_step2(flow_token: str, code: str, device_id: str, ip: str | None) -> dict:
+
+def login_step2(flow_token: str, code: str, device_id: str, secret: str, ip: str | None) -> dict:
     """Second factor: verify the TOTP code and mint the token pair."""
     claims = tokens.decode(flow_token, "2fa")
     if claims.get("did") != device_id:
         raise ApiError(401, "TOKEN_INVALID", "the flow token belongs to another device")
-    remember = bool(claims.get("remember", False))
-    device = _device_or_error(device_id)
-    _require_approved(device)
 
+    remember = bool(claims.get("remember", False))
     username = claims["sub"]
+    _device_or_error(device_id, secret)
+    _blocked_or_error(device_id, username)
     admin = _admin_row(username)
     if admin is None or not admin["active"]:
         raise ApiError(401, "UNAUTHENTICATED", "account disabled")
@@ -384,6 +494,9 @@ def login_step2(flow_token: str, code: str, device_id: str, ip: str | None) -> d
         conn.commit()
 
     ratelimit.success(username, ip)
+    if remember:
+        # Arm the fixed 24h window: the next logins on this browser skip the code.
+        devices.arm_trust(device_id, username)
     audit.record(
         actor=username,
         action="LOGIN_OK",
@@ -394,13 +507,14 @@ def login_step2(flow_token: str, code: str, device_id: str, ip: str | None) -> d
     return _issue(username, device_id, admin, remember=remember)
 
 
-def enroll_start(enroll_token: str, device_id: str) -> dict:
+def enroll_start(enroll_token: str, device_id: str, secret: str) -> dict:
     """Start (or resume) TOTP enrollment; returns the otpauth:// URI for the QR."""
     claims = tokens.decode(enroll_token, "enroll")
     if claims.get("did") != device_id:
         raise ApiError(401, "TOKEN_INVALID", "the enrollment token belongs to another device")
-    _require_approved(_device_or_error(device_id))
     username = claims["sub"]
+    _device_or_error(device_id, secret)
+    _blocked_or_error(device_id, username)
 
     credential = _credential(username)
     if credential and credential["confirmed"]:
@@ -408,27 +522,35 @@ def enroll_start(enroll_token: str, device_id: str) -> dict:
             409, "TOTP_ALREADY_ENROLLED", "this account already has a TOTP credential"
         )
     if credential:
-        secret = crypto.decrypt(credential["secret"])
+        secret_value = crypto.decrypt(credential["secret"])
     else:
-        secret = totp.generate_secret()
+        secret_value = totp.generate_secret()
         with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO totp_credential (username, secret) VALUES (%s, %s)",
-                (username, crypto.encrypt(secret)),
+                (username, crypto.encrypt(secret_value)),
             )
             conn.commit()
 
     return {
-        "secret": secret,
-        "otpauth_uri": totp.provisioning_uri(secret, username),
+        "secret": secret_value,
+        "otpauth_uri": totp.provisioning_uri(secret_value, username),
         "issuer": settings.ADMINNG_TOTP_ISSUER,
         "digits": settings.ADMINNG_TOTP_DIGITS,
         "period": settings.ADMINNG_TOTP_STEP,
     }
 
-def enroll_confirm(enroll_token: str, code: str, ip: str | None) -> dict:
+
+def enroll_confirm(
+    enroll_token: str, code: str, device_id: str, secret: str, ip: str | None
+) -> dict:
     claims = tokens.decode(enroll_token, "enroll")
     username = claims["sub"]
+    if claims.get("did") != device_id:
+        raise ApiError(401, "TOKEN_INVALID", "the enrollment token belongs to another device")
+    _device_or_error(device_id, secret)
+    _blocked_or_error(device_id, username)
+
     credential = _credential(username)
     if credential is None:
         raise ApiError(409, "TOTP_NOT_ENROLLED", "call /auth/totp-enroll first")
@@ -451,14 +573,14 @@ def enroll_confirm(enroll_token: str, code: str, ip: str | None) -> dict:
     audit.record(
         actor=username,
         action="TOTP_ENROLL",
-        device_id=claims.get("did"),
+        device_id=device_id,
         ip=ip,
         endpoint="POST /api/v1/auth/totp-confirm",
     )
     return {"enrolled": True, "username": username}
 
 
-def refresh_session(refresh_token: str, device_id: str) -> dict:
+def refresh_session(refresh_token: str, device_id: str, secret: str) -> dict:
     """Rotate the refresh jti and mint a new access token (reuse detection)."""
     jti = token_hash(refresh_token)
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
@@ -489,8 +611,8 @@ def refresh_session(refresh_token: str, device_id: str) -> dict:
         cur.execute("UPDATE session SET revoked_at = now() WHERE jti = %s", (jti,))
         conn.commit()
 
-    device = _device_or_error(device_id)
-    _require_approved(device)
+    _device_or_error(device_id, secret)
+    _blocked_or_error(device_id, session["username"])
     admin = _admin_row(session["username"])
     if admin is None or not admin["active"]:
         raise ApiError(401, "UNAUTHENTICATED", "account disabled")

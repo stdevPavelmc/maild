@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 
 from .. import audit, webauthn
-from ..auth import Principal, device_header, get_principal
+from ..auth import Principal, device_header, device_secret_header, get_principal
 
 router = APIRouter(prefix="/auth/webauthn", tags=["auth"])
 
@@ -83,10 +83,12 @@ def login_options(
     payload: LoginOptionsRequest,
     request: Request,
     device_id: str = Depends(device_header),
+    secret: str = Depends(device_secret_header),
 ) -> dict:
     return webauthn.login_options(
         payload.username,
         device_id,
+        secret,
         audit.client_ip(request),
         request.headers.get("origin"),
         payload.remember,
@@ -98,12 +100,14 @@ def login_verify(
     payload: LoginVerifyRequest,
     request: Request,
     device_id: str = Depends(device_header),
+    secret: str = Depends(device_secret_header),
 ) -> dict:
     return webauthn.login_verify(
         payload.username,
         payload.challenge_id,
         payload.credential,
         device_id,
+        secret,
         audit.client_ip(request),
     )
 

@@ -28,14 +28,14 @@ export function DevicesPage({ password }: { password: string }) {
       <CardHead>
         <div className="flex min-w-0 items-start gap-2">
           <span aria-hidden="true" className="shrink-0 text-xl leading-none lg:text-base">
-            📱
+            🖥️
           </span>
           <div className="min-w-0">
             <p
               className="break-all font-semibold leading-snug text-slate-100 line-clamp-1"
-              title={device.device_name || device.client_type}
+              title={device.device_name || device.client_type || undefined}
             >
-              {device.device_name || device.client_type}
+              {device.usernames.length > 0 ? device.usernames.join(', ') : t('devices.noUser')}
             </p>
             <p
               className="mt-0.5 truncate font-mono text-[11px] text-slate-400"
@@ -65,10 +65,15 @@ export function DevicesPage({ password }: { password: string }) {
         </ActionRow>
       </CardHead>
       <p className="mt-2 text-xs text-slate-400">
-        {t('devices.user')}: {device.associated_user || '—'} · {t('devices.lastSeen')}:{' '}
+        {device.device_name || device.client_type || '—'} · {t('devices.lastSeen')}:{' '}
         {new Date(device.last_seen).toLocaleString()}
         {device.last_ip ? ` · ${device.last_ip}` : ''}
       </p>
+      {device.fingerprint && (
+        <p className="mt-1 font-mono text-[11px] text-slate-400">
+          {t('device.fingerprint')}: {device.fingerprint}
+        </p>
+      )}
     </EntityCard>
   )
 
@@ -102,12 +107,13 @@ export function DevicesPage({ password }: { password: string }) {
       <ConfirmDelete
         open={Boolean(action)}
         title={t('confirm.title')}
-        body={`${action?.kind === 'APPROVE' ? t('devices.approve') : t('devices.revoke')} ${action?.device.device_name ?? action?.device.device_id ?? ''}?`}
+        body={`${action?.kind === 'APPROVE' ? t('devices.approve') : t('devices.revoke')} ${action?.device.usernames.join(', ') || t('devices.noUser')} @ ${action?.device.device_name || action?.device.device_id || ''}?`}
         password={password}
         label={action?.kind === 'APPROVE' ? t('devices.approve') : t('devices.revoke')}
         onClose={() => setAction(null)}
         action={async (vtoken) => {
-          if (action) await api.setDeviceState(action.device.device_id, action.kind, vtoken)
+          if (action)
+            await api.setDeviceState(action.device.device_id, action.kind, vtoken)
           await refresh()
         }}
       />

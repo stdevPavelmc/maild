@@ -26,6 +26,10 @@
 #   APP_CA_CERT      path to a CA certificate the build should trust (the local
 #                    ldata/certs/adminng-ca.crt for a LAN https origin). Used for
 #                    the manifest preflight and by Bubblewrap (NODE_EXTRA_CA_CERTS).
+#                    The APP_URL host must also be covered by the origin
+#                    certificate's SAN: tls-cert-generate.sh lists the host name,
+#                    localhost and every global IPv4 (re-issue an expired/partial
+#                    leaf with RENEW=1 and --ip <addr>; see README §2.1).
 #   DOCKER_NETWORK   network for docker build/run (default: daemon default).
 #                    On networks whose IPv4 route to dl.google.com is filtered
 #                    the Android SDK/Gradle downloads fail; `host` fixes it.
@@ -137,8 +141,14 @@ docker run --rm "${NETWORK_ARGS[@]}" "${CA_ARGS[@]}" -e APP_URL="$APP_URL" \
                 console.log("manifest: " + r.status + ", " + body.length + " bytes, start_url=" + manifest.start_url);
             })
             .catch((e) => {
-                console.error("manifest: " + (e.cause && e.cause.code ? e.cause.code : e.message) + " (" + url + ")");
-                if (!process.env.NODE_EXTRA_CA_CERTS) {
+                const code = e.cause && e.cause.code ? e.cause.code : e.message;
+                console.error("manifest: " + code + " (" + url + ")");
+                if (code === "ERR_TLS_CERT_ALTNAME_INVALID") {
+                    const host = new URL(url).hostname;
+                    console.error("hint: the server certificate does not list " + host + "; re-issue the leaf with it, then restart the listener:");
+                    console.error("      cd adminng/pwa && RENEW=1 ./tls-cert-generate.sh --ip " + host);
+                    console.error("      docker compose --env-file env.dev -f docker-compose-dev.yml restart adminng");
+                } else if (!process.env.NODE_EXTRA_CA_CERTS) {
                     console.error("hint: private CA? pass APP_CA_CERT=/path/to/adminng-ca.crt");
                 }
                 process.exit(1);

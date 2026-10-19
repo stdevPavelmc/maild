@@ -40,7 +40,7 @@
     "title": "Iniciar sesión",
     "username": "Dirección del administrador",
     "password": "Contraseña",
-    "remember": "Recordar este dispositivo durante 24 horas",
+    "remember": "Confiar en este dispositivo durante 24 horas (omitir el código)",
     "submit": "Continuar",
     "biometric": "Iniciar sesión con biometría",
     "biometricFailed": "No se pudo iniciar sesión con biometría o no está activada en este dispositivo. Usa tu contraseña.",
@@ -58,6 +58,10 @@
     "id": "Identificador del dispositivo",
     "copy": "Copiar ID",
     "check": "Verificar aprobación",
+    "identityTitle": "Identificador de este navegador",
+    "identityBody": "Entrega este identificador a un superadministrador para que autorice este navegador de antemano, o léeles la huella que aparece tras iniciar sesión. Una vez aprobado el navegador, cualquier administrador puede iniciar sesión desde él.",
+    "fingerprint": "Huella del dispositivo",
+    "fingerprintHint": "Lee este código al superadministrador para que confirme que coincide con la solicitud.",
     "cliHint": "Comando en el servidor: docker compose exec api adminng.py --approve-device {{id}}",
     "revoked": "Este dispositivo fue revocado. Pide a un superadministrador que lo apruebe de nuevo."
   },
@@ -150,6 +154,7 @@
     "approve": "Autorizar",
     "lastSeen": "Última vez",
     "user": "Usuario",
+    "noUser": "Sin administrador aún",
     "none": "Sin dispositivos registrados"
   },
   "logs": {
@@ -186,6 +191,13 @@
     "biometricEnable": "Activar en este dispositivo",
     "biometricDisable": "Desactivar en este dispositivo",
     "biometricFailure": "No se pudo completar la operación biométrica."
+  },
+  "biometricPrompt": {
+    "title": "Inicia sesión más rápido la próxima vez",
+    "body": "Activa el inicio de sesión biométrico en este dispositivo. Después podrás entrar con tu huella o tu rostro en lugar de escribir la contraseña.",
+    "enable": "Activar biometría",
+    "confirm": "Activar en este dispositivo",
+    "later": "Ahora no"
   },
   "quota": { "of": "de" }
 }

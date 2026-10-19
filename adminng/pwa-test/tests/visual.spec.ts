@@ -15,8 +15,8 @@ import { join } from 'node:path'
 
 import { expect, test, type Page } from '@playwright/test'
 
-import { approveThisDevice, login, loginSuperadmin } from '../lib/login'
-import { ARTIFACTS } from '../lib/env'
+import { approveThisDevice, login, loginSuperadmin, registerDevice, ALICE, SYSADMIN } from '../lib/login'
+import { adminngCli, ARTIFACTS } from '../lib/env'
 
 const OUT = join(ARTIFACTS, 'screens')
 const DESKTOP = { width: 1440, height: 900 }
@@ -41,20 +41,24 @@ test('capture every screen for review', async ({ page, browser }) => {
 
   await page.setViewportSize(DESKTOP)
   await page.goto('/')
-  await shot(page, 'desktop-pending')
-  await page.setViewportSize(MOBILE)
-  await shot(page, 'mobile-pending')
-
-  const deviceId = await approveThisDevice(page)
-  expect(deviceId).toBeTruthy()
-
-  await page.setViewportSize(DESKTOP)
   await shot(page, 'desktop-login')
   await page.setViewportSize(MOBILE)
   await shot(page, 'mobile-login')
 
+  // A fresh browser only reaches the pending screen through a real sign-in.
+  const deviceId = await registerDevice(page, ALICE)
+  expect(deviceId).toBeTruthy()
   await page.setViewportSize(DESKTOP)
-  await login(page, 'alice@example.net')
+  await shot(page, 'desktop-pending')
+  await page.setViewportSize(MOBILE)
+  await shot(page, 'mobile-pending')
+
+  adminngCli('--approve-device', deviceId, '--user', ALICE)
+  await page.getByRole('button', { name: 'Check approval' }).click()
+  await expect(page.getByRole('heading', { name: /Waiting for approval/ })).toHaveCount(0)
+
+  await page.setViewportSize(DESKTOP)
+  await login(page, ALICE)
 
   for (const screen of screens) {
     await page.goto(screen.path)
@@ -143,7 +147,7 @@ test('capture every screen for review', async ({ page, browser }) => {
   await test.step('superadmin devices panel', async () => {
     const adminContext = await browser.newContext({ viewport: DESKTOP })
     const adminPage = await adminContext.newPage()
-    await approveThisDevice(adminPage)
+    await approveThisDevice(adminPage, SYSADMIN)
     await loginSuperadmin(adminPage)
     await adminPage.goto('/devices')
     await adminPage.waitForTimeout(400)

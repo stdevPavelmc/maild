@@ -11,7 +11,7 @@
 
 import { expect, test } from '@playwright/test'
 
-import { approveThisDevice, loginSuperadmin, pendingDeviceId, SYSADMIN } from '../lib/login'
+import { approveThisDevice, loginSuperadmin, registerDevice, SYSADMIN } from '../lib/login'
 import { password } from '../lib/env'
 
 test('the superadmin signs in with TOTP (enrolling on first run) and authorizes a device from the panel', async ({
@@ -22,13 +22,12 @@ test('the superadmin signs in with TOTP (enrolling on first run) and authorizes 
   const phonePage = await phone.newPage()
 
   await test.step('a second device registers itself and waits', async () => {
-    await phonePage.goto('/')
-    const id = await pendingDeviceId(phonePage)
+    const id = await registerDevice(phonePage, SYSADMIN)
     expect(id).toBeTruthy()
   })
 
   await test.step('the superadmin signs in with TOTP and opens the devices panel', async () => {
-    await approveThisDevice(page)
+    await approveThisDevice(page, SYSADMIN)
     await loginSuperadmin(page)
     await page.getByRole('link', { name: /Devices/ }).first().click()
     await expect(page.getByRole('heading', { name: 'Devices', exact: true })).toBeVisible()

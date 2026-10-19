@@ -147,12 +147,12 @@ mandatory TOTP for superadmins and a full audit trail:
 - **LAN/phone (dev):** `https://<lan-ip>:8084` with the local CA — install
   `ldata/certs/adminng-ca.der` on the device first (see
   [`adminng/pwa/README.md`](adminng/pwa/README.md) §2.1).
-- **First login:** the browser/phone registers a device (`PENDING`); a superadmin approves
-  it from the server side:
+- **First login:** the browser/phone registers itself by signing in (its state starts
+  `PENDING`, device-scoped); a superadmin approves the browser from the server side:
   `docker compose exec api adminng.py --list-devices` then
-  `--approve-device '<uuid>'`. Afterwards the superadmin enrolls an authenticator (QR) on
-  the first login. The Android APK is built by `adminng/pwa/app-generate.sh` (see
-  `adminng/README.md`).
+  `--approve-device '<uuid>'`. Afterwards the superadmin enrolls an
+  authenticator (QR) on the first login. The Android APK is built by
+  `adminng/pwa/app-generate.sh` (see `adminng/README.md`).
 - **New mandatory variable:** `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption,
   `openssl rand -hex 32`). Rotating it invalidates sessions and enrolled TOTP seeds.
 - Design and roadmap: `adminng/doc/technical-draft.md` and `adminng/doc/plan.md`;

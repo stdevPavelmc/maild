@@ -6,6 +6,9 @@ through the `adminng` nginx frontend, which also owns the exterior access log;
 the bare /health path exists for the container healthcheck.
 """
 
+import asyncio
+from contextlib import asynccontextmanager
+
 import psycopg
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -39,9 +42,37 @@ _docs_kwargs = (
     else {"docs_url": None, "redoc_url": None, "openapi_url": None}
 )
 
+# Housekeeping: purge stale PENDING device grants every hour so a browser that
+# asked for access but was never approved does not linger forever (F-11).
+_PURGE_INTERVAL = 3600
+
+
+async def _purge_loop() -> None:
+    from . import devices
+
+    while True:
+        await asyncio.sleep(_PURGE_INTERVAL)
+        try:
+            await asyncio.to_thread(
+                devices.purge_stale_pending, settings.ADMINNG_PENDING_TTL_DAYS
+            )
+        except Exception:  # pragma: no cover - housekeeping must never crash the app
+            pass
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    task = asyncio.create_task(_purge_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+
+
 app = FastAPI(
     title="MailD AdminNG API",
     version=settings.APP_VERSION,
+    lifespan=lifespan,
     description=(
         "PWA-first administration API for the MailD PostfixAdmin catalogue: "
         "domains, domain aliases, mailboxes, address aliases, "

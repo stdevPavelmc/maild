@@ -1,9 +1,9 @@
 import { expect, test } from '@playwright/test'
 
-import { approveThisDevice, loginSuperadmin } from '../lib/login'
+import { approveThisDevice, loginSuperadmin, SYSADMIN } from '../lib/login'
 
 test('catalogue cards stay wide on desktop and full-width on phones', async ({ page }) => {
-  await approveThisDevice(page)
+  await approveThisDevice(page, SYSADMIN)
   await loginSuperadmin(page)
 
   const screens = ['/domains', '/mailboxes', '/aliases', '/admins', '/devices']

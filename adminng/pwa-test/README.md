@@ -25,15 +25,20 @@ except Docker and a stack brought up by `./bootstrap-dev.sh`.
 
 Notes:
 
-- **Device approval is out of band.** The suite reads the pending UUID from the screen and
-  runs `adminng.py --approve-device` inside the `api` container through the mounted docker
-  socket. Deleting the socket mount breaks only that step; `superadmin` exercises the UI
-  path instead (devices panel, re-auth + 5 s armed authorize).
+- **Device approval is out of band.** The suite signs in to register the browser, reads the
+  pending UUID from the screen and runs `adminng.py --approve-device <id>`
+  inside the `api` container through the mounted docker socket. Deleting the socket mount
+  breaks only that step; `superadmin` exercises the UI path instead (devices panel, re-auth +
+  5 s armed authorize).
 - **Secure context.** Service workers and installability need a trustworthy origin. Inside
   the Compose network `http://adminng` is not one, so `entrypoint.sh` tunnels
   `http://localhost:8083` to it; the tests keep the same base URL as a host run.
 - Artifacts are host-owned (`run.sh` passes the invoking uid/gid) and live in
   `ldata/e2e/` (git-ignored): `report/` (HTML), `results/` (traces/videos on failure),
   `screens/`, `a11y/`, `lighthouse.report.{json,html}`.
+- `a11y` and `visual` run with tracing **off** (`entrypoint.sh --trace=off`): they are pure
+  artifact-review modes and each opens a second browser context for the superadmin step,
+  where a Playwright 1.64 trace-teardown bug otherwise fails an otherwise-green run. Pass
+  `--trace=on` to override when debugging.
 - The image is rebuilt from the working tree on every run (cached); set
   `PWA_TEST_NO_BUILD=1` to reuse it.

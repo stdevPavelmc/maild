@@ -25,14 +25,32 @@ export async function pendingDeviceId(page: Page): Promise<string> {
   return id
 }
 
-/** Open the app, read the pending device id and approve it through the CLI. */
-export async function approveThisDevice(page: Page): Promise<string> {
-  await page.goto('/')
-  const pending = page.getByRole('heading', { name: /Waiting for approval/ })
-  const id = await pendingDeviceId(page)
-  adminngCli('--approve-device', id)
+/**
+ * Register a *fresh* browser by signing in once and read the id it shows.
+ *
+ * There is no anonymous handshake anymore (audit F-11): the device row only
+ * exists after a login whose password verified, so the pending screen appears as
+ * the answer to a real sign-in attempt.
+ */
+export async function registerDevice(page: Page, user: string, secret?: string): Promise<string> {
+  // A brand-new context starts blank: open the app first (callers that already
+  // navigated to the sign-in form are left alone, so their state is kept).
+  if ((await page.locator('input[autocomplete="username"]').count()) === 0) {
+    await page.goto('/')
+  }
+  await submitCredentials(page, user, secret)
+  return pendingDeviceId(page)
+}
+
+/**
+ * Register this browser (by signing in) and approve it through the documented
+ * CLI. Leaves the app on the sign-in form.
+ */
+export async function approveThisDevice(page: Page, user: string): Promise<string> {
+  const id = await registerDevice(page, user)
+  adminngCli('--approve-device', id, '--user', user)
   await page.getByRole('button', { name: 'Check approval' }).click()
-  await expect(pending).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: /Waiting for approval/ })).toHaveCount(0)
   return id
 }
 

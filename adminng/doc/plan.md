@@ -95,14 +95,14 @@ running it) · **validated** (verified by running the acceptance checks).
 
 | # | Task | Status | Evidence |
 |---|---|---|---|
-| 1 | Device middleware, lifecycle, handshake/status | **validated** | `test.sh` I1/I2/I15 (PENDING refusal → CLI approve → revoke kills sessions); `tests/test_devices.py` 5 tests |
+| 1 | Device gate: device-scoped approval (`device.state`), client secret binding, status (handshake retired, F-11) | **validated** | `test.sh` I1/I1b/I2/I15 (register-on-login → PENDING refusal → CLI approve → revoke kills sessions); `tests/test_devices.py` |
 | 2 | Two-step login, TOTP enrollment, token pair, jti rotation, idle purge | **validated** | I3/I4/I13; `tests/test_totp.py` (RFC 6238 vectors + replay), `tests/test_tokens.py`, `tests/test_crypto.py` |
 | 3 | Re-auth token + enforcement on destructive routes | **validated** | I10 (403 `OPERATION_NOT_VERIFIED` without the header) and I12 (204 with it) |
-| 4 | `adminng.py` CLI (`--add-device`, `--approve-device`, `--revoke-device`, `--totp-reset`) | **validated** | I2 + `bootstrap-dev.sh` pre-approves the dev device |
+| 4 | `adminng.py` CLI (`--list-devices`, `--approve-device`, `--revoke-device`, `--revoke-grant`, `--purge-pending`, `--totp-reset`) | **validated** | I2/I15 + `bootstrap-dev.sh` pre-approves the dev browser |
 | 5 | Audit trail + `GET /logs` (tenant-scoped) | **validated** | I14 (LOGIN_OK, MAILBOX_CREATE, DOMAIN_DELETE); logs include device id and IP |
 | 6 | Rate limiting + lockout | **validated** | I16 (5 failures → 429), I17 (`--reset-ratelimit` clears it) and `tests/test_ratelimit.py`; state is persisted in the `adminng` DB (migration 004) |
 | 7 | `backup_db.sh` also dumps the `adminng` DB | **validated** | G3/G4/G4b: two archives, gzip/trailer/schema checked, same retention |
-| 8 | `bootstrap-dev.sh` self-approval + `test.creds` | **validated** | the dev device is added/approved by the CLI and written as `adminng.device=` |
+| 8 | `bootstrap-dev.sh` self-approval + `test.creds` | **validated** | the dev browser's sysadmin grant is approved by the CLI and written as `adminng.device=` + `adminng.secret=` |
 
 **Phase 2 deviations / notes**
 
@@ -260,8 +260,11 @@ black-box checks.
 **Goal:** the security model of §4 lands completely; devices gate everything.
 
 Tasks:
-1. Device middleware (`X-Device-ID` on every route except `/health`),
-   `PENDING`/`APPROVED`/`REVOKED` lifecycle, handshake + status endpoints.
+1. Device gate (`X-Device-ID` + client-minted `X-Device-Secret` on every route
+   except `/health`), a `device` row created only by a verified `login-step1`,
+   a device-scoped `device.state` lifecycle (`PENDING`/`APPROVED`/`REVOKED`) with
+   `device_grant` as the per-admin activity log + 24h trust window, and the status
+   endpoint (audit F-11; no handshake).
 2. `login-step1`/`step2` against the catalogue `admin` table (md5crypt
    verify), flow tokens; TOTP (RFC 6238, pyotp) with the **enrollment flow**
    (`REQUIRES_TOTP_ENROLLMENT` → QR → confirm), `ADMINNG_TOTP_REQUIRED`
@@ -269,9 +272,9 @@ Tasks:
    rotation and the 15-min idle purge.
 3. Re-auth: `POST /auth/reauth-confirm` → 30-second scoped
    `X-Security-Validation-Token` enforced on every destructive route.
-4. `adminng.py` CLI: `--list-devices`, `--approve-device`, `--revoke-device`,
-   `--totp-reset` (the §4.2 bootstrap mechanism — documented in
-   `adminng/README.md`).
+4. `adminng.py` CLI: `--list-devices`, `--approve-device <id>`,
+   `--revoke-device`, `--revoke-grant <id> --user <admin>`, `--purge-pending`,
+   `--totp-reset` (the §4.2 bootstrap mechanism — documented in `adminng/README.md`).
 5. Audit trail: `audit_event` rows on every login attempt, device transition
    and catalogue mutation; the `GET /logs` route with cross-filters and the
    forced domain filter for custom admins.

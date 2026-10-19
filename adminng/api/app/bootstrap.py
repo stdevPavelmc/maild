@@ -43,6 +43,13 @@ def main() -> int:
         "migrations applied: %s",
         ", ".join(applied) if applied else "none (schema up to date)",
     )
+
+    # Stale PENDING grants (browsers that asked for access, never approved).
+    from . import devices
+
+    purged = devices.purge_stale_pending(settings.ADMINNG_PENDING_TTL_DAYS)
+    if purged:
+        log.info("purged %s stale PENDING device grant(s)", purged)
     return 0
 
 

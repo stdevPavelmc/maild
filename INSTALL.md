@@ -263,10 +263,12 @@ at `mailadmin.<DEFAULT_DOMAIN>` as the fallback (vacation, fetchmail, backup/res
    sessions and enrolled authenticators.
 2. `docker compose up -d` exposes it at `https://adminng.<DEFAULT_DOMAIN>` (Traefik) — or the
    dev stack at <http://localhost:8083>.
-3. **Approve the first device from the server side** (there is no silent auto-approval):
+3. **Approve the first browser from the server side** (there is no silent auto-approval):
    `docker compose exec api adminng.py --list-devices` then
-   `docker compose exec api adminng.py --approve-device '<uuid>'`. The device ID is shown on
-   the client's lock screen; verify the requester before approving.
+   `docker compose exec api adminng.py --approve-device '<uuid>'`. The browser
+   registers itself by signing in, then shows its device ID (and a short fingerprint) on the
+   lock screen; verify the requester before approving. Approval is device-scoped: once the
+   browser is approved, any admin may sign in from it.
 4. The first superadmin login requires TOTP enrollment (QR + code). Domain admins without an
    enrolled authenticator sign in with their password (TOTP is mandatory for superadmins).
 

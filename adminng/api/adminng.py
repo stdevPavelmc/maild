@@ -3,11 +3,14 @@
 
 Container access is root authority: this is how the FIRST device of a fresh
 deployment is approved (there is no silent in-app auto-approval), and how a lost
-authenticator is recovered. See adminng/README.md for the operator how-to.
+authenticator is recovered. Approval is **device-scoped**: approving a browser
+lets any admin sign in from it, so `--user` is now optional (it only records
+which admin asked for it). See adminng/README.md for the operator how-to.
 
     docker compose exec api adminng.py --list-devices
     docker compose exec api adminng.py --approve-device '<uuid>'
     docker compose exec api adminng.py --revoke-device '<uuid>'
+    docker compose exec api adminng.py --revoke-grant '<uuid>' --user '<admin>'
     docker compose exec api adminng.py --totp-reset '<username>'
 """
 
@@ -16,88 +19,69 @@ import sys
 
 import psycopg
 
-from app import settings
+from app import devices, settings
 from app.db import connect
-
-
-def _load_row(cur, sql: str, params: tuple):
-    cur.execute(sql, params)
-    return cur.fetchone()
+from app.errors import ApiError
 
 
 def cmd_list_devices() -> int:
-    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT device_id, state, associated_user, client_type, device_name,
-                   first_seen, approved_by
-              FROM device
-             ORDER BY first_seen DESC
-            """
-        )
-        rows = cur.fetchall()
-
+    page = devices.list_devices(None, None, 1000, None)
+    rows = page["items"]
     if not rows:
         print("no devices registered yet")
         return 0
 
-    print(f"{'DEVICE ID':<38} {'STATE':<9} {'USER':<28} {'CLIENT':<12} DEVICE NAME")
-    for row in rows:
-        print(
-            f"{str(row['device_id']):<38} {row['state']:<9} "
-            f"{(row['associated_user'] or '-'):<28} "
-            f"{(row['client_type'] or '-'):<12} {row['device_name'] or '-'}"
-        )
-    return 0
-
-
-def cmd_set_state(device_id: str, state: str) -> int:
-    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
-        row = _load_row(
-            cur,
-            """
-            UPDATE device
-               SET state = %s,
-                   approved_at = CASE WHEN %s = 'APPROVED' THEN now() ELSE approved_at END,
-                   approved_by = %s,
-                   last_seen = now()
-             WHERE device_id = %s
-         RETURNING device_id, state
-            """,
-            (state, state, "cli", device_id),
-        )
-        if row is None:
-            conn.rollback()
-            print(f"device {device_id} not found", file=sys.stderr)
-            return 1
-        if state == "REVOKED":
-            # Revocation is immediate: every session bound to the device dies now.
-            cur.execute(
-                "UPDATE session SET revoked_at = now() "
-                "WHERE device_id = %s AND revoked_at IS NULL",
-                (device_id,),
-            )
-        conn.commit()
-
-    print(f"{row['device_id']} -> {row['state']}")
-    return 0
-
-
-def cmd_add_device(device_id: str) -> int:
-    """Register a device row from the server side (PENDING), idempotently."""
-    with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO device (device_id, client_type, device_name, state) "
-            "VALUES (%s, 'cli', 'registered via CLI', 'PENDING') "
-            "ON CONFLICT (device_id) DO NOTHING",
-            (device_id,),
-        )
-        cur.execute("SELECT device_id, state FROM device WHERE device_id = %s", (device_id,))
-        row = cur.fetchone()
-        conn.commit()
     print(
-        f"{row['device_id']} -> {row['state']} (registered; "
-        f"run --approve-device {row['device_id']} to authorize)"
+        f"{'DEVICE ID':<38} {'STATE':<9} {'ADMINS':<28} FINGERPRINT   DEVICE NAME"
+    )
+    for row in rows:
+        admins = ",".join(row["usernames"]) or "(unclaimed)"
+        print(
+            f"{row['device_id']:<38} {row['authorization_state']:<9} "
+            f"{admins[:28]:<28} {(row['fingerprint'] or '(unbound)'):<13} "
+            f"{row['device_name'] or row['client_type'] or '-'}"
+        )
+    return 0
+
+
+def cmd_approve_device(device_id: str, username: str | None, secret: str | None) -> int:
+    """Approve a browser (idempotently); `username` only records the requester."""
+    secret_hash = devices.hash_secret(secret) if secret else None
+    if username:
+        row = devices.ensure_grant(device_id, username, secret_hash, "cli")
+    else:
+        row = devices.approve_device(device_id, secret_hash, "cli")
+    print(
+        f"{device_id} -> {row['state']} (fingerprint: "
+        f"{'bound' if secret_hash else 'binding pending first login'})"
+    )
+    return 0
+
+
+def cmd_revoke_device(device_id: str) -> int:
+    try:
+        grants = devices.revoke_device(device_id)
+    except ApiError:
+        print(f"device {device_id} not found", file=sys.stderr)
+        return 1
+    print(f"{device_id} -> REVOKED ({grants} admin(s) logged, sessions destroyed)")
+    return 0
+
+
+def cmd_revoke_grant(device_id: str, username: str) -> int:
+    row = devices.revoke_grant(device_id, username)
+    print(
+        f"{device_id} / {username} -> access revoked for this admin "
+        f"({row['sessions_revoked']} session(s) destroyed, trust cleared)"
+    )
+    return 0
+
+
+def cmd_purge_pending() -> int:
+    removed = devices.purge_stale_pending(settings.ADMINNG_PENDING_TTL_DAYS)
+    print(
+        f"purged {removed} PENDING grant(s) older than "
+        f"{settings.ADMINNG_PENDING_TTL_DAYS} day(s)"
     )
     return 0
 
@@ -116,6 +100,11 @@ def cmd_totp_reset(username: str) -> int:
     with connect(settings.ADMINNG_DB) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM totp_credential WHERE username = %s", (username,))
         deleted = cur.rowcount
+        # A factor reset invalidates any "skip the code" trust for this admin too.
+        cur.execute(
+            "UPDATE device_grant SET trusted_until = NULL WHERE username = %s",
+            (username,),
+        )
         conn.commit()
 
     print(
@@ -173,19 +162,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="list registered devices and their authorization state",
     )
     group.add_argument(
-        "--add-device",
-        metavar="DEVICE_ID",
-        help="register a device (PENDING) from the server side, idempotently",
-    )
-    group.add_argument(
         "--approve-device",
         metavar="DEVICE_ID",
-        help="authorize a PENDING device (the first-device bootstrap)",
+        help="authorize a browser (optional --user records who requested it)",
     )
     group.add_argument(
         "--revoke-device",
         metavar="DEVICE_ID",
-        help="revoke a device and destroy every session bound to it",
+        help="revoke a browser: destroys its credentials and every session",
+    )
+    group.add_argument(
+        "--revoke-grant",
+        metavar="DEVICE_ID",
+        help="revoke one admin on a browser (needs --user): sessions + trust",
+    )
+    group.add_argument(
+        "--purge-pending",
+        action="store_true",
+        help="delete PENDING grants older than ADMINNG_PENDING_TTL_DAYS",
     )
     group.add_argument(
         "--reset-ratelimit",
@@ -204,6 +198,17 @@ def build_parser() -> argparse.ArgumentParser:
         "weak-scheme support ends 2027-02-01 — those rows must be migrated "
         "(password change/rehash-on-login) before then",
     )
+    parser.add_argument(
+        "--user",
+        metavar="USERNAME",
+        help="admin for --approve-device (optional) / --revoke-grant (required)",
+    )
+    parser.add_argument(
+        "--secret",
+        metavar="SECRET",
+        help="optional browser secret to pre-bind (dev fixtures; normally the "
+        "client mints it and it binds on first login)",
+    )
     return parser
 
 
@@ -212,12 +217,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.list_devices:
             return cmd_list_devices()
-        if args.add_device:
-            return cmd_add_device(args.add_device)
         if args.approve_device:
-            return cmd_set_state(args.approve_device, "APPROVED")
+            return cmd_approve_device(args.approve_device, args.user, args.secret)
         if args.revoke_device:
-            return cmd_set_state(args.revoke_device, "REVOKED")
+            return cmd_revoke_device(args.revoke_device)
+        if args.revoke_grant:
+            if not args.user:
+                print("--revoke-grant requires --user", file=sys.stderr)
+                return 2
+            return cmd_revoke_grant(args.revoke_grant, args.user)
+        if args.purge_pending:
+            return cmd_purge_pending()
         if args.reset_ratelimit:
             return cmd_reset_ratelimit(args.reset_ratelimit)
         if args.totp_reset:
@@ -227,6 +237,9 @@ def main(argv: list[str] | None = None) -> int:
     except psycopg.errors.InvalidTextRepresentation:
         print("invalid device id: expected a UUID (e.g. DE793C1A-...) ", file=sys.stderr)
         return 2
+    except ApiError as exc:
+        print(f"{exc.code}: {exc.message}", file=sys.stderr)
+        return 1
     except psycopg.Error as exc:
         print(f"database error: {exc}", file=sys.stderr)
         return 2
