@@ -30,6 +30,10 @@ RUN mkdir /home/vmail && \
 
 ADD postfix /etc/postfix
 
+# F-12: per-user outbound submission throttle policy daemon (stdlib-only python3,
+# which the image already carries via postfix-policyd-spf-python)
+ADD ratelimitd/ratelimitd.py /opt/maild/ratelimitd.py
+
 ADD docker-entrypoint.sh check.sh /
 RUN chmod +x /*.sh
 
@@ -52,6 +56,9 @@ ENV POSTGRES_HOST=db \
     DNSBL_ENABLE=true \
     DNSBL_LIST=zen.spamhaus.org=127.0.0.[2..11]*2,psbl.surriel.com,bl.spamcop.net,bl.spameatingmonkey.net \
     SMTP_TARPIT_DELAY=2 \
+    OUTBOUND_RATE_RECIPIENTS=200 \
+    OUTBOUND_RATE_WINDOW=3600 \
+    OUTBOUND_RATE_EXEMPT_USERS= \
     PEER_WAIT_TIMEOUT=120 \
     PEER_WATCH_INTERVAL=30 \
     AMAVIS=amavis \

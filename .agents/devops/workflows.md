@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 78 checks
+./test.sh                 # 84 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -118,6 +118,11 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   twice, so its `flock` release is proven), the imapsieve Junk-move learning trigger (a real
   IMAP COPY) and the `sa-update` loop with the rules it maintains (`spamassassin --lint` plus
   the `.pre` family of the installed major).
+- The F-12 outbound throttle is covered end to end: the `submission`/`smtps` policy wiring
+  and the fail-open contract are asserted from the live `master.cf`, the limit and the hard
+  per-account exemption are probed by speaking the Postfix policy protocol straight to
+  `ratelimitd` (with a synthetic user, so the suite's own traffic is never throttled), and
+  the hourly `outbound_watch.sh` alert is exercised against the materialised syslog.
 - Self-cleaning: quota fixture, sieve scripts and the materialised `/var/log/syslog` are
   restored/removed on exit; transcripts append to `./test.log` (git-ignored).
 - Exit code 0 only when every executed check passed. Run the full suite before merging

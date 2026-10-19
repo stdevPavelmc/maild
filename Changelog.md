@@ -31,6 +31,26 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   oracle itself stays by design (reject-at-RCPT is Postfix best practice; accept-then-bounce
   would be backscatter), so the finding is "accepted & mitigated". `test.sh` gains the tarpit
   timing check (A7b) and an env-schema signal for the baked default.
+- Security: **per-user outbound submission throttle with a hard per-account exemption**
+  (2026-10 audit F-12). The mta entrypoint supervises `ratelimitd`, a stdlib-python
+  Postfix policy daemon on loopback `12341`; `submission`/`smtps` consult it per RCPT
+  and defer (`450`) past `OUTBOUND_RATE_RECIPIENTS` (image default 200 envelope
+  recipients per user per `OUTBOUND_RATE_WINDOW`, default 1h; `0` disables everything).
+  `OUTBOUND_RATE_EXEMPT_USERS` (exact addresses, e.g. `no-reply@`, `sysadmin@`) is a
+  hard from-any-IP bypass for notification senders — envelope spoofing is already
+  impossible (`smtpd_sender_login_maps`). Fail-open by contract
+  (`smtpd_policy_service_default_action=DUNNO`, 5s policy timeout): a dead daemon stops
+  no mail; the mta healthcheck goes unhealthy and the entrypoint restart-loops it. The
+  cron container gains the alerting half: hourly `outbound_watch.sh` parses the
+  production syslog for per-user submission volume and `maild-ratelimit: throttled`
+  lines and mails the admin an `[ALERT]` past `OUTBOUND_ALERT_MESSAGES` (150/day/user,
+  `0` = off), honouring `OUTBOUND_ALERT_IGNORE_USERS`, once per user per day. Port 25
+  and the amavis reinjection stay unlimited by design (MX + internal paths).
+  Note: the `submission`/`smtps` policy setting uses the **long** `master.cf` form
+  (`-o { name = value }`) — the short form is whitespace-delimited, so a value with a
+  space (`check_policy_service inet:127.0.0.1:12341`) would be split and the service
+  would die on every connection with `fatal: unexpected command-line argument`.
+  Quotes cannot protect such values in `master.cf`; only the braces do.
 
 ## 2026-10-18 1.6.1-dev
 - Changed: **AdminNG approval is now device-scoped** (migration `008_device_trust.sql`). The

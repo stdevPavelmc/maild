@@ -13,6 +13,15 @@ if [ ! -s "$PIDFILE" ] || ! kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null 
 fi
 echo "postfix ready"
 
+# F-12: the outbound rate-limit policy daemon (fail-open for mail, but the container must
+# not look healthy with a dead throttle). Only probed when the feature is enabled.
+if [ "${OUTBOUND_RATE_RECIPIENTS:-200}" != "0" ] ; then
+    if ! python3 -c 'import socket; socket.create_connection(("127.0.0.1", 12341), 3).close()' 2>/dev/null ; then
+        echo "ratelimitd is not answering on 127.0.0.1:12341"
+        exit 1
+    fi
+fi
+
 # if AMAVISIP still has the same IP, if not reboot
 AMAVISIP=`host ${AMAVIS} | awk '/has address/ { print $4 }'`
 if [ "$AMAVISIP" != "$(cat /tmp/AMAVISIP)" ] ; then

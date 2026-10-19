@@ -22,7 +22,21 @@ submission inet n       -       y       -       -       smtpd
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_recipient_restrictions=
+  # F-12 per-user outbound throttle: the entrypoint-started ratelimitd on loopback
+  # counts envelope recipients per sasl_username and defers (450) past the limit;
+  # OUTBOUND_RATE_EXEMPT_USERS accounts bypass it. Fail-open by design (DUNNO when
+  # the daemon is down — the cron outbound_watch job and the mta healthcheck cover
+  # the gap); 100s default policy timeout would stall sessions, keep it short.
+  # The value contains a space, so it MUST use the LONG form (-o { name = value }):
+  # the short form (-o name=value) is whitespace-delimited by master.cf and would
+  # pass "inet:127.0.0.1:12341" to smtpd as a stray argv -> "fatal: unexpected
+  # command-line argument" and the service dies on every connection. Quotes do NOT
+  # work here (master(5): "quotes cannot be used to protect arguments containing
+  # white space"); only the braces do. See mta/docker-entrypoint.sh (the
+  # OUTBOUND_RATE_RECIPIENTS=0 branch must strip this exact line).
+  -o { smtpd_recipient_restrictions = check_policy_service inet:127.0.0.1:12341 }
+  -o smtpd_policy_service_timeout=5s
+  -o smtpd_policy_service_default_action=DUNNO
   -o milter_macro_daemon_name=ORIGINATING
 
 smtps     inet  n       -       y       -       -       smtpd
@@ -33,7 +47,9 @@ smtps     inet  n       -       y       -       -       smtpd
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
   -o smtpd_relay_restrictions=permit_sasl_authenticated,reject
-  -o smtpd_recipient_restrictions=
+  -o { smtpd_recipient_restrictions = check_policy_service inet:127.0.0.1:12341 }
+  -o smtpd_policy_service_timeout=5s
+  -o smtpd_policy_service_default_action=DUNNO
   -o milter_macro_daemon_name=ORIGINATING
 
 #628       inet  n       -       y       -       -       qmqpd

@@ -18,4 +18,8 @@
 # feed the SA bayes db from the user's Junk folders + random INBOX samples
 30 03 * * * root /scripts/learn_from_folders.sh >/proc/1/fd/1 2>/proc/1/fd/2
 
+# outbound volume watch (audit F-12): per-user daily submission volume + throttle
+# engagement alerts; needs the production syslog like the daily resume
+23 * * * * root /scripts/outbound_watch.sh >/proc/1/fd/1 2>/proc/1/fd/2
+
 # An empty line is required at the end of this file for a valid cron file.

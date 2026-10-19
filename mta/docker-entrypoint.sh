@@ -36,6 +36,29 @@ case "${SMTP_TARPIT_DELAY}" in
         SMTP_TARPIT_DELAY=0
         ;;
 esac
+# F-12 per-user outbound throttle (ratelimitd): integers only, sane floors; the
+# daemon re-validates defensively, these are the values the entrypoint start passes.
+if [ -z "${OUTBOUND_RATE_RECIPIENTS}" ] ; then
+    OUTBOUND_RATE_RECIPIENTS=200
+fi
+if [ -z "${OUTBOUND_RATE_WINDOW}" ] ; then
+    OUTBOUND_RATE_WINDOW=3600
+fi
+case "${OUTBOUND_RATE_RECIPIENTS}" in
+    *[!0-9]*)
+        echo "WARNING: mta: OUTBOUND_RATE_RECIPIENTS='${OUTBOUND_RATE_RECIPIENTS}' is not an integer, using 200" 1>&2
+        OUTBOUND_RATE_RECIPIENTS=200
+        ;;
+esac
+case "${OUTBOUND_RATE_WINDOW}" in
+    ''|*[!0-9]*|0)
+        echo "WARNING: mta: OUTBOUND_RATE_WINDOW='${OUTBOUND_RATE_WINDOW}' is not a valid window, using 3600" 1>&2
+        OUTBOUND_RATE_WINDOW=3600
+        ;;
+esac
+# comma-separated account list: spaces would split the export below into words
+OUTBOUND_RATE_EXEMPT_USERS="$(echo ${OUTBOUND_RATE_EXEMPT_USERS} | tr -d ' ')"
+export OUTBOUND_RATE_RECIPIENTS OUTBOUND_RATE_WINDOW OUTBOUND_RATE_EXEMPT_USERS
 
 # mandatory
 HOSTNAME=`hostname -f`
@@ -164,6 +187,15 @@ done
 # with 0 in the loop above).
 if [ "${SMTP_TARPIT_DELAY}" = "0" ] ; then
     sed -i '/^[[:space:]]*sleep /d' ${MAIN}
+fi
+
+# F-12 throttle disabled (OUTBOUND_RATE_RECIPIENTS=0): restore the empty
+# smtpd_recipient_restrictions override on submission/smtps — the exact pre-F-12
+# state — and the daemon is not started further below. The master.cf line uses the
+# LONG form (-o { name = value }) because the policy value contains a space; the
+# sed must match it verbatim.
+if [ "${OUTBOUND_RATE_RECIPIENTS}" = "0" ] ; then
+    sed -i 's|^  -o { smtpd_recipient_restrictions = check_policy_service inet:127.0.0.1:12341 }$|  -o smtpd_recipient_restrictions=|' ${MASTER}
 fi
 
 # check for SPF activation
@@ -468,6 +500,26 @@ if [ "$1" = 'postfix' ]; then
         echo "mta: peer-IP watchdog started (every ${PEER_WATCH_INTERVAL}s)"
     else
         echo "mta: peer-IP watchdog disabled (PEER_WATCH_INTERVAL=${PEER_WATCH_INTERVAL})"
+    fi
+
+    # F-12: per-user outbound rate-limit policy daemon (ratelimitd), supervised like the
+    # peer watchdog. It is fail-open by contract (the submission services answer DUNNO
+    # when it is unreachable), but a crash loop must be visible in the logs. Runs
+    # unprivileged as postfix; the three values are passed explicitly so the daemon
+    # sees the validated ones even if su drops the environment.
+    if [ "${OUTBOUND_RATE_RECIPIENTS}" != "0" ] ; then
+        ratelimit_supervise() {
+            while : ; do
+                su -s /bin/bash postfix -c \
+                    "OUTBOUND_RATE_RECIPIENTS=${OUTBOUND_RATE_RECIPIENTS} OUTBOUND_RATE_WINDOW=${OUTBOUND_RATE_WINDOW} OUTBOUND_RATE_EXEMPT_USERS='${OUTBOUND_RATE_EXEMPT_USERS}' /usr/bin/python3 /opt/maild/ratelimitd.py" || true
+                echo "mta: WARNING - ratelimitd exited, restarting in 5s" 1>&2
+                sleep 5
+            done
+        }
+        ratelimit_supervise &
+        echo "mta: outbound rate-limit daemon started (ratelimitd, ${OUTBOUND_RATE_RECIPIENTS}/user per ${OUTBOUND_RATE_WINDOW}s, $(echo "${OUTBOUND_RATE_EXEMPT_USERS}" | tr ',' ' ' | wc -w) exempt)"
+    else
+        echo "mta: outbound rate-limit daemon disabled (OUTBOUND_RATE_RECIPIENTS=0)"
     fi
 
     # start postfix in foreground

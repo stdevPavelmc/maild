@@ -121,6 +121,7 @@ schema step to create the sentinel. See `.agents/services/provisioning.md`.
 | 02:13 monthly | `check_maildirs.sh` | stale/orphan maildir report |
 | 03:00 | `purge_junk.sh` | delete Junk older than `JUNK_RETENTION_DAYS` |
 | 03:30 | `learn_from_folders.sh` | Bayes learning from Junk + INBOX samples |
+| hourly (:23) | `outbound_watch.sh` | per-user outbound volume + throttle alerts (needs syslog) |
 | 08:00 | `backup_db.sh` | catalogue dump to `/backups/db` |
 
 SpamAssassin rule updates run on the amavis container (`amavis/sa-update-loop.sh`), not cron.

@@ -61,7 +61,9 @@ ENV POSTGRES_HOST=db \
     MTA=mta \
     JUNK_RETENTION_DAYS=7 \
     SA_HAM_SAMPLE_PER_USER=25 \
-    SA_HAM_SAMPLE_MAX=400
+    SA_HAM_SAMPLE_MAX=400 \
+    OUTBOUND_ALERT_MESSAGES=150 \
+    OUTBOUND_ALERT_IGNORE_USERS=
 
 # the daemon stays in the foreground (CMD) and every job appends to /proc/1/fd/1; the healthcheck
 # just proves cron is alive: it is the pidfile Debian's cron writes at start-up
@@ -86,4 +88,4 @@ LABEL org.opencontainers.image.title="MailD maintenance jobs" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-16"
+      org.opencontainers.image.created="2026-10-19"

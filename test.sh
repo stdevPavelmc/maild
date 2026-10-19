@@ -599,6 +599,102 @@ else
     t_fail "messages above message_size_limit are rejected (rc=$SW_RC, want 24 or 26)" ; dump_swaks
 fi
 
+# A14 — F-12: submission/smtps consult the per-user outbound rate-limit policy daemon,
+# fail-open (DUNNO when it is down) and actually listening.
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "outbound rate-limit policy wiring ($DC_NEEDED)"
+else
+    RATE_WHY=""
+    for SVC in submission smtps ; do
+        MCFL="$(dcx mta postconf -M "$SVC/inet" 2>/dev/null | tr -d '\r')"
+        case "$MCFL" in
+            *"check_policy_service inet:127.0.0.1:12341"*) : ;;
+            *) RATE_WHY="$RATE_WHY $SVC-no-policy-service;" ;;
+        esac
+        case "$MCFL" in
+            *"smtpd_policy_service_default_action=DUNNO"*) : ;;
+            *) RATE_WHY="$RATE_WHY $SVC-no-fail-open;" ;;
+        esac
+    done
+    dcx mta python3 -c 'import socket; socket.create_connection(("127.0.0.1", 12341), 3).close()' \
+        2>/dev/null || RATE_WHY="$RATE_WHY daemon-not-listening;"
+    if [ -z "$RATE_WHY" ] ; then
+        t_ok "submission and smtps consult the outbound rate-limit daemon (fail-open, listening)"
+    else
+        t_fail "submission and smtps consult the outbound rate-limit daemon (${RATE_WHY# })"
+    fi
+fi
+
+# A15/A16 — F-12 functional probes of the live ratelimitd, speaking the policy protocol
+# directly (the same wire Postfix uses): a synthetic user must hit the limit exactly and
+# an exempt account must bypass it from any "IP". The synthetic user burns counters that
+# belong to nobody, so the suite's real submission traffic is never throttled.
+RL_LIMIT="$(dcx mta printenv OUTBOUND_RATE_RECIPIENTS 2>/dev/null | tr -d '\r\n')"
+case "$RL_LIMIT" in ''|*[!0-9]*) RL_LIMIT=0 ;; esac
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "outbound rate-limit daemon behaviour ($DC_NEEDED)"
+elif [ "$RL_LIMIT" -le 0 ] ; then
+    t_skip "outbound rate-limit daemon behaviour (OUTBOUND_RATE_RECIPIENTS=0)"
+else
+    cat > "$TMPRUN/rl_probe.py" <<'PY'
+import socket, sys
+user, limit = sys.argv[1], int(sys.argv[2])
+s = socket.create_connection(("127.0.0.1", 12341), 10)
+f = s.makefile("rwb")
+dunno = throttled = 0
+first_thr = None
+bad = []
+for i in range(limit + 2):
+    f.write(("request=smtpd_rcpt\nclient_address=203.0.113.7\n"
+             "client_name=probe.example.net\nsender=probe@example.org\n"
+             "recipient=rcpt-%d@example.net\nsasl_method=PLAIN\n"
+             "sasl_username=%s\n\n" % (i, user)).encode())
+    f.flush()
+    act = ""
+    while True:
+        line = f.readline()
+        if not line:
+            bad.append("eof-before-action")
+            break
+        line = line.decode("utf-8", "replace").rstrip("\r\n")
+        if not line:
+            break
+        if line.startswith("action="):
+            act = line[7:]
+    if act == "DUNNO":
+        dunno += 1
+    elif act.startswith("450"):
+        throttled += 1
+        if first_thr is None:
+            first_thr = i + 1
+    elif act:
+        bad.append(act)
+print("%d %d %s %s" % (dunno, throttled,
+                       first_thr if first_thr is not None else "-", ";".join(bad[:2])))
+PY
+    RL_PROBE="rl-probe-$RANDOM$RANDOM@$DOMAIN"
+    RL_OUT="$(dcx mta python3 - "$RL_PROBE" "$RL_LIMIT" < "$TMPRUN/rl_probe.py" 2>&1)"
+    set -- $RL_OUT
+    if [ "$1" = "$RL_LIMIT" ] && [ "$2" = "2" ] && [ "$3" = "$((RL_LIMIT + 1))" ] ; then
+        t_ok "ratelimitd defers past the per-user limit (DUNNO x$1, then 450 at #$3)"
+    else
+        t_fail "ratelimitd defers past the per-user limit (want DUNNO x$RL_LIMIT then 450, got: $RL_OUT)"
+    fi
+
+    RL_EXEMPT="$(dcx mta printenv OUTBOUND_RATE_EXEMPT_USERS 2>/dev/null | tr -d '\r' | cut -d, -f1)"
+    if [ -z "$RL_EXEMPT" ] ; then
+        t_skip "ratelimitd exempt-account bypass (OUTBOUND_RATE_EXEMPT_USERS is empty)"
+    else
+        RL_OUT="$(dcx mta python3 - "$RL_EXEMPT" "$RL_LIMIT" < "$TMPRUN/rl_probe.py" 2>&1)"
+        set -- $RL_OUT
+        if [ "$1" = "$((RL_LIMIT + 2))" ] && [ "$2" = "0" ] ; then
+            t_ok "ratelimitd exempts $RL_EXEMPT from any client (DUNNO x$1, no throttle)"
+        else
+            t_fail "ratelimitd exempts $RL_EXEMPT from any client (want DUNNO x$((RL_LIMIT + 2)), got: $RL_OUT)"
+        fi
+    fi
+fi
+
 # ========================================================= B. auth and TLS ==
 section "B. authentication and TLS"
 
@@ -1285,6 +1381,81 @@ else
             t_ok "G11 the Bayes learning job runs twice, releases its lock and reports '$BAYES_SUM'"
         fi
     fi
+
+    # -------------------------------------------- outbound volume watch job (F-12) --
+    # outbound_watch.sh (cron, hourly at :23) reads the same materialised syslog: per-user
+    # submission volume from the sasl_username= attached to queue-id from= lines, plus the
+    # ratelimitd "maild-ratelimit: throttled" events, and mails the admin an [ALERT] past
+    # OUTBOUND_ALERT_MESSAGES (or for a throttle engagement), at most once per user per day
+    # (marker in /tmp). The spike user seeded below is synthetic, so the counters it burns
+    # belong to nobody; and because the syslog only holds THIS run's traffic, no real
+    # fixture user can cross the threshold during the suite.
+    if ! dcx cron sh -c 'grep -q "^23 \* \* \* .*outbound_watch\.sh" /etc/crontab' ; then
+        t_fail "G12 the outbound volume watch job is scheduled in the cron crontab (no hourly outbound_watch.sh entry)"
+    else
+        t_ok "G12 the outbound volume watch job is scheduled hourly in the cron crontab"
+    fi
+
+    OW_SUBJECT="[ALERT] MailD outbound volume"
+    OW_THRESHOLD="$(dcx cron printenv OUTBOUND_ALERT_MESSAGES 2>/dev/null | tr -d '\r')"
+    case "$OW_THRESHOLD" in ''|*[!0-9]*) OW_THRESHOLD=150 ;; esac
+    OW_USER="rl-spike-$RANDOM$RANDOM@example.net"
+    OW_SPIKE=$((OW_THRESHOLD + 5))
+    dcx cron sh -c 'rm -f /tmp/maild-outbound-alerted-*' > /dev/null 2>&1 || true
+
+    if [ "$RES_SEEDED" != 1 ] ; then
+        t_skip "outbound_watch.sh alert behaviour (no materialised syslog to seed)"
+    else
+        # G13 — seed the over-threshold volume + a throttle engagement, run the job, and
+        # expect the [ALERT] to reach the admin's inbox naming both.
+        OW_STAMP="$(dcx cron date +'%b %e %H:%M:%S' 2>/dev/null | tr -d '\r')"
+        OW_TMP="$(mktemp)"
+        for i in $(seq 1 "$OW_SPIKE") ; do
+            echo "${OW_STAMP} $(hostname) maild-mta: postfix/submission/smtpd[9999]: 00000000${i}: from=<${OW_USER}>, size=1024, nrcpts=1, queue-id=00000000${i}, proto=ESMTP, sasl_username=${OW_USER}" >> "$OW_TMP"
+        done
+        echo "${OW_STAMP} $(hostname) maild-mta: maild-ratelimit: throttled user=${OW_USER} count=$((OW_SPIKE + 1)) limit=${OW_THRESHOLD} window=3600s recipient=rcpt@example.net" >> "$OW_TMP"
+        dcx cron sh -c 'cat >> /var/log/syslog' < "$OW_TMP" || true
+        rm -f "$OW_TMP"
+
+        OW_BEFORE="$(subj_count "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT")"
+        timeout -k10 120 "${DC[@]}" exec -T cron /scripts/outbound_watch.sh > "$TMPRUN/ow.log" 2>&1
+        OW_RC=$?
+        if [ "$OW_RC" -ne 0 ] ; then
+            t_fail "G13 outbound_watch.sh runs to completion with a seeded spike (rc=$OW_RC)"
+            info "$(tail -n 10 "$TMPRUN/ow.log" | sed 's/^/        /')"
+        elif ! wait_subj_count_gt "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT" "${OW_BEFORE:-0}" 240 ; then
+            t_fail "G13 the outbound alert was delivered to $DEPLOY_ADMIN's INBOX (still $(subj_count "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT") match(es), had ${OW_BEFORE:-0})"
+            info "$(tail -n 10 "$TMPRUN/ow.log" | sed 's/^/        /')"
+        else
+            OW_UID="$(msg_newest_uid "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT")"
+            msg_text "$DEPLOY_ADMIN" INBOX "${OW_UID:-0}" > "$TMPRUN/ow-mail.txt" 2>&1
+            if grep -qF "$OW_USER" "$TMPRUN/ow-mail.txt" && \
+               grep -q 'maild-ratelimit: throttled' "$TMPRUN/ow-mail.txt" ; then
+                t_ok "G13 the outbound alert names the over-threshold user and the throttle engagement"
+            else
+                t_fail "G13 the outbound alert names the over-threshold user and the throttle engagement (body incomplete)"
+                info "$(sed -n '/^$/,$p' "$TMPRUN/ow-mail.txt" | sed -n '1,14p' | sed 's/^/        /')"
+            fi
+        fi
+
+        # G14 — once per user per day (marker) and the ignore list: after clearing just
+        # the spike's marker entry, a re-run must stay silent by the marker, and a run
+        # with the user on OUTBOUND_ALERT_IGNORE_USERS must stay silent by the list.
+        timeout -k10 120 "${DC[@]}" exec -T cron /scripts/outbound_watch.sh > "$TMPRUN/ow2.log" 2>&1
+        OW_RC2=$?
+        dcx cron sh -c "sed -i '/^${OW_USER}\$/d' /tmp/maild-outbound-alerted-* 2>/dev/null" || true
+        timeout -k10 120 "${DC[@]}" exec -T cron sh -c \
+            "OUTBOUND_ALERT_IGNORE_USERS=${OW_USER} /scripts/outbound_watch.sh" > "$TMPRUN/ow3.log" 2>&1
+        OW_RC3=$?
+        if [ "$OW_RC2" -eq 0 ] && grep -q 'no new outbound alerts' "$TMPRUN/ow2.log" && \
+           [ "$OW_RC3" -eq 0 ] && grep -q 'no new outbound alerts' "$TMPRUN/ow3.log" ; then
+            t_ok "G14 the outbound alert fires once per user per day and honours the ignore list"
+        else
+            t_fail "G14 the outbound alert fires once per user per day and honours the ignore list (rc=$OW_RC2/$OW_RC3)"
+            info "$(tail -n 4 "$TMPRUN/ow2.log" "$TMPRUN/ow3.log" | sed 's/^/        /')"
+        fi
+    fi
+    dcx cron sh -c 'rm -f /tmp/maild-outbound-alerted-*' > /dev/null 2>&1 || true
 
     if [ "$RES_SEEDED" = 1 ] ; then
         info "the materialised /var/log/syslog is removed from the cron container on exit"

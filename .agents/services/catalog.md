@@ -109,6 +109,20 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   accept-then-bounce would create backscatter). Error limits: `smtpd_soft_error_limit=10`
   / `smtpd_hard_error_limit=60` (progressive 1s slowdown, then cut-off) — they used to be
   inverted at 60/10, where the slowdown never engaged.
+- Per-user outbound throttle (audit F-12): the entrypoint starts **`ratelimitd`**
+  (`mta/ratelimitd/ratelimitd.py`, stdlib python3 already in the image), a Postfix SMTP
+  policy daemon on loopback `127.0.0.1:12341`, supervised like the peer watchdog and
+  probed by the healthcheck. `submission`/`smtps` consult it via
+  `-o smtpd_recipient_restrictions=check_policy_service inet:127.0.0.1:12341`; it counts
+  envelope recipients per `sasl_username` over `OUTBOUND_RATE_WINDOW` and defers (`450`)
+  past `OUTBOUND_RATE_RECIPIENTS` (default 200/window; `0` strips the override lines,
+  restores the empty pre-F-12 override and skips the daemon). Accounts in
+  `OUTBOUND_RATE_EXEMPT_USERS` (exact addresses) bypass it from any IP — the hard
+  exemption for notification senders. Fail-open by contract:
+  `smtpd_policy_service_default_action=DUNNO` + a 5s policy timeout, so a dead daemon
+  stops no mail; counters are in-memory (an mta restart resets them, like anvil) and
+  every engagement is logged as a greppable `maild-ratelimit: throttled user=…` line for
+  the cron alert job. Port 25 and the amavis reinjection are untouched by design.
 - Postfix's PostgreSQL maps include the PostfixAdmin alias-domain maps:
   `virtual_alias_domains.cf` recognizes active alias domains, and
   `virtual_alias_domain_maps.cf` preserves the local part while rewriting to the target.
@@ -298,8 +312,20 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 ## cron — maintenance
 
 - Runs `cron -f`; jobs in `cron/crontab` (UTC): traffic resume 01:10, maildir check
-  02:13 monthly, Junk purge 03:00, Bayes learning 03:30, db backup 08:00 (scripts in
-  `cron/scripts/`).
+  02:13 monthly, Junk purge 03:00, Bayes learning 03:30, outbound volume watch
+  hourly (:23), db backup 08:00 (scripts in `cron/scripts/`).
+- `outbound_watch.sh` (audit F-12, alerting half): parses the production syslog for the
+  day's per-user submission volume (`sasl_username=` on queue-id `from=` lines) and the
+  mta's `maild-ratelimit: throttled` lines, and mails an `[ALERT]` to the admin via
+  `swaks` → amavis:10024 when a user crosses `OUTBOUND_ALERT_MESSAGES` (default
+  150/day, `0` = off) or tripped the throttle. `OUTBOUND_ALERT_IGNORE_USERS` is the
+  alert-side twin of the mta's `OUTBOUND_RATE_EXEMPT_USERS`; one alert per user per day
+  (marker in `/tmp`), a failed delivery is retried next run. Skips cleanly when no
+  syslog exists (dev); a dead `ratelimitd` is the mta healthcheck's job, not this one.
+  The day marker matches the *date* (`Oct 19`) at the start of a line or after a
+  separator — not a fixed `" Oct 19 "`: rsyslog stamps the line at column 0 while
+  Postfix adds a second stamp inside the message, so a leading-space match would
+  skip the bare `maild-ratelimit:` lines and never report a throttle engagement.
 - `pg_dump`/`psql` come from the **distro** `postgresql-client-18` (`ARG PG_CLIENT_MAJOR=18`): on
   resolute it is ≥ the catalogue server, so the PGDG repository, keyring and `curl` the jammy image
   needed are gone. `backup_db.sh` still refuses to dump when the client is older than the server
