@@ -1,5 +1,8 @@
 {
-  "app": { "title": "MailD AdminNG", "subtitle": "Administración del servidor de correo, PWA primero" },
+  "app": {
+    "title": "MailD AdminNG",
+    "subtitle": "Administración del servidor de correo, PWA primero"
+  },
   "nav": {
     "domains": "Dominios",
     "mailboxes": "Cuentas",
@@ -7,6 +10,7 @@
     "admins": "Administradores",
     "devices": "Dispositivos",
     "logs": "Registros",
+    "bootstrap": "Carga inicial",
     "settings": "Ajustes",
     "admin": "Admin",
     "search": "Buscar"
@@ -203,5 +207,40 @@
     "confirm": "Activar en este dispositivo",
     "later": "Ahora no"
   },
-  "quota": { "of": "de" }
+  "quota": {
+    "of": "de"
+  },
+  "bootstrap": {
+    "title": "Carga inicial",
+    "intro": "Crea varias cuentas de una vez desde un archivo CSV. Cada fila se procesa por separado: una fila con error nunca detiene la importación.",
+    "formatTitle": "Formato del archivo",
+    "formatHelp": "La primera línea debe ser exactamente: {{headers}}. Después, una cuenta por línea.",
+    "columnFullname": "fullname: el nombre visible de la cuenta (texto libre).",
+    "columnEmail": "emailaddress: la dirección completa, con el dominio (por ejemplo usuario@example.com).",
+    "columnPassword": "password: al menos 8 caracteres con una mayúscula, una minúscula, un dígito y un símbolo.",
+    "columnQuota": "quota: un número son megabytes (512); también se aceptan 512MB, 1G y 1T. Vacío significa sin límite.",
+    "rulesTitle": "Reglas",
+    "ruleDomain": "El dominio debe existir ya en este servidor y tú debes tener permiso para administrarlo.",
+    "rulePassword": "Las contraseñas que no cumplen la política anterior se rechazan.",
+    "ruleQuota": "Una cuota no válida se rechaza; vacía o 0 significa sin límite.",
+    "ruleExisting": "Una cuenta que ya existe nunca se modifica: su fila se omite y se informa.",
+    "rulePartial": "Una fila con error se omite y la importación continúa con la siguiente.",
+    "sample": "Descargar el CSV de ejemplo",
+    "file": "Archivo CSV",
+    "selected": "Archivo seleccionado: {{name}}",
+    "invalidExtension": "Solo se aceptan archivos .csv.",
+    "invalidHeaders": "La cabecera debe empezar por: fullname,emailaddress,password,quota (columnas opcionales al final: passwordhash, problem)",
+    "readError": "No se pudo leer el archivo.",
+    "upload": "Importar cuentas",
+    "uploading": "Importando…",
+    "summary": "Resultado de la importación",
+    "created": "{{count}} creadas",
+    "failed": "{{count}} con error",
+    "failedHelp": "Las filas con error se pueden descargar como un CSV con el motivo de cada una; corrígelas y vuelve a subir el archivo.",
+    "downloadFailed": "Descargar las filas con error (CSV)",
+    "row": "Fila {{row}}",
+    "empty": "El archivo no tiene filas de cuenta.",
+    "columnPasswordhash": "passwordhash: una contraseña pre-hash (argon2id o md5crypt) que se almacena tal cual — para migrar usuarios de otro sistema sin conocer sus contraseñas en texto plano. Entéllas entre comillas si contiene comas.",
+    "rulePasswordhash": "Los hashes md5crypt se rechazan después del 2027-02-01 (eliminación de esquemas débiles). Los formatos de hash no válidos fallan la fila."
+  }
 }

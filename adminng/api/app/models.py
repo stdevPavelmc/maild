@@ -169,6 +169,35 @@ class QuotaStatus(BaseModel):
     source: Literal["maildirsize", "du", "unavailable"]
 
 
+# --------------------------------------------------------------------- bootstrap
+class BootstrapRequest(BaseModel):
+    """The CSV payload of a bulk account import (base64-encoded)."""
+
+    csv_base64: str = Field(min_length=1)
+
+
+class BootstrapResult(BaseModel):
+    """The outcome of one CSV row: created, or failed with a reason."""
+
+    row: int
+    fullname: str = ""
+    email: str = ""
+    ok: bool
+    code: str
+    reason: str = ""
+    quota_bytes: int | None = None
+
+
+class BootstrapReport(BaseModel):
+    """The outcome of the whole import (a failed row never fails the import)."""
+
+    total: int
+    created: int
+    failed: int
+    results: list[BootstrapResult]
+    failed_csv_base64: str | None = None
+
+
 # ----------------------------------------------------------------------- aliases
 class AliasCreate(BaseModel):
     address: str

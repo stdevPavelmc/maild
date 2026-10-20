@@ -15,6 +15,7 @@ const links = [
   { to: '/admins', key: 'admins', icon: '👤' },
   { to: '/devices', key: 'devices', icon: '💻' },
   { to: '/logs', key: 'logs', icon: '📋' },
+  { to: '/bootstrap', key: 'bootstrap', icon: '📥' },
 ] as const
 
 export function Shell({ children }: { children: React.ReactNode }) {

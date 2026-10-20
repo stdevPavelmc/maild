@@ -394,7 +394,11 @@ def create_mailbox(principal: Principal, payload: dict) -> dict:
     username = payload["username"]
     local_part, _, domain = username.rpartition("@")
     ensure_domain_allowed(principal, domain)
-    hashed = hash_password(payload["password"])
+    # `password_hash` lets callers (e.g. bootstrap CSV import) store a
+    # pre-hashed password verbatim instead of hashing plaintext. When present
+    # and non-empty it wins over `password`.
+    password_hash = payload.get("password_hash") or ""
+    hashed = password_hash or hash_password(payload["password"])
     # PostfixAdmin's maildir layout: '<domain>/<local_part>/' (trailing slash).
     maildir = f"{domain}/{local_part}/"
 

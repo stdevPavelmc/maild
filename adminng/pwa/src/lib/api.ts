@@ -198,6 +198,26 @@ export type AuditEvent = {
   result: string
   details: Record<string, unknown> | null
 }
+
+/** The outcome of one row of a bootstrap (CSV) import. */
+export type BootstrapResult = {
+  row: number
+  fullname: string
+  email: string
+  ok: boolean
+  code: string
+  reason: string
+  quota_bytes?: number | null
+}
+
+/** The outcome of a whole bootstrap import (a failed row never fails it). */
+export type BootstrapReport = {
+  total: number
+  created: number
+  failed: number
+  results: BootstrapResult[]
+  failed_csv_base64?: string | null
+}
 export type SearchHit = {
   type: 'user' | 'alias' | 'domain'
   id: string
@@ -556,6 +576,10 @@ export const api = {
     request<Page<AuditEvent>>(`/logs${qs(params)}`),
   logFacets: (params: { domain?: string; actor?: string }) =>
     request<{ actors: string[]; actions: string[] }>(`/logs/facets${qs(params)}`),
+
+  /** Bulk import of accounts from a base64-encoded CSV file. */
+  bootstrapUsers: (csvBase64: string) =>
+    request<BootstrapReport>('/bootstrap', { method: 'POST', body: { csv_base64: csvBase64 } }),
   listAllDomains: async (): Promise<Domain[]> => {
     const out: Domain[] = []
     let cursor: string | undefined

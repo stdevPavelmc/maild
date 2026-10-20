@@ -14,6 +14,7 @@ import { AliasesPage } from './pages/Aliases'
 import { AdminsPage } from './pages/Admins'
 import { DevicesPage } from './pages/Devices'
 import { LogsPage } from './pages/Logs'
+import { BootstrapPage } from './pages/Bootstrap'
 import { SettingsPage } from './pages/Settings'
 
 function Gate() {
@@ -41,6 +42,7 @@ function Gate() {
         <Route path="/admins" element={<AdminsPage password="" />} />
         <Route path="/devices" element={<DevicesPage password="" />} />
         <Route path="/logs" element={<LogsPage />} />
+        <Route path="/bootstrap" element={<BootstrapPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/domains" replace />} />
       </Routes>

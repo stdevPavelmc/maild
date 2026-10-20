@@ -1,5 +1,8 @@
 {
-  "app": { "title": "MailD AdminNG", "subtitle": "PWA-first mailserver administration" },
+  "app": {
+    "title": "MailD AdminNG",
+    "subtitle": "PWA-first mailserver administration"
+  },
   "nav": {
     "domains": "Domains",
     "mailboxes": "Accounts",
@@ -7,6 +10,7 @@
     "admins": "Admins",
     "devices": "Devices",
     "logs": "Logs",
+    "bootstrap": "Bootstrap",
     "settings": "Settings",
     "admin": "Admin",
     "search": "Search"
@@ -203,5 +207,40 @@
     "confirm": "Enable on this device",
     "later": "Not now"
   },
-  "quota": { "of": "of" }
+  "quota": {
+    "of": "of"
+  },
+  "bootstrap": {
+    "title": "Bootstrap / Initial load",
+    "intro": "Create several accounts at once from a CSV file. Each row is processed on its own: a failed row never stops the import.",
+    "formatTitle": "File format",
+    "formatHelp": "The first line must be exactly: {{headers}}. One account per line after that.",
+    "columnFullname": "fullname: the display name of the account (free text).",
+    "columnEmail": "emailaddress: the full address, domain included (for example user@example.com).",
+    "columnPassword": "password: at least 8 characters with an upper case letter, a lower case letter, a digit and a symbol.",
+    "columnQuota": "quota: a number is megabytes (512); 512MB, 1G and 1T are also accepted. Empty means unlimited.",
+    "rulesTitle": "Rules",
+    "ruleDomain": "The domain must already exist on this server and you must be allowed to manage it.",
+    "rulePassword": "Passwords that do not meet the policy above are rejected.",
+    "ruleQuota": "An invalid quota is rejected; empty or 0 means unlimited.",
+    "ruleExisting": "An account that already exists is never modified: its row is skipped and reported.",
+    "rulePartial": "A failing row is skipped and the import continues with the next one.",
+    "sample": "Download the sample CSV",
+    "file": "CSV file",
+    "selected": "Selected file: {{name}}",
+    "invalidExtension": "Only .csv files are accepted.",
+    "invalidHeaders": "The header must start with: fullname,emailaddress,password,quota (optional trailing columns: passwordhash, problem)",
+    "readError": "The file could not be read.",
+    "upload": "Import accounts",
+    "uploading": "Importing…",
+    "summary": "Import result",
+    "created": "{{count}} created",
+    "failed": "{{count}} failed",
+    "failedHelp": "The failed rows can be downloaded as a CSV with the reason of each one; fix them and upload the file again.",
+    "downloadFailed": "Download the failed rows (CSV)",
+    "row": "Row {{row}}",
+    "empty": "The file has no account rows.",
+    "columnPasswordhash": "passwordhash: a pre-hashed password (argon2id or md5crypt) to store verbatim — for migrating users from another system without knowing their plaintext passwords. Quoted if it contains commas.",
+    "rulePasswordhash": "md5crypt hashes are rejected after 2027-02-01 (weak-scheme removal). Invalid hash formats fail the row."
+  }
 }

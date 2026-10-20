@@ -19,6 +19,7 @@ from .routers import (
     admins,
     aliases,
     auth,
+    bootstrap,
     devices,
     domain_aliases,
     domains,
@@ -98,6 +99,7 @@ for _router in (
     admins.router,
     search.router,
     logs.router,
+    bootstrap.router,
 ):
     app.include_router(_router, prefix="/api/v1")
 

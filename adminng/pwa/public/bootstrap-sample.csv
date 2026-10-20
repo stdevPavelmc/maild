@@ -1,0 +1,3 @@
+fullname,emailaddress,password,quota,passwordhash
+Pavel Milanes Costa,pavel@example.net,Str0ng!Pass,512MB,
+"Migrated User,migrated@example.net,,"{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$...",512MB
