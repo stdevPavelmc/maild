@@ -106,6 +106,32 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     await expect.poll(() => calls.some((url) => !url.includes('domain='))).toBe(true)
   })
 
+  await test.step('the logs filters are tenant-scoped dropdowns', async () => {
+    await page.getByRole('link', { name: /Logs/ }).first().click()
+
+    const domain = page.getByLabel('Domain', { exact: true })
+    const actor = page.getByLabel('Actor', { exact: true })
+    const action = page.getByLabel('Action', { exact: true })
+    await expect(domain).toBeVisible()
+    await expect(actor).toBeVisible()
+    await expect(action).toBeVisible()
+
+    // Defaults: All domains / All actors / Any action.
+    await expect(domain).toHaveValue('')
+    await expect(actor).toHaveValue('')
+    await expect(action).toHaveValue('')
+    await expect(domain.getByRole('option', { name: 'All domains' })).toHaveCount(1)
+    await expect(actor.getByRole('option', { name: 'Nobody' })).toHaveCount(1)
+
+    // The Nobody sentinel reaches the API verbatim.
+    const calls: string[] = []
+    page.on('request', (request) => {
+      if (request.url().includes('/api/v1/logs?')) calls.push(request.url())
+    })
+    await actor.selectOption('__none__')
+    await expect.poll(() => calls.some((url) => url.includes('actor=__none__'))).toBe(true)
+  })
+
   await test.step('switching the language translates the navigation', async () => {
     await page.getByRole('button', { name: /Settings/ }).click()
     await page.getByRole('button', { name: 'Español' }).click()

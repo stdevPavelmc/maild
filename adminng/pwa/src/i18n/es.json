@@ -162,6 +162,10 @@
     "actor": "Autor",
     "action": "Acción",
     "domain": "Dominio",
+    "allDomains": "Todos los dominios",
+    "allActors": "Todos los autores",
+    "nobody": "Nadie",
+    "anyAction": "Cualquiera",
     "filter": "Filtrar",
     "clear": "Limpiar filtros",
     "empty": "Sin eventos"

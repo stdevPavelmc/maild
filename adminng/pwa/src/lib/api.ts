@@ -554,6 +554,18 @@ export const api = {
     request<{ query: string; results: SearchHit[] }>(`/search${qs({ q })}`),
   logs: (params: { actor?: string; domain?: string; action?: string; cursor?: string }) =>
     request<Page<AuditEvent>>(`/logs${qs(params)}`),
+  logFacets: (params: { domain?: string; actor?: string }) =>
+    request<{ actors: string[]; actions: string[] }>(`/logs/facets${qs(params)}`),
+  listAllDomains: async (): Promise<Domain[]> => {
+    const out: Domain[] = []
+    let cursor: string | undefined
+    for (;;) {
+      const page = await request<Page<Domain>>(`/domains${qs({ cursor })}`)
+      out.push(...page.items)
+      if (!page.next_cursor) return out
+      cursor = page.next_cursor
+    }
+  },
   devices: (state?: string, cursor?: string, username?: string) =>
     request<Page<Device>>(`/admin/devices${qs({ state, cursor, username })}`),
   setDeviceState: (device: string, action: 'APPROVE' | 'REVOKE', vtoken: string) =>

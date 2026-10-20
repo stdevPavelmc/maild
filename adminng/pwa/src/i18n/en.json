@@ -162,6 +162,10 @@
     "actor": "Actor",
     "action": "Action",
     "domain": "Domain",
+    "allDomains": "All domains",
+    "allActors": "All actors",
+    "nobody": "Nobody",
+    "anyAction": "Any action",
     "filter": "Filter",
     "clear": "Clear filters",
     "empty": "No events"

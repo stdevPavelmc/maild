@@ -488,7 +488,8 @@ confirm button (§6.3) so no destructive click can be a reflex.
 | `PUT /aliases/{id}` · `DELETE /aliases/{id}` | access (+ reauth on DELETE) | alias CRUD |
 | `GET /admins` · `POST /admins` | superadmin | create = `admin` + `domain_admins` rows |
 | `PUT /admins/{u}` · `DELETE /admins/{u}` | superadmin (+ reauth on DELETE) | superadmin flag / domain assignments |
-| `GET /logs?actor=&domain=&action=&entity=&cursor=` | access | audit events; for domain admins the domain filter is **forced on** (their own domains only) |
+| `GET /logs?actor=&domain=&action=&entity=&cursor=` | access | audit events; for domain admins the domain filter is **forced on** (their own domains only); `actor=__none__` selects rows whose actor is not an existing admin (Nobody) |
+| `GET /logs/facets?domain=&actor=` | access | `{actors, actions}` distinct dropdown options, tenant-scoped like `/logs` |
 
 **Example — the rapid search response** (tenant-scoped, capped):
 
