@@ -246,7 +246,7 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Stateless and env-free: **no `env_file:`** (variable separation, like clamav). Its access
   log (stdout) is the exterior interaction record; the functional audit trail lives in the
   `adminng` DB's `audit_event` table.
-- Built multi-stage from `adminng/pwa/` (`node:22-alpine` build → `nginx:1.27-alpine`).
+- Built multi-stage from `adminng/pwa/` (`node:26-alpine` build → `nginx:1.27-alpine`).
 - Clients (browser/PWA/APK) can only log in until their device is approved; the Android
   APK (Phase 4) is the only client that needs the server-URL onboarding screen.
 

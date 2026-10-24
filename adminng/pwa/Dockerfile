@@ -5,7 +5,7 @@
 # service (see nginx/default.conf). No env_file is needed: the bundle is fully
 # static and the API is same-origin.
 
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
@@ -18,7 +18,7 @@ RUN if [ -f package-lock.json ]; then \
 COPY . .
 RUN npm run build
 
-FROM nginx:1.27-alpine
+FROM nginx:1.31-alpine
 
 # Shared vhost pieces (server headers + locations) live outside conf.d so both
 # the HTTP vhost and the optional HTTPS vhost can include them.
