@@ -95,4 +95,4 @@ LABEL org.opencontainers.image.title="MailD MTA (Postfix)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-19"
+      org.opencontainers.image.created="2026-10-24"
