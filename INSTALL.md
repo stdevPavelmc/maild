@@ -1,7 +1,7 @@
 # MailD install instructions
 
 MailD is a complete mail server built from Docker containers (Postfix, Dovecot, Amavis +
-ClamAV, PostfixAdmin, SnappyMail and a maintenance cron) that keeps its domain/user
+ClamAV, AdminNG, SnappyMail and a maintenance cron) that keeps its domain/user
 catalogue in PostgreSQL.
 
 This guide takes you from a bare host to a **working server in one command**: on the first
@@ -12,6 +12,10 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 ## Requirements
 
 - A valid `docker` engine and the `docker compose` v2 plugin.
+- **Open ports on the host** (firewall/NAT accordingly): `25`, `465`, `587` (SMTP, SMTPS,
+  Submission) and `993`, `995` (IMAPS, POP3S) — there is **no** plaintext 143/110 in the
+  production compose files. The web UIs are served behind your TLS ingress on `80`/`443`
+  (see [HTTPS & web UIs](#https--web-uis)).
 - Access to the container registry (Docker Hub, GitHub `ghcr.io` or your own). Some networks
   block Docker Hub (Cuba, behind a proxy): use the GitHub compose or a pre-built registry.
   That is out of scope here — google it.
@@ -67,6 +71,13 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 
    When you see `api: INFO - catalogue provisioned: domain=... admin=...` the server is ready.
 
+**Quick check before you continue:**
+
+- `docker compose -f docker-compose.yml ps` — every service should be `Up`/`healthy`
+  (`clamav` may take a while the first time while it downloads ~230 MB of signatures).
+- Send a mail from an external account (e.g. Gmail) to `sysadmin@<DEFAULT_DOMAIN>` and read
+  it back on the webmail: that confirms SMTP + content filtering + delivery in one go.
+
 That's it — the deployment is usable. Jump to [First login](#first-login).
 
 > Building from source instead of pulling? Same flow, just build first:
@@ -111,8 +122,10 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
   enrolls TOTP on first login — see [`adminng/README.md`](./adminng/README.md).
 - From there create **additional** domains, users and aliases (a new domain gets the four
   default aliases automatically). Bulk import is supported (CSV, "Carga inicial").
-- **Webmail (SnappyMail):** open `https://webmails.domain.com` (or the webmail port of your
-  compose file) and log in with a mailbox you created.
+  > The first domain is already there: do **not** recreate it, or you will get a duplicate.
+- **Webmail (SnappyMail):** open `https://webmail.<DEFAULT_DOMAIN>` — served behind your TLS
+  ingress (the production compose files expose no webmail port; the dev stack is at
+  `http://localhost:8081`) — and log in with a mailbox you created.
 - **Webmail admin panel:** `https://webmail.domain.com/​?admin` — the login (default `maild`)
   and the password are printed by the webmail container on every boot, as an OTP:
   `docker compose logs mua | grep -A3 'admin panel'`. The password is generated on the first
@@ -148,14 +161,13 @@ upgrade. Two things to know:
   `docker compose exec api adminng.py --legacy-hashes`. The mda logs a startup
   warning with the remaining count on every boot.
 
-> The first domain is already there: do **not** recreate it, or you will get a duplicate.
-
 ## DKIM
 
-`amavis` generates one DKIM key per domain and prints the DNS record it needs. Read it:
+`amavis` generates one DKIM key per domain and prints the DNS record it needs. Read it
+(with the compose file you deployed with):
 
 ```sh
-docker compose -f compose-github.yml logs amavis | grep -A12 'DKIM / DNS config'
+docker compose -f docker-compose.yml logs amavis | grep -A12 'DKIM / DNS config'
 ```
 
 You get a block like:
@@ -252,13 +264,39 @@ never a plain image swap and never an in-place start. The step-by-step procedure
 (collation, the `--clean --if-exists` restore, the provisioning sentinel, downtime, secrets) and
 the rollback path are in [`db_upgrade.md`](db_upgrade.md).
 
+## Outbound throttle & abuse alerts (per-user)
+
+Submission over `465`/`587` counts envelope recipients per SASL user over
+`OUTBOUND_RATE_WINDOW` (1 hour by default); past `OUTBOUND_RATE_RECIPIENTS` (200
+recipients/user/hour by default, `0` disables the throttle) Postfix defers the extra
+recipients with `450 4.7.1` until the window frees up. This protects your IP reputation,
+it is not a malfunction:
+
+- To exempt a notification/list sender (hard bypass, from any IP) list its account in
+  `OUTBOUND_RATE_EXEMPT_USERS` (comma-separated). An exempt account still cannot spoof
+  other senders.
+- Every throttle engagement is logged as a greppable
+  `maild-ratelimit: throttled user=...` line in the `mta` logs.
+- The throttle daemon **fails open by contract**: if it dies it stops no mail, but the
+  `mta` healthcheck goes unhealthy (it probes the throttle) and the entrypoint keeps
+  restarting it until you look.
+- Additionally, the `cron` container mails the administrator an hourly `[ALERT]` (at :23)
+  for each user/day past `OUTBOUND_ALERT_MESSAGES` (150 messages/day/user, `0` = off),
+  honouring `OUTBOUND_ALERT_IGNORE_USERS` (accounts never alerted on). If you run a
+  high-volume list relay, raise these limits or exempt the sender accounts.
+
+On inbound `25` (unauthenticated) a recipient-enumeration attempt is **tarpitted**: the
+connection stalls after invalid recipients on purpose — that pause is anti-abuse, not a
+hung server.
+
 ## Tech details
 
 - **Volumes:** all persistent data lives in Docker volumes (mail, catalogue, filters, certs).
 - **SSL certs:** a self-signed cert is generated if no Let's Encrypt one is found (for the
   MTA/MDA); setting up Let's Encrypt is up to you.
 - **Webmail:** SnappyMail is the default; swap/comment the `mua` service if you prefer another.
-- **PostfixAdmin:** open-source web admin; supports CSV import and per-domain admins.
+- **AdminNG:** the web admin (per-domain admins, CSV bulk import, audit trail) — see
+  [AdminNG](#adminng-optional-but-recommended).
 - **Maildir:** compatible with MailAD / Docker-MailAD; per-user maildirs live under a folder
   named after the domain, which eases migrations.
 

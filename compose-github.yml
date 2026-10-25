@@ -84,14 +84,14 @@ services:
       options:
         syslog-address: "unixgram:///dev/log"
     labels:
-      # Ingress (Traefik) — https://adminng.${DEFAULT_DOMAIN}
+      # Ingress (Traefik) — https://admin.${DEFAULT_DOMAIN}
       - "traefik.enable=true"
-      - "traefik.http.routers.adminng.rule=Host(`adminng.${DEFAULT_DOMAIN}`)"
-      - "traefik.http.routers.adminng.entrypoints=websecure"
-      - "traefik.http.routers.adminng.tls=true"
+      - "traefik.http.routers.admin.rule=Host(`admin.${DEFAULT_DOMAIN}`)"
+      - "traefik.http.routers.admin.entrypoints=websecure"
+      - "traefik.http.routers.admin.tls=true"
       # custom service (non default port)
-      - "traefik.http.routers.adminng.service=adminng_custom_port"
-      - "traefik.http.services.adminng_custom_port.loadbalancer.server.port=80"
+      - "traefik.http.routers.admin.service=admin_custom_port"
+      - "traefik.http.services.admin_custom_port.loadbalancer.server.port=80"
       #- "traefik.docker.network=maild"
 
   mua:
