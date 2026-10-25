@@ -112,6 +112,15 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   overrides any of them;
   password + `DEFAULT_DOMAIN`/`MAIL_ADMIN_USER` passed explicitly at compose level.
 - Ports: 110, 143, 993, 995 (POP3/IMAP + TLS) and 4190 (ManageSieve), 12345 (SASL).
+- **Readiness is the auth socket, not the container state.** A cold first boot generates the
+  self-signed cert and `openssl dhparam -5 2048` (a safe prime: seconds to minutes) *before* the
+  entrypoint `exec`s the master, so a "running" container can have no
+  `/run/dovecot/auth-client` at all and every `doveadm`/IMAP probe fails with
+  `conn unix:/run/dovecot/auth-client ... No such file or directory`. `bootstrap-dev.sh` waits
+  (bounded) for that socket before it verifies the fixtures. The entrypoint's wait for a
+  shared, amavis-seeded `/etc/spamassassin/init.pre` is bounded too (120 s, then it warns and
+  starts anyway): no compose file mounts `/etc/spamassassin` (the image ships its own copy), and
+  an unbounded wait there would leave the container "running" with Dovecot never started.
 
 ## mta — Postfix
 

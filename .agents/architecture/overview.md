@@ -55,7 +55,8 @@ compose network.
 - Service names are the DNS aliases on the network; in dev the containers are also named
   `maild-dev-<svc>` (production: `maild-<svc>`, external network `maild`).
 - `depends_on` is a **start order**, not a readiness wait — `bootstrap-dev.sh` does the
-  real bounded waiting (Postgres, PostfixAdmin schema, web UIs, ClamAV signatures).
+  real bounded waiting (Postgres, the catalogue schema, Dovecot's auth socket, the web UIs,
+  the ClamAV signatures).
 - Production images are `pavelmc/maild-<svc>:latest` (Docker Hub), `ghcr.io/stdevpavelmc/maild-<svc>:latest`
   (GitHub) or `${IMG_<SVC>}:${TAG}` (GitLab). The web UIs (`mua`, `adminng`) are exposed via
   Traefik labels and fronted by an external ingress that terminates TLS — the stack ships none.

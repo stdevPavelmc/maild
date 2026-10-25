@@ -127,6 +127,19 @@ jobs:
           docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps
           ./test.sh
 
+      - name: Dump container state and logs (on failure)
+        # A container that is up but not ready (the mda generating its DH params on a cold
+        # volume, amavis blocked on the provisioning sentinel, ...) and a real failure look
+        # the same from the bootstrap output alone, and that was exactly the ambiguity of the
+        # first failing run. This is the evidence needed to tell them apart.
+        if: failure()
+        run: |
+          docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" ps -a || true
+          for svc in $SERVICES; do
+            echo "===== $svc ====="
+            docker compose --env-file "$ENV_FILE" -f "$COMPOSE_FILE" logs --no-color --tail=200 "$svc" || true
+          done
+
 
       # --- Phase 2: push images (push events only, after the tests passed) -------------
       - name: Log in to Docker Hub

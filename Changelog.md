@@ -89,6 +89,30 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   can write the cache while the `.sieve` sources stay immutable for it. Verified: the first copy
   saves the binary, the next one logs `Script binary ... successfully loaded`, and the container log
   stays clean.
+- Fixed: **the `build-test-push-tag` CI job could fail the bootstrap with
+  `IMAP login FAILED ... auth-client: conn unix:/run/dovecot/auth-client ... No such file or
+  directory` for *every* fixture mailbox.** Nothing was wrong with the credentials or the
+  catalogue: `bootstrap-dev.sh` only proved that the `mda` *container* was running
+  (`docker compose ps --status running`), while on a cold host its first boot spends an
+  unpredictable number of seconds generating the self-signed certificate and
+  `openssl dhparam -5 2048` (a safe prime) *before* it execs Dovecot — so the `doveadm auth test`
+  probes ran against a master that had not created its auth socket yet. The bootstrap now waits
+  (bounded, `WAIT_MDA=300`) for `/run/dovecot/auth-client` and retries a socket-level `doveadm`
+  failure a few times; a real credential reject still fails at once. This is a harness bug that a
+  re-run "fixed", not a mail-stack defect.
+- Fixed: **the `mda` entrypoint no longer blocks forever waiting for an amavis-seeded
+  `/etc/spamassassin/init.pre`.** No compose file shares `/etc/spamassassin` with `amavis` any
+  more (the mda image ships its own copy), so the gate was dead weight — and had the file ever
+  been missing, the container would have sat `running` with Dovecot never started: no mail
+  service, no crash, nothing but the notice in its log. The wait is now bounded (120 s) and, if
+  it times out, warns and starts Dovecot anyway.
+- Changed: the CI job gains a `Dump container state and logs (on failure)` step
+  (`docker compose ps -a` plus the last 200 log lines per service). A container that is up but
+  not ready and a real failure are indistinguishable from the bootstrap output alone — that is
+  what made the run above read like a credentials problem.
+- Changed: `bootstrap-dev.sh`'s `bind_prep` uses `cp -a --update=none` instead of the
+  non-portable `cp -a -n`, which coreutils warns about on every run (the vehicle image is
+  `ubuntu:resolute`, whose `cp` already recommends the new spelling).
 
 ## 2026-10-19 1.6.1-dev
 - Security: **SMTP local-part harvesting on :25 is now tarpitted** (2026-10 audit F-07). The

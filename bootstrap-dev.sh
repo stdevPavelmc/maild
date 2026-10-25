@@ -14,7 +14,8 @@
 #        - the same default aliases → alice
 #        - alice as the *domain admin* of the test domain (catalogue `admin` row)
 #   3. test.creds (git-ignored, mode 0600) with every credential, then verifies them:
-#        IMAP auth through doveadm for each mailbox plus the admin rows in the catalogue.
+#        IMAP auth through doveadm for each mailbox plus the admin rows in the catalogue
+#        (the wait before it is on Dovecot's auth socket, not on the container state).
 #
 # Everything is idempotent: a second run re-asserts the same state and changes nothing else.
 # A password already present in test.creds is never replaced (--rotate-creds forces new ones).
@@ -30,6 +31,9 @@ readonly EXEC_TIMEOUT=60     # hard ceiling for every single docker call (never 
 readonly WAIT_DB=120         # seconds to wait for Postgres
 readonly WAIT_SCHEMA=180     # seconds to wait for the catalogue schema
 readonly WAIT_HTTP=120       # seconds to wait for a web UI
+readonly WAIT_MDA=300        # seconds to wait for Dovecot's auth socket (cold first boot
+                             # generates the self-signed cert + `openssl dhparam -5 2048`,
+                             # a safe prime: its cost is unpredictable, seconds to minutes)
 readonly WAIT_MUA=120        # seconds to wait for the webmail per-domain config
 readonly WAIT_CLAMAV=900     # seconds to wait for the first ClamAV signature download
 
@@ -289,7 +293,7 @@ bind_prep() { # <image> <host dir> <sh snippet run inside /target>
 # with "Please create an empty directory /var/lib/amavis/db") and virusmails; cp -n never
 # overwrites what the services already created, so a re-run is a no-op.
 bind_prep "pavelmc/maild-amavis:develop" "ldata/amavis" \
-	"cp -a -n /var/lib/amavis/. /target/ && chown -R 994:994 /target"
+	"cp -a --update=none /var/lib/amavis/. /target/ && chown -R 994:994 /target"
 # clamav: the clamav image itself runs as uid 100 and cannot chown, so use a root image
 # (the amavis one) as the vehicle.
 bind_prep "pavelmc/maild-amavis:develop" "ldata/clamav" \
@@ -346,6 +350,13 @@ fi
 # server logs 'FATAL: database "maild" does not exist' on every probe.
 probe_db() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T db pg_isready -U "$PGUSER" -d "$PGDB" -q; }
 probe_schema() { [ "$(psql_q "$PGDB" "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='domain'")" = "1" ]; }
+# Dovecot's readiness is its auth socket, NOT the container state: on a cold host the mda's
+# first boot generates the self-signed cert and `openssl dhparam -5 2048` (a safe prime, an
+# unpredictable number of seconds) *before* it execs Dovecot. A container that is merely
+# "running" at that point answers `doveadm` with
+#   auth-client: conn unix:/run/dovecot/auth-client ... No such file or directory
+# which is exactly what made the CI run report every fixture mailbox as failed (2026-10-24).
+probe_mda_auth() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda test -S /run/dovecot/auth-client; }
 # AdminNG end to end: nginx serves the PWA and proxies /api/v1/ to the api service,
 # which answers only when its own database is up and migrated.
 probe_adminng_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${ADMINNG_PORT}/api/v1/health"; }
@@ -363,7 +374,10 @@ wait_up "$WAIT_SCHEMA" probe_schema ||
 ok "Postgres is up and the catalogue schema exists"
 
 is_service_up mda || die "the mda (Dovecot) service is not running (docker compose -f $COMPOSE_FILE logs mda)"
-ok "mda is reachable"
+log "waiting for the Dovecot auth socket (up to ${WAIT_MDA}s)"
+wait_up "$WAIT_MDA" probe_mda_auth ||
+	die "Dovecot never created /run/dovecot/auth-client within ${WAIT_MDA}s: check 'docker compose -f $COMPOSE_FILE logs mda' (a cold first boot also generates the self-signed cert and the DH params there)"
+ok "mda is reachable (Dovecot auth socket ready)"
 
 log "waiting for the AdminNG frontend on :${ADMINNG_PORT} (up to ${WAIT_HTTP}s)"
 wait_up "$WAIT_HTTP" probe_adminng_http ||
@@ -836,9 +850,28 @@ VERIFY_FAILED=0
 if [ "$DO_VERIFY" = 1 ]; then
 	step "verification"
 
+	# doveadm talks to Dovecot through its auth socket. A socket-level failure is retried
+	# (bounded): it means the auth service is momentarily unavailable, not that the credentials
+	# are wrong — `probe_mda_auth` above already waited for the master to come up, but a
+	# restarted db/auth-worker still produces this transiently (see adminng/doc/plan.md). A
+	# real reject ("passdb: ... auth failed") is final and reported at once.
+	imap_auth() { # <address> <password> — doveadm stdout, 0 when Dovecot accepted the login
+		local addr="$1" pw="$2" attempt out
+		for attempt in 1 2 3 4 5; do
+			out="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda doveadm auth test "$addr" "$pw" 2>&1 || true)"
+			if printf '%s' "$out" | grep -q 'auth succeeded'; then
+				printf '%s' "$out"
+				return 0
+			fi
+			printf '%s' "$out" | grep -q 'conn unix:/run/dovecot' || break
+			sleep 2
+		done
+		printf '%s' "$out"
+		return 1
+	}
+
 	for addr in "${ADDRESSES[@]}"; do
-		if out="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda doveadm auth test "$addr" "${PW[$addr]}" 2>&1 || true)" &&
-			printf '%s' "$out" | grep -q 'auth succeeded'; then
+		if out="$(imap_auth "$addr" "${PW[$addr]}")"; then
 			ok "IMAP login           $addr"
 		else
 			warn "IMAP login FAILED for $addr: $(printf '%s' "$out" | tr '\n' ' ')"

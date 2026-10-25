@@ -1,11 +1,22 @@
 #!/bin/sh
 set -e
 
-# SpamAssassin shared config: seed the shared volume is a tash of amavis 
-# Wait for amavis to populate the shared volume on the first boot of the container
+# SpamAssassin shared config: a deployment may mount /etc/spamassassin as a shared volume
+# that amavis seeds on its first boot (the image also ships its own copy, so this is only a
+# layout nicety). Wait for it, but only bounded: an unbounded loop left the container
+# "running" with Dovecot never started — nothing in the log except the notice below and no
+# mail service at all, which is how a cold bootstrap could see
+# `auth-client: conn unix:/run/dovecot/auth-client ... No such file or directory` for every
+# mailbox.
+SA_WAIT=0
 while [ ! -f /etc/spamassassin/init.pre ]; do
-    echo "==> Waiting for Spamassassin to be populated from amavis container"
+    if [ "$SA_WAIT" -ge 120 ]; then
+        echo "WARNING: /etc/spamassassin/init.pre did not appear after ${SA_WAIT}s: starting Dovecot anyway (the image ships its own SpamAssassin config)" >&2
+        break
+    fi
+    echo "==> Waiting for Spamassassin to be populated from amavis container (${SA_WAIT}s/120s)"
     sleep 3
+    SA_WAIT=$((SA_WAIT + 3))
 done
 
 # shared bayes folder: usable by amavis (scans), root (cron) and the

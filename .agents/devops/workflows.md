@@ -228,6 +228,11 @@ succeeded, which is how "phase 2 only if phase 1 passed" is enforced:
    `config` also resolves every `env_file:`, and the production files list the git-ignored
    `.env`, so the job first materialises a throwaway `.env` from `env.sample`;
    `compose-gitlab.yml` is validated with placeholder `IMG_*`/`TAG`.
+   When a step fails, a `Dump container state and logs (on failure)` step prints
+   `docker compose ps -a` plus the last 200 log lines of every service: a container that is
+   *up but not ready* (the mda generating its DH params on a cold volume, amavis blocked on
+   the provisioning sentinel, …) is otherwise indistinguishable from a real failure in the
+   bootstrap output, which is how the first failing run read like a credentials problem.
 2. **Push images** — `push` events only, only if phase 1 passed: retag the local `:develop`
    images for `pavelmc/maild-<svc>` (Docker Hub) and `ghcr.io/stdevpavelmc/maild-<svc>` and
    push them as `:develop` on `develop` or `:latest` on `main`.
