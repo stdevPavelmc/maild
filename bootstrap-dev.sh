@@ -6,14 +6,15 @@
 # What it provisions
 #   1. the deployment's own domain (DEFAULT_DOMAIN from env.dev):
 #        - <MAIL_ADMIN_USER>@<DEFAULT_DOMAIN>   the human administrator mailbox, also created as
-#                                               the PostfixAdmin superadmin (README setup step)
+#                                               the superadmin (catalogue `admin` row, README setup
+#                                               step)
 #        - the default aliases (postmaster, abuse, hostmaster, webmaster) → the admin mailbox
 #   2. the test domain (default example.net):
 #        - alice, bob, charlie, dylan mailboxes with generated passwords
 #        - the same default aliases → alice
-#        - alice as the PostfixAdmin *domain admin* of the test domain
+#        - alice as the *domain admin* of the test domain (catalogue `admin` row)
 #   3. test.creds (git-ignored, mode 0600) with every credential, then verifies them:
-#        IMAP auth through doveadm for each mailbox and a real PostfixAdmin web login.
+#        IMAP auth through doveadm for each mailbox plus the admin rows in the catalogue.
 #
 # Everything is idempotent: a second run re-asserts the same state and changes nothing else.
 # A password already present in test.creds is never replaced (--rotate-creds forces new ones).
@@ -27,13 +28,14 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly COMPOSE_FILE="docker-compose-dev.yml"
 readonly EXEC_TIMEOUT=60     # hard ceiling for every single docker call (never hang)
 readonly WAIT_DB=120         # seconds to wait for Postgres
-readonly WAIT_SCHEMA=180     # seconds to wait for the PostfixAdmin schema
+readonly WAIT_SCHEMA=180     # seconds to wait for the catalogue schema
 readonly WAIT_HTTP=120       # seconds to wait for a web UI
 readonly WAIT_MUA=120        # seconds to wait for the webmail per-domain config
 readonly WAIT_CLAMAV=900     # seconds to wait for the first ClamAV signature download
 
-# The default aliases PostfixAdmin creates for a new domain. Kept in sync with
-# admin/docker-entrypoint.sh ($CONF['default_aliases']) and the README "Domain Setup" step.
+# The default aliases a new domain gets (PostfixAdmin's $CONF['default_aliases'], now
+# written by the api seeder and by the AdminNG API's create-domain). Kept in sync with
+# adminng/api/app/catalogue.py (DEFAULT_ALIASES) and the README "Domain Setup" step.
 readonly DEFAULT_ALIAS_PARTS=(postmaster abuse hostmaster webmaster)
 
 # ---------------------------------------------------------------- defaults ---
@@ -60,7 +62,7 @@ Usage: ./bootstrap-dev.sh [options]
   --users <a,b,c,d>          mailboxes in the test domain     (default: alice,bob,charlie,dylan)
   --alias-target <address>   where the test domain's default aliases (postmaster, abuse,
                              hostmaster, webmaster) point       (default: first user)
-  --superadmin               also make the test-domain admin a PostfixAdmin superadmin
+  --superadmin               also make the test-domain admin a catalogue superadmin
                              (the default is a *domain admin* of the test domain only)
   --default-domain <domain>  override DEFAULT_DOMAIN from env.dev for this run
   --skip-default-domain      do not provision DEFAULT_DOMAIN; only the test domain is created
@@ -172,7 +174,7 @@ valid_domain() { printf '%s' "$1" | grep -Eq '^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[
 valid_local() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]*$'; }
 valid_address() { printf '%s' "$1" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9._+-]*@[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$'; }
 
-mailbox_name() { # <address> — display name used by PostfixAdmin
+mailbox_name() { # <address> — display name stored in the catalogue
 	case "${1%%@*}" in
 		sysadmin) printf 'Mail administrator' ;;
 		no-reply|noreply) printf 'MailD service (no reply)' ;;
@@ -226,7 +228,6 @@ MAIL_ADMIN_USER="${MAIL_ADMIN_USER:-sysadmin}"
 
 # The stack declares port mappings in docker-compose-dev.yml; keep them here so the printed URLs
 # and the verification steps match the running stack.
-ADMIN_PORT="8080"
 ADMINNG_PORT="8083"
 ADMINNG_TLS_PORT="8084"
 MUA_PORT="8081"
@@ -253,6 +254,12 @@ ok "test mailboxes       : ${TEST_USERS[*]}"
 ok "default aliases      : ${DEFAULT_ALIAS_PARTS[*]}@$TEST_DOMAIN → $ALIAS_TARGET"
 if [ "$SKIP_DEFAULT_DOMAIN" = 1 ]; then
 	ok "deployment domain    : skipped (--skip-default-domain)"
+	# The api seeds DEFAULT_DOMAIN at boot (AUTO_PROVISION defaults to yes). This mode
+	# means "no deployment domain at all", so the boot-time seeder is disabled for this
+	# run through the compose interpolation in docker-compose-dev.yml. The amavis/mua/mta
+	# sentinel gates then wait out PROVISION_WAIT_TIMEOUT once, which is why this mode is
+	# for the test suite's "not hosted" branch, not the everyday dev loop.
+	export AUTO_PROVISION=no
 else
 	ok "deployment domain    : $DEFAULT_DOMAIN ($MAIL_ADMIN_USER)"
 fi
@@ -328,8 +335,8 @@ if [ "$DO_START" = 1 ]; then
 	# path via depends_on — a subset `up` would otherwise leave it crash-looping and mail deferred.
 	# `clamav` and `amavis` are explicit (not only via mta's depends_on): the content
 	# filter sits in the delivery path, so its readiness gates everything below.
-	log "docker compose up -d db admin mda mta mua cron clamav amavis api adminng"
-	timeout -k10 600 "${DC[@]}" up -d db admin mda mta mua cron clamav amavis api adminng >/dev/null ||
+	log "docker compose up -d db mda mta mua cron clamav amavis api adminng"
+	timeout -k10 600 "${DC[@]}" up -d db mda mta mua cron clamav amavis api adminng >/dev/null ||
 		die "'docker compose up -d' failed: see 'docker compose -f $COMPOSE_FILE logs'"
 else
 	log "--no-start: assuming the stack is already up"
@@ -339,7 +346,6 @@ fi
 # server logs 'FATAL: database "maild" does not exist' on every probe.
 probe_db() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T db pg_isready -U "$PGUSER" -d "$PGDB" -q; }
 probe_schema() { [ "$(psql_q "$PGDB" "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='domain'")" = "1" ]; }
-probe_admin_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${ADMIN_PORT}/login.php"; }
 # AdminNG end to end: nginx serves the PWA and proxies /api/v1/ to the api service,
 # which answers only when its own database is up and migrated.
 probe_adminng_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${ADMINNG_PORT}/api/v1/health"; }
@@ -349,23 +355,15 @@ probe_clamav_db() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T clamav \
 log "waiting for Postgres (up to ${WAIT_DB}s)"
 wait_up "$WAIT_DB" probe_db || die "Postgres did not answer within ${WAIT_DB}s (docker compose -f $COMPOSE_FILE logs db)"
 
-log "waiting for the PostfixAdmin schema in '$PGDB' (up to ${WAIT_SCHEMA}s)"
-if ! wait_up 60 probe_schema; then
-	# spike-log §11 item 9: a leftover admin container can leave the schema uncreated; the
-	# documented fix is a force-recreate of the admin service (its entrypoint runs upgrade.php).
-	warn "schema still missing: recreating the admin service (its entrypoint creates the schema)"
-	timeout -k10 300 "${DC[@]}" up -d --force-recreate admin >/dev/null || true
-	wait_up "$WAIT_SCHEMA" probe_schema ||
-		die "the PostfixAdmin schema never appeared. Check 'docker compose -f $COMPOSE_FILE logs admin' (its entrypoint must run public/upgrade.php with POSTFIXADMIN_DB_TYPE=pgsql)"
-fi
-ok "Postgres is up and the PostfixAdmin schema exists"
-
-log "waiting for the PostfixAdmin web UI on :$ADMIN_PORT (up to ${WAIT_HTTP}s)"
-wait_up "$WAIT_HTTP" probe_admin_http ||
-	die "http://localhost:${ADMIN_PORT}/login.php did not answer within ${WAIT_HTTP}s (docker compose -f $COMPOSE_FILE logs admin)"
+log "waiting for the catalogue schema in '$PGDB' (up to ${WAIT_SCHEMA}s)"
+# The db container creates it on its own boot (db/migrations/002_postfixadmin_catalogue.sql,
+# applied by migrate.sh); the api waits on the same condition before seeding.
+wait_up "$WAIT_SCHEMA" probe_schema ||
+	die "the catalogue schema never appeared. Check 'docker compose -f $COMPOSE_FILE logs db' (its entrypoint must run migrate.sh against '$PGDB')"
+ok "Postgres is up and the catalogue schema exists"
 
 is_service_up mda || die "the mda (Dovecot) service is not running (docker compose -f $COMPOSE_FILE logs mda)"
-ok "admin (:${ADMIN_PORT}) and mda are reachable"
+ok "mda is reachable"
 
 log "waiting for the AdminNG frontend on :${ADMINNG_PORT} (up to ${WAIT_HTTP}s)"
 wait_up "$WAIT_HTTP" probe_adminng_http ||
@@ -404,7 +402,7 @@ ok "amavis is up"
 # re-resolves the names.
 mta_peer_moved() {
 	local svc cached live
-	for svc in amavis mda mua admin; do
+	for svc in amavis mda mua; do
 		cached="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mta cat "/tmp/${svc^^}IP" 2>/dev/null | tr -d ' \r\n' || true)"
 		live="$(timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mta getent hosts "$svc" 2>/dev/null | head -n1 | cut -d' ' -f1 || true)"
 		# an EMPTY cached address counts as drift too: that is what a too-early mta start
@@ -449,7 +447,7 @@ fi
 # ------------------------------------------------------------ credentials ----
 declare -A CRED_PW=()   # what test.creds already holds (reused verbatim)
 declare -A PW=()        # effective password per address
-declare -A NAME=()      # PostfixAdmin display name per address
+declare -A NAME=()      # catalogue display name per address
 declare -A ROLE=()      # human-readable label, for test.creds and the summary
 declare -a ADDRESSES=() # ordered: deployment domain first, then the test domain
 declare -A HASH=()      # MD5-CRYPT hash per address
@@ -482,7 +480,7 @@ read_creds
 [ -f "$CREDS_FILE" ] && log "found an existing $CREDS_FILE: its passwords will be reused"
 
 if [ "$SKIP_DEFAULT_DOMAIN" = 0 ]; then
-	add_mailbox "${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}" "PostfixAdmin superadmin + human administrator"
+	add_mailbox "${MAIL_ADMIN_USER}@${DEFAULT_DOMAIN}" "catalogue superadmin + human administrator"
 else
 	log "--skip-default-domain: only $TEST_DOMAIN is provisioned ($DEFAULT_DOMAIN untouched)"
 fi
@@ -492,9 +490,9 @@ for u in "${TEST_USERS[@]}"; do
 done
 TEST_ADMIN_ADDR="${TEST_USERS[0]}@${TEST_DOMAIN}"
 if [ "$SUPERADMIN" = 1 ]; then
-	ROLE["$TEST_ADMIN_ADDR"]="PostfixAdmin superadmin + domain admin of $TEST_DOMAIN"
+	ROLE["$TEST_ADMIN_ADDR"]="catalogue superadmin + domain admin of $TEST_DOMAIN"
 else
-	ROLE["$TEST_ADMIN_ADDR"]="PostfixAdmin domain admin of $TEST_DOMAIN"
+	ROLE["$TEST_ADMIN_ADDR"]="catalogue domain admin of $TEST_DOMAIN"
 fi
 if [ "$ALIAS_TARGET" = "$TEST_ADMIN_ADDR" ]; then
 	ROLE["$TEST_ADMIN_ADDR"]="${ROLE[$TEST_ADMIN_ADDR]} + default alias target"
@@ -515,14 +513,14 @@ creds_tmp="$(mktemp "${CREDS_FILE}.XXXXXX")"
 {
 	printf '# MailD dev bootstrap credentials — DEV ONLY, plaintext on purpose.\n'
 	printf '# Generated by %s at %s — git-ignored, mode 0600.\n' "${0##*/}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-	printf '# The same password works over IMAP/SMTP and in the PostfixAdmin web UI: Dovecot\n'
-	printf '# (MD5-CRYPT) and PostfixAdmin (md5crypt) verify the very same hash. The dev\n'
-	printf '# fixtures deliberately stay on the legacy scheme; new passwords are Argon2id.\n'
+	printf '# The same password works over IMAP/SMTP and in AdminNG: Dovecot and the\n'
+	printf '# AdminNG API verify the very same stored hash (the dev fixtures stay on the\n'
+	printf '# legacy MD5-CRYPT scheme on purpose; new passwords are Argon2id).\n'
 	printf '#\n'
-	printf '# PostfixAdmin (admin) : http://localhost:%s\n' "$ADMIN_PORT"
+	printf '# AdminNG (PWA)        : http://localhost:%s\n' "$ADMINNG_PORT"
 	printf '# Webmail (SnappyMail) : http://localhost:%s\n' "$MUA_PORT"
 	printf '#\n'
-	printf '# Accounts in PostfixAdmin:\n'
+	printf '# Accounts in the catalogue:\n'
 	for addr in "${ADDRESSES[@]}"; do
 		case "${ROLE[$addr]}" in *admin*) printf '#   %-24s %s\n' "$addr" "${ROLE[$addr]}" ;; esac
 	done
@@ -564,11 +562,12 @@ fi
 
 # --------------------------------------------------------------- hashing -----
 # Legacy scheme on purpose: the stack-wide default is Argon2id (PASSWORD_SCHEME,
-# written by seed.sh / the AdminNG API / the webmail driver), but the dev
+# written by the api seeder / the AdminNG API / the webmail driver), but the dev
 # fixtures stay on MD5-CRYPT so the local stack exercises the legacy-coexistence
-# path (Dovecot auth_allow_weak_schemes + rehash-on-login) and keeps PostfixAdmin
-# logins working. Adding a password via the API/webmail is what creates the
-# {ARGON2ID}$… rows. See .agents/services/configuration.md (F-18).
+# path (Dovecot auth_allow_weak_schemes + rehash-on-login, and the AdminNG API's
+# md5crypt verifier) until the 2027-02-01 removal. Adding a password via the
+# API/webmail is what creates the {ARGON2ID}$… rows.
+# See .agents/services/configuration.md (F-18).
 step "password hashes (MD5-CRYPT fixture scheme, the legacy coexistence path)"
 
 for addr in "${ADDRESSES[@]}"; do
@@ -584,7 +583,7 @@ ok "hashes ready for ${#ADDRESSES[@]} mailboxes"
 # --------------------------------------------------------------- catalogue ---
 step "mail catalogue ($PGDB)"
 
-# Column preflight: the PostfixAdmin schema is versioned (the R-20 drift class), so fail loudly
+# Column preflight: the catalogue schema is versioned (the R-20 drift class), so fail loudly
 # with the exact missing columns instead of a cryptic SQL error a few statements later.
 psql_in "$PGDB" <<'SQL'
 DO $$
@@ -605,7 +604,7 @@ BEGIN
 		SELECT 1 FROM information_schema.columns col
 		 WHERE col.table_schema = 'public' AND col.table_name = x.t AND col.column_name = x.c);
 	IF missing IS NOT NULL THEN
-		RAISE EXCEPTION 'bootstrap: unexpected PostfixAdmin schema, missing column(s): %', missing;
+		RAISE EXCEPTION 'bootstrap: unexpected catalogue schema, missing column(s): %', missing;
 	END IF;
 END
 $$;
@@ -726,7 +725,7 @@ for part in "${DEFAULT_ALIAS_PARTS[@]}"; do
 	ensure_alias "${part}@${TEST_DOMAIN}" "$ALIAS_TARGET"
 done
 
-log "PostfixAdmin accounts"
+log "catalogue accounts"
 if [ "$SKIP_DEFAULT_DOMAIN" = 0 ]; then
 	# README "Setup Instructions" step 3: the superadmin account. Same password as its mailbox.
 	ensure_admin "$SYSADMIN_ADDR" "${HASH[$SYSADMIN_ADDR]}" true
@@ -814,31 +813,23 @@ else
 fi
 
 # ----------------------------------------------------------- verification ----
-# The PostfixAdmin web login is the real end-to-end check: GET /login.php to obtain the session
-# cookie and the CSRF token, then POST fUsername/fPassword/token and require a 302 to main.php
-# (public/login.php does exactly that on success).
-admin_login_check() { # <address> <password>
-	local addr="$1" pw="$2" jar hdrs page token code
-	jar="$(mktemp)"; hdrs="$(mktemp)"
-	page="$(timeout -k10 20 curl -sS -c "$jar" "http://localhost:${ADMIN_PORT}/login.php" 2>/dev/null || true)"
-	token="$(printf '%s' "$page" | tr '>' '\n' | grep 'name="token"' | sed -n 's/.*value="\([^"]*\)".*/\1/p' | head -n1)"
-	if [ -z "$token" ]; then
-		rm -f "$jar" "$hdrs"
-		warn "PostfixAdmin login check for $addr: the login page carries no CSRF token (is the stack configured?) — the row and hash are in place, but the web login is unverified"
+# The admin rows are what AdminNG authenticates against (the web login is the
+# device-approved PWA, covered by adminng/pwa-test). Verify the catalogue state the
+# API depends on: the row exists, is active, and carries the superadmin flag when it must.
+admin_row_check() { # <address> <expect-superadmin: 0|1>
+	local addr="$1" want_super="$2" row super
+	row="$(psql_q "$PGDB" "SELECT superadmin FROM admin WHERE username = '$addr' AND active = true")"
+	if [ -z "$row" ]; then
+		warn "catalogue admin row missing or inactive for $addr"
 		return 1
 	fi
-	code="$(timeout -k10 20 curl -sS -o /dev/null -D "$hdrs" -b "$jar" -c "$jar" \
-		--data-urlencode "fUsername=$addr" --data-urlencode "fPassword=$pw" \
-		--data-urlencode "token=$token" -w '%{http_code}' \
-		"http://localhost:${ADMIN_PORT}/login.php" 2>/dev/null || true)"
-	if [ "$code" = "302" ] && grep -qi '^location: main.php' "$hdrs"; then
-		rm -f "$jar" "$hdrs"
-		ok "PostfixAdmin login   $addr (302 → main.php)"
-		return 0
+	super="$(printf '%s' "$row" | tr -d '[:space:]')"
+	if [ "$want_super" = 1 ] && [ "$super" != "t" ]; then
+		warn "catalogue admin row for $addr exists but is not a superadmin"
+		return 1
 	fi
-	rm -f "$jar" "$hdrs"
-	warn "PostfixAdmin login FAILED for $addr (HTTP ${code:-?})"
-	return 1
+	ok "admin row            $addr (active, superadmin=$super)"
+	return 0
 }
 
 VERIFY_FAILED=0
@@ -856,12 +847,12 @@ if [ "$DO_VERIFY" = 1 ]; then
 	done
 
 	if [ "$SKIP_DEFAULT_DOMAIN" = 0 ]; then
-		admin_login_check "$SYSADMIN_ADDR" "${PW[$SYSADMIN_ADDR]}" || VERIFY_FAILED=1
+		admin_row_check "$SYSADMIN_ADDR" 1 || VERIFY_FAILED=1
 	fi
-	admin_login_check "$TEST_ADMIN_ADDR" "${PW[$TEST_ADMIN_ADDR]}" || VERIFY_FAILED=1
+	admin_row_check "$TEST_ADMIN_ADDR" "$SUPERADMIN" || VERIFY_FAILED=1
 
 	if [ "$VERIFY_FAILED" = 0 ]; then
-		ok "every credential works over IMAP and in the PostfixAdmin web UI"
+		ok "every credential works over IMAP and every admin row is active"
 	fi
 else
 	log "--skip-verify: credentials were written but not verified"
@@ -873,12 +864,11 @@ PROVISIONED_DOMAINS=("$TEST_DOMAIN")
 
 step "summary"
 printf '  %s\n' "domains     : ${PROVISIONED_DOMAINS[*]}"
-printf '  %s\n' "admin UI    : http://localhost:${ADMIN_PORT}   (PostfixAdmin)"
 printf '  %s\n' "adminng UI  : http://localhost:${ADMINNG_PORT}   (AdminNG PWA)"
 printf '  %s\n' "adminng TLS : https://localhost:${ADMINNG_TLS_PORT}  (LAN/phone; install ldata/certs/adminng-ca.der first)"
 printf '  %s\n' "webmail     : http://localhost:${MUA_PORT}   (SnappyMail)"
 printf '  %s\n' "credentials : ${CREDS_FILE} (mode 600, git-ignored)"
-printf '\n  %-30s %-34s %s\n' "MAILBOX" "PASSWORD" "POSTFIXADMIN / ROLE"
+printf '\n  %-30s %-34s %s\n' "MAILBOX" "PASSWORD" "ROLE"
 printf '  %-30s %-34s %s\n' "------------------------------" "----------------------------------" "-------------------------------"
 for addr in "${ADDRESSES[@]}"; do
 	printf '  %-30s %-34s %s\n' "$addr" "${PW[$addr]}" "${ROLE[$addr]}"
@@ -886,7 +876,7 @@ done
 
 if [ "$VERIFY_FAILED" = 1 ]; then
 	printf '\n'
-	warn "one or more credentials could not be verified — see the warnings above and 'docker compose -f $COMPOSE_FILE logs mda mta admin'"
+	warn "one or more credentials could not be verified — see the warnings above and 'docker compose -f $COMPOSE_FILE logs mda mta api'"
 	exit 1
 fi
 printf '\n'

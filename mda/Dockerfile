@@ -78,10 +78,25 @@ ADD dovecot/ /etc/dovecot
 RUN chown root:vmail /etc/dovecot/rehash-creds.sh && \
     chmod 0640 /etc/dovecot/rehash-creds.sh
 
-# NOTE: the imapsieve learning scripts are NOT compiled at build time:
-# the vnd.dovecot.pipe & imapsieve extensions are only available when
-# the sieve plugins are loaded at runtime, dovecot compiles the scripts
-# lazily on first use inside the IMAP process.
+# imapsieve binaries: pigeonhole compiles a script on first use and caches the
+# binary next to the source by default, but /etc/dovecot/sieve is root-owned and
+# must stay that way (it holds the global filters every mailbox runs). The imap
+# process runs as vmail, so that cache write failed and every Junk copy logged
+#   Error: sieve: binary /etc/dovecot/sieve/learn-spam.svbin: save: failed to
+#   create temporary file: open(/etc/dovecot/sieve/learn-spam.svbin.) failed:
+#   Permission denied (euid=5000(vmail) ... dir owned by 0:0 mode=0775)
+# and recompiled the script every time. `bin_path` in 90-imapsieve.conf points
+# the binary cache here instead: group-writable by vmail, the sources stay
+# read-only for it.
+RUN mkdir -p /var/lib/dovecot/sieve/imapsieve && \
+    chown root:vmail /var/lib/dovecot/sieve/imapsieve && \
+    chmod 0770 /var/lib/dovecot/sieve/imapsieve
+
+# NOTE: the imapsieve learning scripts are NOT compiled at build time: the
+# sievec binary can resolve vnd.dovecot.pipe & imapsieve from the baked config,
+# but the scripts only make sense at runtime, so pigeonhole compiles them lazily
+# on first use inside the IMAP process and caches the result in the writable
+# bin_path above (see 90-imapsieve.conf).
 
 # pipe helpers for the imapsieve learning scripts
 COPY sieve-pipe/ /usr/lib/dovecot/sieve-pipe/

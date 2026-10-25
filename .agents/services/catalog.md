@@ -2,7 +2,7 @@
 
 All services live on the compose network `maild-dev` (dev) / `maild` (production, external).
 Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `mda`,
-`amavis`, `clamav`, `admin`, `mua`, `cron` — never rename them.
+`amavis`, `clamav`, `api`, `adminng`, `mua`, `cron` — never rename them.
 
 ## db — PostgreSQL catalogue
 
@@ -50,6 +50,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `/etc/spamassassin/maild.cf` from the env at every start (defaults in `amavis/Dockerfile`).
   Extra `.cf` files can be dropped into the volume without a rebuild (reload/restart amavis).
 - `amavis/sa-update-loop.sh` runs daily `sa-update` + reload.
+- Archive scanning: the image carries the decompressors amavisd's `@decoders` table
+  shells out to — `bzip2` (bz2), `xz-utils` (xz/lzma), `lrzip` (lrz), `lzop` (lzo), `lz4`
+  (its `lz4c` symlink) and `rpm2cpio` (rpm) — plus `7zip`, `unrar-free` and `cabextract`, so
+  those attachment types are extracted and scanned instead of being flagged **UNCHECKED**.
 - Waits (bounded) on the `maild_provision` sentinel before the DKIM section, so a fresh
   deploy comes up signed with no restart (`AUTO_PROVISION`).
 - Env: defaults baked in `amavis/Dockerfile` (filter toggles, `SA_*`, peer hostnames); the
@@ -63,9 +67,24 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Its listeners carry names in 2.4: `inet_listener auth` (:12345, the mta's SASL path) and
   `inet_listener quota-status` (:12340, Postfix's full-mailbox policy) — renaming either breaks the
   mta.
+- **Socket permissions for the mail user**: `service lmtp { user = vmail }` (`10-master.conf`) runs
+  the whole LMTP service as uid/gid 5000, while Dovecot 2.4 creates the anvil listener root-only
+  (`/run/dovecot/anvil` = `0600 root:root`; upstream `beca41cc`, which relaxes it to `0660` +
+  `default_internal_group`, landed *after* 2.4.2 — the version `ubuntu:resolute` ships).
+  `90-stats-perms.conf` (stats-reader/stats-writer) and `90-anvil-perms.conf` (anvil) hand those
+  listeners to `vmail` (`0660`) so the mail processes can reach them. Without the anvil one, LMTP
+  logged `net_connect_unix(/run/dovecot/anvil) failed: Permission denied` +
+  `lmtp_user_concurrency_limit lookup failed - skipping` for every recipient (mail was still
+  delivered; only the per-user concurrency lookup was skipped).
 - Instant Bayes learning: moving mail into/out of `Junk` triggers imapsieve pipe scripts
   (a `sieve_script` on `mailbox Junk` + `imapsieve_from Junk` in `mda/dovecot/conf.d/90-imapsieve.conf`
-  → `mda/sieve-pipe/learn-{spam,ham}.sh`).
+  → `mda/sieve-pipe/learn-{spam,ham}.sh`). The scripts live in `/etc/dovecot/sieve` (root-owned, and
+  read-only for `vmail` on purpose: they are the global filters) while their compiled binaries are
+  cached in `/var/lib/dovecot/sieve/imapsieve` — `bin_path` in that same file, a `root:vmail 0770`
+  dir created by the Dockerfile. Pigeonhole would otherwise try to save `<script>.svbin` next to the
+  source, fail as `vmail` and recompile the script on every load, logging
+  `Error: sieve: binary /etc/dovecot/sieve/learn-spam.svbin: save: failed to create temporary file`.
+
 - `mda/scripts/quota_report.sh` mails the daily mailbox-quota report to
   `MAIL_ADMIN_USER@DEFAULT_DOMAIN`; knobs in `env.sample` (`QUOTA_REPORT_*`); run manually:
   `docker compose exec mda /scripts/quota_report.sh --now [--dry-run]`.
@@ -139,7 +158,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   the container's own address (for the 10025 reinjection listener) comes from
   `getent hosts "$(hostname)"`. `postfix-policyd-spf-python` 3.1.0 keeps `/usr/bin/policyd-spf`.
 - Hard-depends on mda, amavis, clamav. Delivers local mail over LMTP to the mda's IP
-  (baked into `main.cf` at start — restart the mta when the mda is recreated).
+  (rendered into `main.cf`/`master.cf` at start), repatched by the **peer-IP watchdog**
+  (`PEER_WATCH_INTERVAL`, default 30s, `0` disables it) when `amavis`/`mda`/`mua` come back with
+  a new address; the mta reloads Postfix itself after the repatch.
 - Logs to stdout (`maillog_file = /dev/stdout`); the daily traffic resume parses a syslog
   with rsyslog-style stamps, which only exists in production (dev: `test.sh` phase G
   materialises one).
@@ -149,22 +170,18 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   peer hostnames/timeouts); the operator file is the `env_file:` and overrides any of them;
   `MAILADMIN`, `DEBUG` and the password passed explicitly.
 
-## admin — PostfixAdmin
+## admin — PostfixAdmin (retired)
 
-- Web admin UI on Apache; dev publishes **8080:80** (the container listens on 80;
-  publishing 8080:8080 left the UI unreachable while the container looked healthy — found
-  by bootstrap-dev.sh).
-- Creates/updates the PostfixAdmin schema on boot; emits a one-time **OTP setup password**
-  to the logs on every boot (`docker compose logs admin | grep OTP`). The superadmin
-  account is `MAIL_ADMIN_USER@DEFAULT_DOMAIN` (provisioned by bootstrap-dev.sh).
-- On boot it also runs `admin/seed.sh` **after** `upgrade.php` when `AUTO_PROVISION` is not
-  `no`: this is the first-boot provisioner (leader) that seeds the default domain, the
-  superadmin (`MAIL_ADMIN_USER@DEFAULT_DOMAIN`), its mailbox and the default aliases, then
-  writes the `maild_provision` sentinel. See `.agents/services/provisioning.md`.
-- env: defaults baked in `admin/Dockerfile` (`POSTFIXADMIN_*` wiring + the provisioning
-  vars); the operator file is the `env_file:` and overrides any of them. The entrypoint maps
-  `POSTGRES_PASSWORD` → `POSTFIXADMIN_DB_PASSWORD` itself; `POSTFIXADMIN_SETUP_PASSWORD`
-  is ignored (the entrypoint always emits its own OTP).
+The `admin` service, its image (`maild-admin`) and the `mailadmin.${DEFAULT_DOMAIN}`
+ingress route are **gone**. Its two provisioning duties moved:
+
+- the catalogue schema (PostfixAdmin's own DDL, created by `public/upgrade.php`) is now
+  `db/migrations/002_postfixadmin_catalogue.sql`, applied by the `db` container;
+- the first-boot seeder (`admin/seed.sh`) is now `adminng/api/app/provision.py`, run by
+  the `api` container.
+
+The `POSTFIXADMIN_*` variables, the OTP setup password and `/setup.php` do not exist any
+more. See `.agents/services/provisioning.md`.
 
 ## api — AdminNG backend
 
@@ -172,10 +189,17 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   hostname `api`, **no published port** — only the `adminng` frontend talks to it, over the
   compose network (`/api/v1/` proxy).
 - Two databases on `db`: the PostfixAdmin catalogue `POSTGRES_DB` (read/write, **zero
-  DDL** — it writes rows exactly like PostfixAdmin: md5crypt, `maildir = domain/local/`,
-  quota in bytes) and its own `ADMINNG_DB` (devices, sessions, TOTP credentials,
-  device-scoped WebAuthn credentials/challenges, audit trail), whose schema it migrates at
-  boot from `adminng/api/migrations/`.
+  DDL** — the schema belongs to `db/migrations/002_postfixadmin_catalogue.sql`; it writes
+  rows exactly like PostfixAdmin: `maildir = domain/local/`, quota in bytes, Argon2id
+  passwords with md5crypt accepted as legacy) and its own `ADMINNG_DB` (devices, sessions,
+  TOTP credentials, device-scoped WebAuthn credentials/challenges, audit trail), whose
+  schema it migrates at boot from `adminng/api/migrations/`.
+- **First-boot provisioning leader** (`app/provision.py`, run before uvicorn): seeds
+  `DEFAULT_DOMAIN`, the superadmin (`admin` row) plus its mailbox, the four default aliases
+  and the `maild_provision` sentinel; one transaction under the advisory lock, idempotent,
+  fast path on every later boot. `AUTO_PROVISION=no` disables it, and
+  `docker compose exec api adminng.py --provision [--force]` is the manual path. See
+  `.agents/services/provisioning.md`.
 - Mounts the vmail volume **read-only**: quota usage comes from the Maildir++ `.maildirsize`
   files (never a Dovecot secret, never a write). Because maildirs are `0700 vmail:vmail`,
   the process runs as **uid/gid 5000** (the vmail owner): read-only mount + matching uid =
@@ -186,11 +210,13 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `session.jti` row; the idle purge (`ADMINNG_REFRESH_IDLE_TTL`) and the account's `active`
   flag are enforced on every request. Phase 2 replaces issuance with device-bound
   `login-step1/2` + TOTP.
-- Catalogue writes are md5crypt-compatible (admin.password mirrors the mailbox password),
-  delete/suspend revokes the account's sessions, and domain counters stay in step.
-  Dovecot's auth cache can hold a superseded result for up to a minute after a suspend or
-  password change (`doveadm auth cache flush` in the mda clears it) — same caveat as
-  PostfixAdmin.
+- Catalogue writes are PostfixAdmin-compatible (Argon2id by default; admin.password mirrors
+  the mailbox password), delete/suspend revokes the account's sessions, and domain counters
+  stay in step. Creating a domain also writes the four default aliases
+  (postmaster/abuse/hostmaster/webmaster → the creating admin), like the old
+  "create domain" click. Dovecot's auth cache can hold a superseded result for up to a
+  minute after a suspend or password change (`doveadm auth cache flush` in the mda clears
+  it).
 - Phase 2 adds the zero-trust device gate (`/device/status?username=`, `/admin/devices`),
   two-step login (`/auth/login-step1|step2`), TOTP enrollment
   (`/auth/totp-enroll|confirm`, RFC 6238, secrets encrypted with
@@ -295,9 +321,10 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `https://snappymail.eu/repository/v2/packages.json`).
 - `change-password` ships with **MailD's own driver** (`mua/plugins/change-password-maild/`), a
   sibling package of the plugin (its documented extension point, so a plugin update cannot
-  overwrite it). It writes `mailbox.password` (+`modified`) in the catalogue exactly like
-  PostfixAdmin does, md5crypt by default — the scheme PostfixAdmin (`POSTFIXADMIN_ENCRYPT`) and
-  Dovecot (`default_password_scheme`) both verify — from the container's `POSTGRES_*`, with every
+  overwrite it). It writes `mailbox.password` (+`modified`) in the catalogue in exactly the
+  same row format the AdminNG API uses, following `PASSWORD_SCHEME` (Argon2id
+  `{ARGON2ID}$…` by default; md5crypt `$1$…` is the legacy escape hatch, both verified by
+  Dovecot's passdb) — from the container's `POSTGRES_*`, with every
   value overridable in the panel. `config-setup.php` keeps `driver_maild_enabled` on. After a
   change, Dovecot's auth cache (`auth_cache_ttl` **1 minute**, negative caching off — MailD's
   settings in `mda/dovecot/conf.d/10-auth.conf`) may still answer with the old result for up to

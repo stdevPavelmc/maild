@@ -46,7 +46,7 @@ RUN chmod +x /*.sh
 # (dev: env.dev, prod: .env — see env.sample). DEFAULT_DOMAIN / MAIL_ADMIN_USER are
 # deployment values passed by the compose file; RELAY / ALWAYS_BCC / POSTMASTER_ABUSE_
 # SETUP and the debug switches are deliberately unset (unset ⇒ feature off).
-# AMAVIS/MDA/MUA/ADMIN are the fixed service hostnames (never rename them).
+# AMAVIS/MDA/MUA are the fixed service hostnames (never rename them).
 # Full variable matrix: .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
@@ -64,7 +64,6 @@ ENV POSTGRES_HOST=db \
     AMAVIS=amavis \
     MDA=mda \
     MUA=MUA \
-    ADMIN=admin \
     AUTO_PROVISION=yes \
     PROVISION_VERSION=1 \
     PROVISION_WAIT_TIMEOUT=180

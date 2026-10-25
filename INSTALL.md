@@ -34,7 +34,7 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
    - `DEFAULT_DOMAIN` — your first mail domain (e.g. `maild.cu`).
    - `MAIL_ADMIN_USER` — the administrator local part (default `sysadmin`).
    - `MAIL_ADMIN_PASSWORD` — the password of the administrator (superadmin). Leave it empty
-     to have one generated and printed in `docker compose logs admin`.
+     to have one generated and printed in `docker compose logs api`.
    - `POSTGRES_PASSWORD` — the database password (pick a strong one).
 
 2. Every tunable defaults **inside the service images** (ENV in the Dockerfiles): to
@@ -62,10 +62,10 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 4. Watch the first boot provision itself:
 
    ```sh
-   docker compose -f docker-compose.yml logs -f admin
+   docker compose -f docker-compose.yml logs -f api
    ```
 
-   When you see `seed: catalogue provisioned: domain=... admin=...` the server is ready.
+   When you see `api: INFO - catalogue provisioned: domain=... admin=...` the server is ready.
 
 That's it — the deployment is usable. Jump to [First login](#first-login).
 
@@ -74,11 +74,13 @@ That's it — the deployment is usable. Jump to [First login](#first-login).
 
 ## What happens automatically on the first boot
 
-The stack seeds the catalogue and configures the boot-time services for you:
+The stack creates its schema and seeds the catalogue for you:
 
-1. **`db`** creates the databases and the `maild_provision` sentinel table (an idempotent
-   migration; no PostfixAdmin core table is changed).
-2. **`admin`** runs PostfixAdmin's `upgrade.php` (schema), then `admin/seed.sh` creates:
+1. **`db`** creates the databases (`mailddb`, `contacts`, `adminng`) and applies its
+   migrations: `001_maild_provision.sql` (the `maild_provision` sentinel table) and
+   `002_postfixadmin_catalogue.sql` (the PostfixAdmin catalogue schema — MailD's own
+   snapshot, no PostfixAdmin container involved).
+2. **`api`** waits for that schema, then seeds:
    - the `DEFAULT_DOMAIN` domain,
    - the superadmin `MAIL_ADMIN_USER@DEFAULT_DOMAIN` (password `MAIL_ADMIN_PASSWORD`),
    - the matching mailbox with the **same** password (so it is also a real IMAP account),
@@ -102,11 +104,13 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
 
 ## First login
 
-- **Admin UI (PostfixAdmin):** open `https://mails.domain.com/admin` (or `http://host:8080`)
-  and log in as `sysadmin@<DEFAULT_DOMAIN>` with `MAIL_ADMIN_PASSWORD` (or the generated
-  password from `docker compose logs admin`).
-- From there create **additional** domains, users and aliases. Bulk import is supported
-  (CSV) via the PostfixAdmin tools.
+- **Admin UI (AdminNG):** open `https://adminng.<DEFAULT_DOMAIN>` (or `http://host:8083` in
+  dev) and log in as `sysadmin@<DEFAULT_DOMAIN>` with `MAIL_ADMIN_PASSWORD` (or the generated
+  password from `docker compose logs api`). The first browser must be approved server-side
+  (`docker compose exec api adminng.py --approve-device '<uuid>'`), then the superadmin
+  enrolls TOTP on first login — see [`adminng/README.md`](./adminng/README.md).
+- From there create **additional** domains, users and aliases (a new domain gets the four
+  default aliases automatically). Bulk import is supported (CSV, "Carga inicial").
 - **Webmail (SnappyMail):** open `https://webmails.domain.com` (or the webmail port of your
   compose file) and log in with a mailbox you created.
 - **Webmail admin panel:** `https://webmail.domain.com/​?admin` — the login (default `maild`)
@@ -132,10 +136,10 @@ Older deployments carry **legacy md5crypt (`$1$…`)** hashes; both formats are
 valid in the same column and Dovecot verifies either, so nothing breaks on
 upgrade. Two things to know:
 
-- **PostfixAdmin cannot verify Argon2id** (it is a deprecated, dev-only
-  fallback). Its logins only work for accounts still on legacy hashes. If you
-  must keep the PostfixAdmin UI working for a while, set
-  `PASSWORD_SCHEME=md5crypt` — but note the deadline below.
+- **The PostfixAdmin UI is retired.** The `admin` service no longer exists: its schema duty
+  lives in `db/migrations/002_postfixadmin_catalogue.sql` and its seeder in the `api`. Do not
+  point an old PostfixAdmin instance at the catalogue — its `upgrade.php` would re-run
+  unguarded migrations against a schema MailD now owns.
 - **Weak-scheme support is removed on 2027-02-01.** From that date MailD
   releases refuse `PASSWORD_SCHEME=md5crypt`, Dovecot's
   `auth_allow_weak_schemes` goes back to `no`, and any remaining `$1$` hash stops
@@ -179,14 +183,15 @@ on air-gapped, proxied or low-bandwidth hosts:
   private registry built by the CI.
 - **ClamAV updates:** the first boot downloads ~230 MB of signatures. On a restricted link
   set `ALTERNATE_MIRROR` in your `.env`.
-- **Prefer the classic manual setup:** set
+- **Prefer to seed by hand:** set
 
   ```sh
   AUTO_PROVISION=no
   ```
 
-  in `.env`. The stack then starts exactly as before: the admin container prints a one-time
-  **OTP setup password** and you finish by hand — see [Manual mode](#manual-mode-auto_provisionno).
+  in `.env`. The stack then starts unseeded; run
+  `docker compose exec api adminng.py --provision` once — see
+  [Manual mode](#manual-mode-auto_provisionno).
 
 Other provisioning knobs (see `env.sample`): `PROVISION_VERSION` (bump to re-assert the
 defaults), `PROVISION_WAIT_TIMEOUT`, `PROVISION_FORCE` (re-write the admin password).
@@ -195,10 +200,10 @@ defaults), `PROVISION_WAIT_TIMEOUT`, `PROVISION_FORCE` (re-write the admin passw
 
 MailD does **not** terminate TLS for the web UIs; every production compose file ships
 Traefik labels that route `webmail.<DEFAULT_DOMAIN>` (webmail) and
-`mailadmin.<DEFAULT_DOMAIN>` (admin). You **must** front the stack with a reverse proxy /
+`adminng.<DEFAULT_DOMAIN>` (AdminNG). You **must** front the stack with a reverse proxy /
 ingress controller that terminates TLS (Traefik, Nginx, …) — it is **not** provided. Attach
 the ingress to the external `maild` network (create it once with
-`docker network create maild`) so it can reach the `admin` and `mua` containers, both
+`docker network create maild`) so it can reach the `adminng` and `mua` containers, both
 listening on port 80 inside the stack.
 
 The host must carry the same name as the mail server (see Requirements) for Let's Encrypt,
@@ -214,24 +219,30 @@ and the certs must live in the standard `/etc/letsencrypt` location.
 
 ## Manual mode (AUTO_PROVISION=no)
 
-If you set `AUTO_PROVISION=no` you get the original hand-driven flow. After the first start:
+If you set `AUTO_PROVISION=no` the boot-time seeder is skipped and you seed the catalogue
+yourself — useful for scripted deployments, air-gapped hosts, or when you want to choose the
+administrator password at a specific moment:
 
-1. Open `https://mails.domain.com/setup.php`.
-2. Find the OTP setup password in the `maild-admin` logs (it changes on **every** reboot):
+1. Start the stack normally (`docker compose … up -d`). It comes up with an empty catalogue:
+   no domain, no superadmin.
+2. Run the seeder once inside the `api` container:
 
+   ```sh
+   docker compose -f docker-compose.yml exec api adminng.py --provision
    ```
-   ####################### !!! #############################
-   OTP SETUP PASSWORD: RanDomStringThatChangesOnEveryReboot
-   ####################### !!! #############################
+
+   It creates `DEFAULT_DOMAIN`, the superadmin `MAIL_ADMIN_USER@DEFAULT_DOMAIN`, its mailbox
+   (same password), the four default aliases and the `maild_provision` row. The password comes
+   from `MAIL_ADMIN_PASSWORD`; if that is empty the command prints a generated one.
+3. `--force` re-asserts the administrator password on an already provisioned catalogue:
+
+   ```sh
+   docker compose -f docker-compose.yml exec api adminng.py --provision --force
    ```
 
-3. Create the superadmin account with that setup password. It must be a valid address of the
-   default domain, and PostfixAdmin checks it resolves on the internet (it fails otherwise).
-   Remember: **this is a login, not a mailbox** — you can create a mailbox of the same name
-   with a *different* password.
-4. Log in, create the domain, add the administrator mailbox, review the aliases, add users.
-5. Take the stack down and up so the boot-time services pick up the changes
-   (`docker compose … down && docker compose … up -d`), then do [DKIM](#dkim).
+4. The amavis/mua/mta gates wait out `PROVISION_WAIT_TIMEOUT` (180s by default) in this mode
+   before configuring themselves. To make that instant, restart them after step 2:
+   `docker compose -f docker-compose.yml restart amavis mua mta`, then do [DKIM](#dkim).
 
 ## Upgrading the database (PostgreSQL major)
 
@@ -255,8 +266,8 @@ the rollback path are in [`db_upgrade.md`](db_upgrade.md).
 
 The stack also ships **AdminNG**, a PWA-first admin interface served by the `adminng` container
 and backed by the `api` container (`ADMINNG_DB` holds devices, sessions, TOTP seeds and the
-audit trail). It replaces the everyday PostfixAdmin workflows; PostfixAdmin remains available
-at `mailadmin.<DEFAULT_DOMAIN>` as the fallback (vacation, fetchmail, backup/restore UI).
+audit trail). It is the only web administration UI — PostfixAdmin and its `admin` container
+were retired in 2026-10 (see `Changelog.md`).
 
 1. **Set `ADMINNG_SECRET_KEY`** in `.env` (`openssl rand -hex 32`). It signs the AdminNG JWTs
    and encrypts the TOTP seeds; the stack refuses to start without it. Rotating it invalidates

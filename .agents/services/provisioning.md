@@ -1,8 +1,7 @@
 # First-boot provisioning
 
-MailD deploys the catalogue itself on the first boot so a fresh stack is usable without the
-manual `/setup.php` wizard, the "create domain" clicks, the down/up cycle or the per-service
-restart that `INSTALL.md` used to require.
+MailD deploys the catalogue itself on the first boot so a fresh stack is usable without a
+setup wizard, the "create domain" clicks, a down/up cycle or a per-service restart.
 
 ## The problem it solves
 
@@ -19,26 +18,35 @@ the operator to "take the stack down and up". A `docker restart` from inside a c
 impossible without the docker socket (and meaningless in swarm), so instead the services
 **wait for the catalogue to be seeded before they run their config stage**.
 
-## Design — sentinel + leader / worker
+## Design — schema owner + leader + sentinel
 
 ```
- db    : migrate.sh creates the maild_provision sentinel table (the only DDL MailD adds)
- admin : upgrade.php (schema) → seed.sh (LEADER) → writes the sentinel row
+ db    : ensure_databases.sh → POSTGRES_DB, POSTGRES_EXTRA_DB, ADMINNG_DB
+         migrate.sh         → 001_maild_provision.sql          (the sentinel table)
+                              002_postfixadmin_catalogue.sql   (the catalogue schema)
+ api   : wait for the `domain` table → seed (LEADER) → sentinel row
+         → apply its own migrations to ADMINNG_DB → exec uvicorn
  amavis ┐
- mua    ├─ wait_for_provision() gate → then run the boot config once → exec the server
+ mua    ├─ wait_for_provision() gate → run the boot config once → exec the server
  mta    ┘
  mda /  ── no boot-time domain cache → no gate
  cron
 ```
 
+- **Schema owner = `db`.** `db/migrations/002_postfixadmin_catalogue.sql` is a `pg_dump`
+  snapshot of the schema PostfixAdmin 3.3.13 created (13 tables: `config`, `domain`,
+  `mailbox`, `alias`, `alias_domain`, `admin`, `domain_admins`, `log`, `vacation`,
+  `vacation_notification`, `fetchmail`, `quota`, `quota2`), rewritten idempotent. It used to
+  run in the `admin` container through `public/upgrade.php`, before that service retired.
+- **Leader = `api`.** `adminng/api/app/provision.py` runs from `app/bootstrap.py` before
+  uvicorn starts. Its work is one transaction guarded by
+  `pg_advisory_xact_lock(842019019)` — the same key the shell seeder used, so a rolling
+  upgrade can never interleave — with `INSERT … ON CONFLICT DO NOTHING` everywhere, so
+  concurrent swarm replicas converge instead of racing.
 - **Sentinel** = one row in `maild_provision` (`db/migrations/001_maild_provision.sql`). The
   DB is the only store shared by *every* service in all deployment contexts (compose, swarm,
   CI); there is no single volume mounted in all of them, which is why a marker file will not
   do.
-- **Leader** = the `admin` container: it already owns the PostfixAdmin schema, it exists in
-  every compose file, and it is the only service whose job is catalogue management.
-  `admin/seed.sh` runs after `public/upgrade.php`. Its work is one transaction guarded by
-  `pg_advisory_xact_lock(842019019)`, so concurrent swarm replicas serialise and converge.
 - **Worker gate** = a small `wait_for_provision()` inlined in the amavis / mua / mta
   entrypoints (they already inline `get_domains`/pgpass, so this matches the codebase style
   and keeps every image self-contained — the Docker build context is the per-service
@@ -49,10 +57,18 @@ impossible without the docker socket (and meaningless in swarm), so instead the 
 
 ## What gets seeded
 
-`admin/seed.sh` writes the same data the manual procedure did: `DEFAULT_DOMAIN`, the
-superadmin `MAIL_ADMIN_USER@DEFAULT_DOMAIN` (plus its mailbox with the *same* password),
-and the default aliases → the admin address. The password comes from `MAIL_ADMIN_PASSWORD`;
-when empty it is generated and printed OTP-style in `docker compose logs admin`.
+The same data the manual procedure always created:
+
+- the `DEFAULT_DOMAIN` row (`transport = virtual`);
+- the superadmin `MAIL_ADMIN_USER@DEFAULT_DOMAIN` — an `admin` row with `superadmin = true`;
+- the matching **mailbox** with the *same* password (so it is a real IMAP/SMTP account);
+- the default aliases `postmaster`/`abuse`/`hostmaster`/`webmaster` → the administrator;
+- the `maild_provision` sentinel row, last.
+
+The password comes from `MAIL_ADMIN_PASSWORD`; when empty it is generated and printed
+OTP-style in `docker compose logs api`. It is hashed with the stack-wide `PASSWORD_SCHEME`
+(`argon2id` by default → `{ARGON2ID}$argon2id$…`, the format Dovecot's SQL passdb and the
+AdminNG API both verify).
 
 Seeding the catalogue **directly in the DB** also bypasses PostfixAdmin's interactive "the
 domain must resolve on the internet" check, which is a real obstacle on air-gapped or
@@ -62,22 +78,35 @@ behind-proxy deployments.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `AUTO_PROVISION` | `yes` | `no` restores the classic OTP + `/setup.php` manual flow. |
+| `AUTO_PROVISION` | `yes` | `no` disables the boot-time seeder (manual: `adminng.py --provision`). |
 | `MAIL_ADMIN_PASSWORD` | *(empty)* | Superadmin + admin-mailbox password. Empty ⇒ generated + logged. |
 | `PROVISION_VERSION` | `1` | Bump to re-assert the defaults on the next boot. |
-| `PROVISION_WAIT_TIMEOUT` | `180` | Seconds a gated service waits for the sentinel. |
-| `PROVISION_FORCE` | `no` | `yes` re-writes the admin password even if it exists. |
+| `PROVISION_WAIT_TIMEOUT` | `180` | Seconds the api waits for the schema, and each gated service for the sentinel. |
+| `PROVISION_FORCE` | `no` | `yes` re-writes the administrator password even if it exists. |
 
-`MAIL_ADMIN_PASSWORD` is already injected by `.gitlab-ci.yml`; the rest default in the
-images (admin/amavis/mua/mta bake the gate set — see the matrix in
-`.agents/services/configuration.md`) and `env.sample` documents them as optional
-overrides of the operator file (`env.dev` in dev, `.env` in production).
+`MAIL_ADMIN_PASSWORD` is injected by `.gitlab-ci.yml`; the rest default in the images
+(`api` bakes the seeder set, `amavis`/`mua`/`mta` the gate set — see the matrix in
+`.agents/services/configuration.md`) and `env.sample` documents them as optional overrides
+of the operator file (`env.dev` in dev, `.env` in production).
 
 ## Operations
 
-- Reprovision / re-assert by hand: `docker compose exec admin /seed.sh`
-  (with `AUTO_PROVISION=yes` in the env; pass `PROVISION_FORCE=yes` to reset the password).
-- Working on the dev stack: `bootstrap-dev.sh` still owns the fixtures and re-asserts the
-  `test.creds` passwords after the container has seeded, so `test.sh` is unaffected.
-- Adding a *later* domain through the PostfixAdmin UI still needs a targeted
-  `docker compose restart amavis mua` for DKIM / SnappyMail (inherent: they cache at boot).
+- **Reprovision / re-assert by hand:**
+  `docker compose exec api adminng.py --provision` (add `--force` to reset the password).
+  It ignores `AUTO_PROVISION` on purpose: that switch only silences the *boot-time* run.
+- **Manual mode (`AUTO_PROVISION=no`):** the stack comes up unseeded; the operator runs the
+  CLI above once. This replaces the old `POSTFIXADMIN_SETUP_PASSWORD` + `/setup.php` wizard,
+  which retired with the `admin` service. The amavis/mua/mta gates wait out
+  `PROVISION_WAIT_TIMEOUT` once in that mode.
+- **Working on the dev stack:** `bootstrap-dev.sh` owns the fixtures and re-asserts the
+  `test.creds` passwords after the container has seeded, so `test.sh` is unaffected. Its
+  `--skip-default-domain` mode exports `AUTO_PROVISION=no` so the "domain not hosted" branch
+  stays testable.
+- **Adding a *later* domain** through AdminNG writes the same four default aliases, but a
+  targeted `docker compose restart amavis mua` is still needed for DKIM / SnappyMail
+  (inherent: they cache at boot).
+- **PostfixAdmin is retired.** Do not point an old PostfixAdmin instance at the catalogue:
+  its `public/upgrade.php` would re-run unguarded migration steps against a schema MailD now
+  owns. The `config('version')` row is still seeded so an inspection copy does not think the
+  schema is older than itself.
+

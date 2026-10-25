@@ -12,6 +12,7 @@ which admin asked for it). See adminng/README.md for the operator how-to.
     docker compose exec api adminng.py --revoke-device '<uuid>'
     docker compose exec api adminng.py --revoke-grant '<uuid>' --user '<admin>'
     docker compose exec api adminng.py --totp-reset '<username>'
+    docker compose exec api adminng.py --provision          # AUTO_PROVISION=no path
 """
 
 import argparse
@@ -150,6 +151,43 @@ def cmd_legacy_hashes() -> int:
     return 0
 
 
+def cmd_provision(force: bool = False) -> int:
+    """Seed the catalogue by hand — the manual path that replaces /setup.php.
+
+    With AUTO_PROVISION=no the boot-time run is off on purpose, so this command
+    ignores that switch: it reads DEFAULT_DOMAIN/MAIL_ADMIN_* from the container
+    env and runs the very same idempotent seeder (one transaction, sentinel row).
+    """
+    import dataclasses
+
+    from app import provision as provisioner
+
+    try:
+        cfg = provisioner.config_from_env(respect_auto_provision=False)
+        if cfg is not None and force:
+            cfg = dataclasses.replace(cfg, force=True)
+        report = provisioner.provision(cfg)
+    except provisioner.ProvisionError as exc:
+        print(f"provisioning failed: {exc}", file=sys.stderr)
+        return 1
+
+    if report["status"] == "already-provisioned":
+        print(
+            f"already provisioned: {report['admin']} (domain {report['domain']}); "
+            "pass --force to re-assert the administrator password"
+        )
+        return 0
+
+    print(
+        f"catalogue provisioned: domain={report['domain']} admin={report['admin']} "
+        f"version={report['version']}"
+    )
+    print("default aliases: " + ", ".join(report["aliases"]))
+    if report.get("password"):
+        print(f"administrator + mailbox password: {report['password']}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="adminng.py",
@@ -198,6 +236,19 @@ def build_parser() -> argparse.ArgumentParser:
         "weak-scheme support ends 2027-02-01 — those rows must be migrated "
         "(password change/rehash-on-login) before then",
     )
+    group.add_argument(
+        "--provision",
+        action="store_true",
+        help="seed the catalogue by hand (DEFAULT_DOMAIN, the superadmin, its "
+        "mailbox and the default aliases) and write the maild_provision sentinel; "
+        "this is the manual path that replaces PostfixAdmin's /setup.php",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="with --provision: re-assert the administrator password even if the "
+        "account already exists",
+    )
     parser.add_argument(
         "--user",
         metavar="USERNAME",
@@ -234,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_totp_reset(args.totp_reset)
         if args.legacy_hashes:
             return cmd_legacy_hashes()
+        if args.provision:
+            return cmd_provision(args.force)
     except psycopg.errors.InvalidTextRepresentation:
         print("invalid device id: expected a UUID (e.g. DE793C1A-...) ", file=sys.stderr)
         return 2

@@ -41,6 +41,21 @@ POSTGRES_PASSWORD = os.environ.get("POSTGRES_PASSWORD", "")
 POSTGRES_DB = os.environ.get("POSTGRES_DB", "mailddb")
 ADMINNG_DB = os.environ.get("ADMINNG_DB", "adminng")
 
+# --- First-boot provisioning (see .agents/services/provisioning.md) ------------
+# The api is the provisioning leader now that the PostfixAdmin container is
+# retired: at boot it seeds DEFAULT_DOMAIN, the superadmin (plus its mailbox) and
+# the default aliases, then writes the maild_provision sentinel that amavis/mua/mta
+# wait on. AUTO_PROVISION=no disables the boot-time run; the manual path is
+# `docker compose exec api adminng.py --provision`.
+DEFAULT_DOMAIN = os.environ.get("DEFAULT_DOMAIN", "").strip().lower().rstrip(".")
+MAIL_ADMIN_USER = os.environ.get("MAIL_ADMIN_USER", "sysadmin").strip()
+# Empty ⇒ generated and printed OTP-style in the api log. Never baked into an image.
+MAIL_ADMIN_PASSWORD = os.environ.get("MAIL_ADMIN_PASSWORD", "")
+AUTO_PROVISION = _bool("AUTO_PROVISION", True)
+PROVISION_VERSION = _int("PROVISION_VERSION", 1)
+PROVISION_WAIT_TIMEOUT = _int("PROVISION_WAIT_TIMEOUT", 180)
+PROVISION_FORCE = _bool("PROVISION_FORCE", False)
+
 # --- API knobs (see .agents/services/configuration.md) -------------------------
 ADMINNG_API_PORT = _int("ADMINNG_API_PORT", 8080)
 ADMINNG_ACCESS_TTL = _int("ADMINNG_ACCESS_TTL", 600)

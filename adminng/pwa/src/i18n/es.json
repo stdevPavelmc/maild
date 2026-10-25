@@ -104,6 +104,7 @@
     "title": "Dominios",
     "new": "Nuevo dominio",
     "description": "Descripción",
+    "defaultAliases": "Crear los alias postmaster, abuse, hostmaster y webmaster",
     "mailboxes": "Buzones",
     "aliases": "Alias",
     "aliasDomains": "Dominios alias que apuntan aquí",

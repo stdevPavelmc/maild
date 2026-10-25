@@ -43,11 +43,4 @@ if [ "$MUAIP" != "$(cat /tmp/MUAIP)" ] ; then
 	exit 1
 fi
 
-# if ADMINIP still has the same IP, if not reboot
-ADMINIP=`host ${ADMIN} | awk '/has address/ { print $4 }'`
-if [ "$ADMINIP" != "$(cat /tmp/ADMINIP)" ] ; then
-	echo "ADMIN IP has changed, need to reboot"
-	exit 1
-fi
-
 exit 0

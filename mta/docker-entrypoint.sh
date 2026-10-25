@@ -120,7 +120,6 @@ wait_peer() { # <NAME> <hostname> <critical|best-effort> -> address on stdout (d
 AMAVISIP="$(wait_peer AMAVISIP "${AMAVIS}" critical)" || exit 1
 MDAIP="$(wait_peer MDAIP "${MDA}" critical)" || exit 1
 MUAIP="$(wait_peer MUAIP "${MUA}" best-effort)"
-ADMINIP="$(wait_peer ADMINIP "${ADMIN}" best-effort)"
 # The container's own address, used for the _OWN_IP_ placeholder (the 10025 reinjection
 # listener). It used to come from `ifconfig eth0` (net-tools), which no longer exists on
 # resolute — and neither does iproute2 in this image — so it is resolved through libc from the
@@ -135,13 +134,11 @@ fi
 echo "AMAVISIP=${AMAVISIP}" >> "${CFILE}"
 echo "MDAIP=${MDAIP}" >> "${CFILE}"
 echo "MUAIP=${MUAIP}" >> "${CFILE}"
-echo "ADMINIP=${ADMINIP}" >> "${CFILE}"
 echo "OWN_IP=${OWN_IP}" >> "${CFILE}"
 #- set files for checks
 echo "$AMAVISIP" > /tmp/AMAVISIP
 echo "$MDAIP" > /tmp/MDAIP
 echo "$MUAIP" > /tmp/MUAIP
-echo "$ADMINIP" > /tmp/ADMINIP
 echo "$OWN_IP" > /tmp/OWNIP
 
 # postgresql data
@@ -416,13 +413,11 @@ peer_watchdog() {
         W_AMAVISIP="$(resolve_peer "${AMAVIS}")"
         W_MDAIP="$(resolve_peer "${MDA}")"
         W_MUAIP="$(resolve_peer "${MUA}")"
-        W_ADMINIP="$(resolve_peer "${ADMIN}")"
         W_CHANGED=0
 
         for W_PAIR in "AMAVISIP:${AMAVISIP}:${W_AMAVISIP}" \
                       "MDAIP:${MDAIP}:${W_MDAIP}" \
-                      "MUAIP:${MUAIP}:${W_MUAIP}" \
-                      "ADMINIP:${ADMINIP}:${W_ADMINIP}" ; do
+                      "MUAIP:${MUAIP}:${W_MUAIP}" ; do
             W_NAME="$(printf '%s' "$W_PAIR" | cut -d: -f1)"
             W_OLD="$(printf '%s' "$W_PAIR" | cut -d: -f2)"
             W_NEW="$(printf '%s' "$W_PAIR" | cut -d: -f3)"
@@ -445,7 +440,6 @@ peer_watchdog() {
                 AMAVISIP) AMAVISIP="$W_NEW" ; echo "$W_NEW" > /tmp/AMAVISIP ;;
                 MDAIP)    MDAIP="$W_NEW"    ; echo "$W_NEW" > /tmp/MDAIP ;;
                 MUAIP)    MUAIP="$W_NEW"    ; echo "$W_NEW" > /tmp/MUAIP ;;
-                ADMINIP)  ADMINIP="$W_NEW"  ; echo "$W_NEW" > /tmp/ADMINIP ;;
             esac
             W_CHANGED=1
         done

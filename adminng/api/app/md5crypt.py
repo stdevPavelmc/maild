@@ -1,8 +1,8 @@
 """md5crypt ($1$) hashing — the LEGACY catalogue password scheme.
 
 MailD used to store mailbox/admin passwords as md5crypt: `POSTFIXADMIN_ENCRYPT=md5crypt`
-and Dovecot's `default_password_scheme` both verify it, and `admin/seed.sh`
-produces it with PHP's crypt(). Python 3.13 removed the stdlib `crypt` module,
+and Dovecot's `default_password_scheme` both verify it, and the old `admin/seed.sh`
+produced it with PHP's `crypt()`. Python 3.13 removed the stdlib `crypt` module,
 so this is a self-contained implementation of the FreeBSD md5crypt algorithm
 (pure hashlib) with the same output format:
 

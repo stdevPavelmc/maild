@@ -36,43 +36,6 @@ services:
     networks:
       - maild
 
-  admin:
-    image: ${IMG_ADMIN}:${TAG}
-    build: ./admin/
-    container_name: maild-admin
-    hostname: admin
-    restart: always
-    # No published port: the UI is exposed through the ingress proxy (Traefik labels below).
-    environment:
-      # the entrypoint maps POSTGRES_PASSWORD -> POSTFIXADMIN_DB_PASSWORD itself;
-      # POSTFIXADMIN_SETUP_PASSWORD is not passed any more (the entrypoint generates
-      # and prints its own OTP on every boot, the variable was always ignored).
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
-      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
-    # operator env file (from env.sample); overrides any same-named image ENV default
-    env_file:
-      - .env
-    depends_on:
-      - db
-    networks:
-      - maild
-    logging: # See https://docs.docker.com/config/containers/logging/syslog/
-      driver: syslog
-      options:
-        syslog-address: "unixgram:///dev/log"
-    labels:
-      # Ingress (Traefik) — http://mailadmin.${DEFAULT_DOMAIN}
-      - "traefik.enable=true"
-      - "traefik.http.routers.mailadmin.rule=Host(`mailadmin.${DEFAULT_DOMAIN}`)"
-      - "traefik.http.routers.mailadmin.entrypoints=websecure"
-      - "traefik.http.routers.mailadmin.tls=true"
-      # custom service (non default port)
-      - "traefik.http.routers.mailadmin.service=mailadmin_custom_port"
-      - "traefik.http.services.mailadmin_custom_port.loadbalancer.server.port=80"
-      # optional: pin the network Traefik must use when the container joins several
-      #- "traefik.docker.network=maild"
-
   api:
     image: ${IMG_API}:${TAG}
     build: ./adminng/api/
@@ -86,6 +49,10 @@ services:
       # makes a missing password fail at `compose config`.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       ADMINNG_SECRET_KEY: ${ADMINNG_SECRET_KEY:?set ADMINNG_SECRET_KEY in .env}
+      # The api is the first-boot provisioning leader now (admin is retired): it seeds
+      # DEFAULT_DOMAIN, the superadmin and the default aliases before uvicorn starts.
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
     # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
       - .env

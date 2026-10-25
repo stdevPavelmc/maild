@@ -22,7 +22,6 @@ variables:
   IMG_MTA: "$CI_REGISTRY_IMAGE/maild-mta"
   IMG_MDA: "$CI_REGISTRY_IMAGE/maild-mda"
   IMG_MUA: "$CI_REGISTRY_IMAGE/maild-mua"
-  IMG_ADMIN: "$CI_REGISTRY_IMAGE/maild-admin"
   IMG_CLAMAV: "$CI_REGISTRY_IMAGE/maild-clamav"
   IMG_AMAVIS: "$CI_REGISTRY_IMAGE/maild-amavis"
   IMG_CRON: "$CI_REGISTRY_IMAGE/maild-cron"
@@ -63,11 +62,6 @@ stages:
   rules:
     - changes:
         - db/**/*
-
-.rule_admin:
-  rules:
-    - changes:
-        - admin/**/*
 
 .rule_api:
   rules:
@@ -122,18 +116,6 @@ build_db:
     - mails
   rules:
     !reference [.rule_db, rules]
-
-# admin
-build_admin:
-  stage: build
-  <<: *before_script
-  script:
-    - docker compose build admin --push
-  needs: []
-  tags:
-    - mails
-  rules:
-    !reference [.rule_admin, rules]
 
 # api (AdminNG backend)
 build_api:
@@ -250,22 +232,6 @@ release_db:
     - mails
   rules:
     !reference [.rule_db, rules]
-
-# Release admin
-release_admin:
-  stage: release
-  <<: *before_script
-  script:
-    - docker compose pull admin
-    - docker tag ${IMG_ADMIN}:${TAG} ${IMG_ADMIN}:latest
-    - export TAG=latest
-    - docker compose push admin
-  needs:
-    - build_admin
-  tags:
-    - mails
-  rules:
-    !reference [.rule_admin, rules]
 
 # Release api (AdminNG backend)
 release_api:
@@ -412,8 +378,6 @@ deploy:
     - job: release_mta
       optional: true
     - job: release_mda
-      optional: true
-    - job: release_admin
       optional: true
     - job: release_db
       optional: true

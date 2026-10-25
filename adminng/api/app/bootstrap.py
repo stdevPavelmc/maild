@@ -1,14 +1,20 @@
-"""Container start-up: wait for Postgres + the adminng DB, then migrate.
+"""Container start-up: wait for Postgres, seed the catalogue, then migrate.
 
-Invoked by entrypoint.sh before uvicorn. The adminng database is *created* by the
-db container (`db/ensure_databases.sh` creates ADMINNG_DB on every boot), so this
-module only waits for it and reports a clear error if the operator removed it
-from the db's env.
+Invoked by entrypoint.sh before uvicorn. Both databases are *created* by the db
+container (`db/ensure_databases.sh` creates the catalogue and ADMINNG_DB on every
+boot) and the catalogue schema is applied there too (`db/migrations/`), so this
+module only waits, runs MailD's first-boot provisioning (this container is the
+leader: `admin/seed.sh` is retired, see app/provision.py) and applies AdminNG's own
+migrations.
+
+A provisioning failure never aborts the boot: the API must stay reachable so an
+operator can finish by hand with `docker compose exec api adminng.py --provision`.
 """
 
 import logging
 import sys
 
+from . import provision as provisioner
 from . import settings
 from .db import wait_for_db
 from .migrate import apply_migrations
@@ -34,8 +40,27 @@ def main() -> int:
         settings.POSTGRES_DB,
         settings.ADMINNG_DB,
     )
-    # `postgres` always exists; ADMINNG_DB is created by the db container.
+    # `postgres` always exists; the catalogue and ADMINNG_DB are created by the db
+    # container, and the catalogue schema is applied by its migrate.sh.
     wait_for_db("postgres", timeout=120)
+    wait_for_db(settings.POSTGRES_DB, timeout=120)
+
+    # First-boot provisioning (leader): DEFAULT_DOMAIN, the superadmin + its mailbox,
+    # the default aliases and the maild_provision sentinel. Idempotent; the fast path
+    # on every later boot is one SELECT.
+    try:
+        report = provisioner.provision()
+    except provisioner.ProvisionError as exc:
+        log.error("provisioning did not run: %s", exc)
+    else:
+        if report["status"] == "provisioned":
+            log.info(
+                "catalogue seeded: domain=%s admin=%s aliases=%s",
+                report["domain"],
+                report["admin"],
+                ", ".join(report["aliases"]),
+            )
+
     wait_for_db(settings.ADMINNG_DB, timeout=60)
 
     applied = apply_migrations()

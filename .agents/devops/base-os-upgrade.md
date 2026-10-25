@@ -129,7 +129,7 @@ docker run --rm -it --name tpl-<svc>-<new> ubuntu:<new-codename> bash
 apt-get update && apt-get install -y <packages from Dockerfile>
 # mta: postfix postfix-pcre postfix-pgsql postfix-policyd-spf-python
 # mda: dovecot-pop3d dovecot-imapd dovecot-pgsql dovecot-sieve dovecot-lmtpd dovecot-managesieved spamassassin python3
-# amavis: amavisd-new 7zip unrar-free cabextract spamassassin gpg netcat-openbsd bind9-host postgresql-client
+# amavis: amavisd-new 7zip unrar-free cabextract bzip2 xz-utils lrzip lzop lz4 rpm2cpio spamassassin gpg netcat-openbsd bind9-host postgresql-client
 # clamav: clamav-daemon clamav-freshclam libclamunrar12
 # cron: swaks pflogsumm bind9-host spamassassin cron ca-certificates (+ PGDG postgresql-client-<MAJOR>, see box)
 ```

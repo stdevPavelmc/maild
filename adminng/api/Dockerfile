@@ -2,10 +2,12 @@ FROM python:3.14-slim-trixie
 
 # AdminNG API — FastAPI backend for the next-generation MailD admin interface.
 #
-# Reads/writes the PostfixAdmin catalogue (mailddb) exactly like PostfixAdmin does
+# Reads/writes the PostfixAdmin catalogue (mailddb) exactly like PostfixAdmin did
 # and owns its own state (devices, sessions, TOTP credentials, audit trail) in the
-# ADMINNG_DB database. The catalogue schema belongs to the `admin` container
-# (public/upgrade.php); the adminng schema is migrated by this image's entrypoint.
+# ADMINNG_DB database. The catalogue SCHEMA belongs to the `db` container
+# (db/migrations/002_postfixadmin_catalogue.sql); this image seeds the catalogue
+# rows at boot (first-boot provisioning, app/provision.py) and migrates its own
+# adminng schema.
 # The vmail volume is mounted READ-ONLY: quota usage is read from the Maildir++
 # .maildirsize files, never written.
 
@@ -22,6 +24,10 @@ ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
     ADMINNG_DB=adminng \
+    AUTO_PROVISION=yes \
+    PROVISION_VERSION=1 \
+    PROVISION_WAIT_TIMEOUT=180 \
+    PROVISION_FORCE=no \
     ADMINNG_API_PORT=8080 \
     ADMINNG_API_DOCS=no \
     PASSWORD_SCHEME=argon2id \
@@ -42,8 +48,8 @@ ENV POSTGRES_HOST=db \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN pip --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+RUN pip install --upgrade pip --no-cache-dir && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./app/
 COPY migrations/ ./migrations/
@@ -75,4 +81,4 @@ LABEL org.opencontainers.image.title="MailD AdminNG API" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-19"
+      org.opencontainers.image.created="2026-10-24"

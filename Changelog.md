@@ -18,6 +18,78 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-24 1.7.0-dev
+- Added: the `amavis` image now carries amavisd's decompressor helpers — `bzip2`,
+  `xz-utils`, `lrzip`, `lzop`, `lz4` and `rpm2cpio` — so `.bz2`/`.xz`/`.lzma`/`.lrz`/`.lzo`/
+  `.lz4`/`.rpm` attachments are extracted and scanned instead of being flagged **UNCHECKED**.
+  Package names differ from the binaries amavisd's `@decoders` table calls: `xz` comes from
+  `xz-utils` and `lz4c` is a symlink shipped by the `lz4` package (neither has a same-named
+  distro package).
+- Removed: **the `admin` service (PostfixAdmin) is gone.** The container, its image
+  (`maild-admin`), its CI build/release jobs, the `mailadmin.${DEFAULT_DOMAIN}` Traefik
+  route, its `POSTFIXADMIN_*` variables and the per-boot OTP setup password were all
+  retired. AdminNG (`adminng` PWA + `api`) is the only web administration UI.
+- Added: **the catalogue schema now belongs to the `db` container** —
+  `db/migrations/002_postfixadmin_catalogue.sql` is a `pg_dump --schema-only` snapshot of
+  what PostfixAdmin 3.3.13's `public/upgrade.php` created (13 tables + sequences, indexes,
+  constraints, the `quota`/`quota2` merge triggers and the `config('version')` row),
+  rewritten to be fully idempotent so `migrate.sh` re-applies it on every boot. Existing
+  deployments see a no-op; a PostfixAdmin bump in the future needs a new guarded migration
+  (the file is a snapshot, never edited to follow upstream). GPL-2.0-or-later attribution
+  is in the file header.
+- Added: **first-boot provisioning moved to the `api`** (`adminng/api/app/provision.py`,
+  run by `app/bootstrap.py` before uvicorn). It waits (bounded) for the `domain` table,
+  then seeds `DEFAULT_DOMAIN`, the superadmin (`admin` row) + its mailbox with the same
+  password, the four default aliases and the `maild_provision` sentinel — one transaction
+  under the same `pg_advisory_xact_lock(842019019)` the shell seeder used, `INSERT … ON
+  CONFLICT DO NOTHING` everywhere, fast path (one `SELECT`) on every later boot.
+  `PROVISION_VERSION`/`PROVISION_FORCE`/`PROVISION_WAIT_TIMEOUT`/`MAIL_ADMIN_PASSWORD`
+  keep their meaning; the password is hashed with `PASSWORD_SCHEME` (Argon2id by default).
+- Added: `adminng.py --provision [--force]` — the manual seeder that replaces the retired
+  PostfixAdmin `/setup.php` wizard. It ignores `AUTO_PROVISION` (that switch only silences
+  the boot-time run) and prints the generated password when `MAIL_ADMIN_PASSWORD` is empty.
+- Changed: a domain created through AdminNG now gets PostfixAdmin's four default aliases
+  (`postmaster`/`abuse`/`hostmaster`/`webmaster` → the creating administrator) in the same
+  transaction, and `domain.aliases`/`domain.mailboxes` are recounted (the "create domain"
+  click parity that disappeared with PostfixAdmin). New opt-out: `default_aliases: false`
+  on `POST /api/v1/domains`, exposed as a toggle in the PWA's new-domain dialog (EN/ES).
+- Changed: `mta` dropped the `ADMIN=admin` peer — `_ADMINIP_` left `main.cf`'s
+  `mynetworks`, and the peer watchdog/healthcheck no longer track an admin container.
+- Changed: `bootstrap-dev.sh` waits for the **catalogue schema** (not the PostfixAdmin UI),
+  no longer force-recreates `admin`, verifies the `admin` rows directly instead of a
+  PostfixAdmin web login, and `--skip-default-domain` exports `AUTO_PROVISION=no` so that
+  mode keeps meaning "no deployment domain".
+- Tests: new `adminng/api/tests/test_provision.py` (7 cases: seed shape, Argon2id hash,
+  no-op second run, `--force`, generated password, schema-timeout, `AUTO_PROVISION`
+  handling); `tests/test_catalogue.py` gains the default-aliases/opt-out case (12 green).
+- Docs: `AGENTS.md`, `.agents/services/{provisioning,catalog,configuration}.md`,
+  `.agents/architecture/overview.md`, `.agents/devops/environment-setup.md`,
+  `INSTALL.md`, `README.md`, `env.sample` and `db_upgrade.md` now describe the
+  `db`-schema / `api`-seeder split.
+
+- Fixed: **LMTP no longer logs `net_connect_unix(/run/dovecot/anvil) failed: Permission denied`
+  (plus `lmtp_user_concurrency_limit lookup failed - skipping`) for every delivery.** Dovecot 2.4
+  runs anvil as root and creates `/run/dovecot/anvil` `0600 root:root`; upstream commit `beca41cc`
+  relaxes that to `0660` + `default_internal_group`, but it landed after 2.4.2 (the version
+  `ubuntu:resolute` ships). This stack runs the whole lmtp service as `vmail`
+  (`service lmtp { user = vmail }` in `mda/dovecot/conf.d/10-master.conf`), so the per-recipient
+  concurrency lookup was denied and skipped — mail was still delivered, but a configured
+  `lmtp_user_concurrency_limit` would have been silently ignored. New
+  `mda/dovecot/conf.d/90-anvil-perms.conf` hands the listener to `vmail` (`0660`), the same
+  treatment `90-stats-perms.conf` already applies to the stats sockets.
+- Fixed: **imapsieve no longer logs `sieve: binary /etc/dovecot/sieve/learn-spam.svbin: save: failed
+  to create temporary file: ... Permission denied` on every Junk copy.** Pigeonhole caches a
+  compiled script next to its source by default and the imap process runs as `vmail`, but
+  `/etc/dovecot/sieve` is `root:root 0775` — and it must stay read-only for the mail user, since it
+  holds the global filters every mailbox runs. The learning itself always worked (the script
+  compiled in memory and the `pipe` to `sa-learn` ran); what was lost was the binary cache, so both
+  scripts were recompiled on every load and each copy logged the error. `90-imapsieve.conf` now sets
+  `bin_path = /var/lib/dovecot/sieve/imapsieve` for `learn_spam`/`learn_ham` (a *directory*: the
+  file name comes from the script name), which the Dockerfile creates `root:vmail 0770` so `vmail`
+  can write the cache while the `.sieve` sources stay immutable for it. Verified: the first copy
+  saves the binary, the next one logs `Script binary ... successfully loaded`, and the container log
+  stays clean.
+
 ## 2026-10-19 1.6.1-dev
 - Security: **SMTP local-part harvesting on :25 is now tarpitted** (2026-10 audit F-07). The
   mta sleeps `SMTP_TARPIT_DELAY` seconds (image default 2, `0` disables) before the

@@ -44,32 +44,6 @@ services:
     ports:
       - "5432:5432"  # Exposed for local debugging
 
-  admin:
-    image: pavelmc/maild-admin:develop
-    build: ./admin/
-    container_name: maild-dev-admin
-    hostname: admin
-    restart: unless-stopped
-    ports:
-      # NOTE: Apache in this image listens on 80 (the production compose documents the
-      # same intent as "8080:80"). Publishing 8080:8080 left the admin UI unreachable from the
-      # host even though the container reported healthy - found by bootstrap-dev.sh.
-      - "8080:80"  # Exposed for local access
-    environment:
-      # the entrypoint maps POSTGRES_PASSWORD -> POSTFIXADMIN_DB_PASSWORD itself;
-      # POSTFIXADMIN_SETUP_PASSWORD is not passed any more (the entrypoint generates
-      # and prints its own OTP on every boot, the variable was always ignored).
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
-      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in env.dev}
-      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
-    # operator env file (fake dev secrets); overrides any same-named image ENV default
-    env_file:
-      - env.dev
-    depends_on:
-      - db
-    networks:
-      - maild-dev
-
   api:
     image: pavelmc/maild-api:develop
     build: ./adminng/api/
@@ -81,6 +55,13 @@ services:
       # makes a missing password fail at `compose config`.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
       ADMINNG_SECRET_KEY: ${ADMINNG_SECRET_KEY:?set ADMINNG_SECRET_KEY in env.dev}
+      # The api is the first-boot provisioning leader now (admin is retired): it seeds
+      # DEFAULT_DOMAIN, the superadmin and the default aliases before uvicorn starts.
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in env.dev}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+      # Interpolated so bootstrap-dev.sh --skip-default-domain can disable the boot-time
+      # seeder for that run (env.dev does not set it; the image default is yes).
+      AUTO_PROVISION: ${AUTO_PROVISION:-yes}
     # operator env file (fake dev secrets); overrides any same-named image ENV default
     env_file:
       - env.dev

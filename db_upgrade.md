@@ -22,7 +22,7 @@ state in it beyond what is dumped):
 
 | Service | What it reads |
 |---------|---------------|
-| `admin` | the PostfixAdmin schema and every row it manages (domains, mailboxes, aliases, admins) |
+| `api` | the whole catalogue (domains, mailboxes, aliases, admins) — it also **seeds** it on first boot |
 | `mda` | `passdb`/`userdb` queries (auth, mailbox path, per-user quota) |
 | `mta` | `pgsql:` maps (virtual domains/mailboxes/aliases, sender login, relay domains) |
 | `amavis` | the domain list (DKIM key bootstrap) |
@@ -31,8 +31,9 @@ state in it beyond what is dumped):
 
 Inside the cluster:
 
-* `mailddb` (`POSTGRES_DB`) — the catalogue: PostfixAdmin's tables plus MailD's
-  `maild_provision` sentinel (added by `db/migrations/001_maild_provision.sql`).
+* `mailddb` (`POSTGRES_DB`) — the catalogue: the PostfixAdmin table layout (created by
+  `db/migrations/002_postfixadmin_catalogue.sql`, MailD's snapshot) plus MailD's
+  `maild_provision` sentinel (`db/migrations/001_maild_provision.sql`).
 * `contacts` (`POSTGRES_EXTRA_DB`, a comma-separated list) — SnappyMail's database; empty in a
   fresh deploy.
 * `adminng` (`ADMINNG_DB`) — AdminNG's own state (devices, sessions, TOTP, audit trail); created
@@ -251,12 +252,12 @@ $DC up -d                                   # every client starts against the ne
 ```
 
 The suite exercises the whole catalogue path (IMAP/SMTP authentication, alias resolution, quotas,
-content filters, and the PostfixAdmin login inside `bootstrap-dev.sh`), so a green run **is** the
+content filters, and the `admin` rows in `bootstrap-dev.sh`), so a green run **is** the
 proof that the restore is complete. If a single client complains, restart it — Postfix, Dovecot,
-amavis and PostfixAdmin reconnect per query, but a cached failed connection can linger:
+amavis and the api reconnect per query, but a cached failed connection can linger:
 
 ```bash
-$DC restart mda mta amavis admin mua cron
+$DC restart mda mta amavis api mua cron
 ```
 
 ### 3.9 Cleanup

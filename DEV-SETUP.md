@@ -62,10 +62,10 @@ refuses to run against anything but `docker-compose-dev.yml`:
 
 What it does, idempotently (a second run re-asserts the same state and changes nothing else):
 
-- ensures `db admin mda mta mua cron` are up (`cron` because the amavis entrypoint refuses to
-  start without its IP, and amavis sits in the MTA delivery path), waits for Postgres, for the
-  PostfixAdmin schema (the `admin` container creates it on boot) and for the web UIs — every wait
-  is bounded;
+- ensures `db adminng mda mta mua cron clamav amavis` are up (`cron` because amavis resolves its
+  address for the reinject/scan path, and amavis sits in the MTA delivery path), waits for
+  Postgres, for the catalogue schema (`db` applies `db/migrations/*.sql` on boot) and for the web
+  UIs — every wait is bounded;
 - refuses to run when the stack was created with different secrets than `env.dev` (e.g. a plain
   `docker compose up` without `--env-file`): Postgres only honours `POSTGRES_PASSWORD` on first
   init, so the remedy is always `down` → `rm -rf ldata/` → re-run (dev data is disposable);
@@ -87,18 +87,37 @@ What it does, idempotently (a second run re-asserts the same state and changes n
 - restarts `amavis` when a provisioned domain still has no DKIM key: amavis builds the keys for
   the domains it sees at its own start, so a domain created afterwards would go out unsigned;
 - writes **`test.creds`** (git-ignored, mode `0600`) with every password and then verifies them:
-  an IMAP login for each mailbox plus a real PostfixAdmin web login (302 → `main.php`).
+  an IMAP login for each mailbox plus the matching `admin`/`domain_admins` rows in the catalogue.
 
-The *same* password works over IMAP/SMTP and in the PostfixAdmin UI: the dev
+The *same* password works over IMAP/SMTP and in the AdminNG PWA / webmail: the dev
 fixtures are hashed with **legacy md5crypt `$1$…`** on purpose
 (`bootstrap-dev.sh` runs `doveadm pw -s MD5-CRYPT`), so the local stack always
 exercises the legacy-coexistence path that the stack-wide default (Argon2id,
 `PASSWORD_SCHEME`) is migrating away from; Dovecot verifies both. Change a
 password from the webmail or the AdminNG API and the row becomes
-`{ARGON2ID}$argon2id$…`, which PostfixAdmin can no longer verify — see
-`INSTALL.md` (“Password hashes and the 2027-02-01 deadline”).
+`{ARGON2ID}$argon2id$…` — see `INSTALL.md` (“Password hashes and the 2027-02-01
+deadline”).
 
 Delete `test.creds` (or run `./bootstrap-dev.sh --rotate-creds`) to get fresh passwords.
+
+### What auto-provisioning does *not* do
+
+The `api` container's first-boot seeder (`adminng/api/app/provision.py`, `AUTO_PROVISION=yes`
+by default) only handles `DEFAULT_DOMAIN` from `env.dev`: the domain row,
+`<MAIL_ADMIN_USER>@<DEFAULT_DOMAIN>` as superadmin + mailbox, the four default aliases and the
+`maild_provision` sentinel that `mta`/`mda`/`amavis`/`mua` gate on. It **never** creates the
+`example.net` fixtures, the vmail homes, the SnappyMail domain configs or `test.creds` — that is
+`bootstrap-dev.sh`'s job. Confirm the seeder ran with:
+
+```bash
+docker compose --env-file env.dev -f docker-compose-dev.yml logs api | grep -i 'provision'
+docker compose --env-file env.dev -f docker-compose-dev.yml exec -T db \
+  psql -U maild -d mailddb -c 'select * from maild_provision'
+```
+
+Because `env.dev` carries no `MAIL_ADMIN_PASSWORD`, the first boot generates one and prints it
+`OTP-style` in the `api` log (`GENERATED ADMIN PASSWORD for …`). `bootstrap-dev.sh` replaces it
+with the value from `test.creds`, so use those credentials for the PWA/IMAP.
 
 ## Automated Test Suite (`test.sh`)
 
@@ -233,7 +252,7 @@ All services expose debugging ports:
 | Service | Port(s) | Description |
 |---------|---------|-------------|
 | db      | 5432    | PostgreSQL database |
-| admin   | 8080    | PostfixAdmin web interface |
+| adminng | 8083, 8084 | AdminNG PWA (HTTP; 8084 = dev-only HTTPS with the local CA) |
 | mua     | 8081    | Webmail interface |
 | mda     | 110, 143, 993, 995, 4190, 12345 | Dovecot (POP3, IMAP, IMAPS, POP3S, ManageSieve, SASL) |
 | mta     | 25, 465, 587 | Postfix (SMTP, SMTPS, Submission) |
@@ -253,7 +272,6 @@ All services expose debugging ports:
 - **Mailbox password change:** from the webmail itself (Settings → Password) — the `change-password`
   plugin and the MailD catalogue driver ship with the image, as do the X-Originating-IP header and
   TOTP two-factor plugins (`MUA_PLUGINS`), installed on every boot
-- **Admin Interface:** http://localhost:8080
 - **AdminNG PWA:** http://localhost:8083
   - LAN/phone (HTTPS, dev): https://<lan-ip>:8084 — install `ldata/certs/adminng-ca.der` on the
     device first (`bootstrap-dev.sh` generates the local CA; see `adminng/pwa/README.md` §2.1)

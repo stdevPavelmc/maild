@@ -10,6 +10,12 @@ RUN apt-get update && \
         7zip \
         unrar-free \
         cabextract \
+        bzip2 \
+        xz-utils \
+        lrzip \
+        lzop \
+        lz4 \
+        rpm2cpio \
         spamassassin \
         gpg \
         netcat-openbsd \
@@ -21,6 +27,13 @@ RUN apt-get update && \
 # resolute package notes: `netcat` is now a virtual package apt refuses to resolve (install
 # `netcat-openbsd` instead) and `p7zip-full` is gone, replaced by `7zip` (it Provides
 # p7zip-full and still ships /usr/bin/7z + /usr/bin/p7zip, what amavisd's unpacker looks up).
+#
+# Decompressor helpers: amavisd's @decoders table shells out to `bzip2 -d` (bz2),
+# `xz -dc` (xz), `xz -dc --format=lzma` (lzma), `lrzip -q -k -d -o -` (lrz), `lzop -d`
+# (lzo), `lz4c -d` (lz4) and `rpm2cpio` (rpm). Without them the matching attachment types
+# are flagged as **UNCHECKED** instead of being extracted and scanned. Binary names differ
+# from the distro package names: `xz` comes from xz-utils and `lz4c` is a symlink shipped
+# by the `lz4` package (there is no package named `lz4c` nor `xz`).
 
 # No uid/gid pinning here on purpose: the distro-allocated amavis ids win (jammy: 101:101,
 # resolute: 994:994). bootstrap-dev.sh owns ldata/amavis with the ids this image uses, and a

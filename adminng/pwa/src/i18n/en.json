@@ -104,6 +104,7 @@
     "title": "Domains",
     "new": "New domain",
     "description": "Description",
+    "defaultAliases": "Create postmaster, abuse, hostmaster and webmaster aliases",
     "mailboxes": "Mailboxes",
     "aliases": "Aliases",
     "aliasDomains": "Alias domains pointing here",

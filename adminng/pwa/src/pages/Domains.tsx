@@ -37,6 +37,9 @@ export function DomainsPage({ password }: { password: string }) {
   }, [newSignal])
   const [domain, setDomain] = useState('')
   const [description, setDescription] = useState('')
+  // PostfixAdmin created postmaster/abuse/hostmaster/webmaster with every domain;
+  // keep that default, but let the operator opt out (some domains are aliases only).
+  const [defaultAliases, setDefaultAliases] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [advisory, setAdvisory] = useState<string | null>(null)
   const [editing, setEditing] = useState<Domain | null>(null)
@@ -47,10 +50,11 @@ export function DomainsPage({ password }: { password: string }) {
   const create = async (): Promise<void> => {
     setError(null)
     try {
-      const created = await api.createDomain({ domain, description })
+      const created = await api.createDomain({ domain, description, default_aliases: defaultAliases })
       setOpenNew(false)
       setDomain('')
       setDescription('')
+      setDefaultAliases(true)
       setAdvisory(created.advisories?.[0]?.message ?? t('domains.advisory'))
       await list.reload()
     } catch (err) {
@@ -158,6 +162,12 @@ export function DomainsPage({ password }: { password: string }) {
         <Field label={t('domains.description')}>
           <Input value={description} onChange={(event) => setDescription(event.target.value)} />
         </Field>
+        <Toggle
+          checked={defaultAliases}
+          label={t('domains.defaultAliases')}
+          disabled={!online}
+          onChange={setDefaultAliases}
+        />
       </Modal>
 
       <Modal

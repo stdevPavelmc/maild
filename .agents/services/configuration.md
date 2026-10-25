@@ -82,12 +82,12 @@ every DB consumer and is never baked.
 | Service | Image ENV defaults (overridable) | Mandatory from the operator file | Optional overrides (documented in env.sample) |
 |---------|----------------------------------|----------------------------------|-----------------------------------------------|
 | db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=contacts` `ADMINNG_DB=adminng` | `POSTGRES_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB`, `ADMINNG_DB` (advanced; `ADMINNG_DB` must match the api's) |
-| admin | `POSTGRES_HOST/DB/USER` `POSTFIXADMIN_DB_TYPE=pgsql` `POSTFIXADMIN_SMTP_SERVER=mta` `POSTFIXADMIN_SMTP_PORT=25` `POSTFIXADMIN_ENCRYPT=md5crypt` `PASSWORD_SCHEME=argon2id` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `MAIL_ADMIN_PASSWORD` (empty ⇒ OTP), `PROVISION_*`, `POSTFIXADMIN_*`, `PASSWORD_SCHEME` |
-| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `ADMINNG_API_PORT=8080` `ADMINNG_API_DOCS=no` `PASSWORD_SCHEME=argon2id` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REMEMBER_TTL=86400` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_PENDING_TTL_DAYS=3` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_WEBAUTHN_RP_ID=localhost` `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084` `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) | every `ADMINNG_*` knob, `PASSWORD_SCHEME` |
+| admin | **retired** — its schema duty lives in `db/migrations/002_postfixadmin_catalogue.sql` and its seeder in `adminng/api/app/provision.py` | — | — |
+| api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` `ADMINNG_API_PORT=8080` `ADMINNG_API_DOCS=no` `PASSWORD_SCHEME=argon2id` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REMEMBER_TTL=86400` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_PENDING_TTL_DAYS=3` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_WEBAUTHN_RP_ID=localhost` `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084` `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` | `MAIL_ADMIN_PASSWORD` (empty ⇒ generated + logged), `PROVISION_*`, every `ADMINNG_*` knob, `PASSWORD_SCHEME` |
 | adminng | (none — static PWA + nginx proxy) | — | — (no `env_file`); dev publishes 8083 (HTTP) and 8084 (HTTPS, local CA) |
 | mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST/DB/USER` `POSTGRES_EXTRA_DB=contacts` `PASSWORD_SCHEME=argon2id` `MUA_ADMIN_USER=maild` `MUA_CONFIG_WAIT_TIMEOUT=120` `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `MUA_ADMIN_PASSWORD` (empty ⇒ generated + logged), `BANNER_TITLE`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT`, `PASSWORD_SCHEME` |
 | mda | `POSTGRES_HOST/DB/USER` `PASSWORD_SCHEME=argon2id` `DEFAULT_MAILBOX_SIZE=200M` `QUOTA_REPORT_HOUR=0` `QUOTA_REPORT_MINUTE=1` `COUNTRY=JM` `STATE=Kingston` `CITY=Kingston` `ORG=MailD` `OU=MailD` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, cert subject (`COUNTRY/STATE/CITY/ORG/OU`), `PASSWORD_SCHEME` (rehash-on-login gate) |
-| mta | `POSTGRES_HOST/DB/USER` `MAX_MESSAGESIZE=34865152` `SPF_ENABLE=True` `DNSBL_ENABLE=true` `DNSBL_LIST=zen.spamhaus.org=…` `SMTP_TARPIT_DELAY=2` `OUTBOUND_RATE_RECIPIENTS=200` `OUTBOUND_RATE_WINDOW=3600` `OUTBOUND_RATE_EXEMPT_USERS=` `PEER_WAIT_TIMEOUT=120` `PEER_WATCH_INTERVAL=30` `AMAVIS=amavis` `MDA=mda` `MUA=MUA` `ADMIN=admin` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `RELAY`, `ALWAYS_BCC`, `POSTMASTER_ABUSE_SETUP` (unset ⇒ off), `MAX_MESSAGESIZE`, `SPF_ENABLE`, `DNSBL_*`, `SMTP_TARPIT_DELAY` (0 ⇒ no tarpit), `OUTBOUND_RATE_*` (`OUTBOUND_RATE_RECIPIENTS=0` ⇒ no throttle), `PEER_*` |
+| mta | `POSTGRES_HOST/DB/USER` `MAX_MESSAGESIZE=34865152` `SPF_ENABLE=True` `DNSBL_ENABLE=true` `DNSBL_LIST=zen.spamhaus.org=…` `SMTP_TARPIT_DELAY=2` `OUTBOUND_RATE_RECIPIENTS=200` `OUTBOUND_RATE_WINDOW=3600` `OUTBOUND_RATE_EXEMPT_USERS=` `PEER_WAIT_TIMEOUT=120` `PEER_WATCH_INTERVAL=30` `AMAVIS=amavis` `MDA=mda` `MUA=MUA` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `RELAY`, `ALWAYS_BCC`, `POSTMASTER_ABUSE_SETUP` (unset ⇒ off), `MAX_MESSAGESIZE`, `SPF_ENABLE`, `DNSBL_*`, `SMTP_TARPIT_DELAY` (0 ⇒ no tarpit), `OUTBOUND_RATE_*` (`OUTBOUND_RATE_RECIPIENTS=0` ⇒ no throttle), `PEER_*` |
 | amavis | `POSTGRES_HOST/DB/USER` `MTA=mta` `CLAMAV=clamav` `CRON=cron` `SPAM_FILTER_ENABLED=yes` `AV_ENABLED=yes` `DKIM_SIGNING=yes` `SA_AUTOLEARN_NONSPAM=0.1` `SA_AUTOLEARN_SPAM=10` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `AV_ENABLED`, `SPAM_FILTER_ENABLED`, `DKIM_SIGNING`, `SA_*`, `JUNK_RETENTION_DAYS` |
 | cron | `POSTGRES_HOST/DB/USER` `MTA=mta` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` `OUTBOUND_ALERT_MESSAGES=150` `OUTBOUND_ALERT_IGNORE_USERS=` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `JUNK_RETENTION_DAYS`, `SA_HAM_SAMPLE_*`, `OUTBOUND_ALERT_*` (the entrypoint dumps the env into `/etc/environment`, from where the cron jobs source it) |
 | clamav | (none — both knobs unset by design) | — | `ALTERNATE_MIRROR`, `CLAMAV_DEBUG` (passed by the compose files as explicit entries) |
@@ -115,7 +115,7 @@ Password/TOTP login remains the fallback.
 ### Password hashing scheme (`PASSWORD_SCHEME`) — 2026-10 audit F-18
 
 `PASSWORD_SCHEME` (`argon2id` default, `md5crypt` legacy) is shared by the
-three catalogue writers — `admin/seed.sh` (first boot), the AdminNG `api`, and
+three catalogue writers — the `api` seeder (first boot), the AdminNG `api`, and
 the `mua` change-password driver. New hashes are Argon2id:
 `{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…` (the `{SCHEME}` prefix is required
 by Dovecot's SQL passdb; parameters are self-encoded, so any writer's output
@@ -135,13 +135,11 @@ next IMAP/POP3 login: `mda/scripts/rehash-password.sh`, wired as an
 (guarded `UPDATE … WHERE password LIKE '$1$%'`, so concurrent changes are never
 clobbered) and is skipped when `PASSWORD_SCHEME=md5crypt`.
 
-**PostfixAdmin is a deprecated, dev-only fallback and cannot verify Argon2id**
-(`crypt()` argon2id → false, no salt generator): its logins only work for
-accounts still on legacy hashes. This is accepted by design; an operator who
-needs the PostfixAdmin UI until the deadline can set `PASSWORD_SCHEME=md5crypt`
-(the existing rows keep working), at the cost of the weak scheme. Dev fixtures
-stay on MD5-CRYPT on purpose (`bootstrap-dev.sh`) to exercise the coexistence
-path.
+**The PostfixAdmin UI is retired** and cannot verify Argon2id anyway (`crypt()`
+argon2id → false, no salt generator). The catalogue is now a plain PostgreSQL
+schema owned by MailD; only the admin (`api`/AdminNG, `mua` change-password) and
+Dovecot paths touch it. Dev fixtures stay on MD5-CRYPT on purpose
+(`bootstrap-dev.sh`) to exercise the coexistence path.
 
 Debug switches (all off by default, never baked): `DEBUG` (mta alias-file
 dump), `MTA_DEBUG`, `MDA_DEBUG_INIT/AUTH/AUTH_PASSWORD/MAIL/SSL`, `MUA_DEBUG`,
@@ -165,9 +163,8 @@ docker-compose.yml       (production source of truth, derived from -dev; env_fil
   `env_file:`), tag `develop`, JSON logs, dozzle, extra debug ports.
 - `docker-compose.yml` → named volumes, `.env` (interpolation AND `env_file:`),
   tag `latest`, syslog, image `pavelmc/maild-<svc>:latest`, external `maild`
-  network, **Traefik labels** on `admin` (`mailadmin.${DEFAULT_DOMAIN}`),
-  `mua` (`webmail.${DEFAULT_DOMAIN}`) and `adminng`
-  (`adminng.${DEFAULT_DOMAIN}`).
+  network, **Traefik labels** on `mua` (`webmail.${DEFAULT_DOMAIN}`) and
+  `adminng` (`adminng.${DEFAULT_DOMAIN}`).
 - `compose-github.yml` / `compose-gitlab.yml` are **strict copies** — regenerate
   them from `docker-compose.yml` whenever it changes (only the `image:` lines
   differ).
@@ -201,11 +198,17 @@ in the operator file to enable.
 
 `AUTO_PROVISION`, `MAIL_ADMIN_PASSWORD`, `PROVISION_VERSION`, `PROVISION_WAIT_TIMEOUT`
 and `PROVISION_FORCE` are documented in `env.sample`; their defaults are baked
-in the admin/amavis/mua/mta images (see the matrix). The `admin` entrypoint is
-the seeder (leader): after `upgrade.php` it runs `admin/seed.sh`, which seeds
-the default domain + superadmin + aliases and writes the `maild_provision`
-sentinel row. `amavis`, `mua` and `mta` wait on that sentinel before their
-DB-dependent config stage. Full details: `.agents/services/provisioning.md`.
+in the api/amavis/mua/mta images (see the matrix). Two containers split the work:
+
+- `db` owns the **schema**: `db/migrations/002_postfixadmin_catalogue.sql` is the
+  PostfixAdmin catalogue DDL (a `pg_dump` snapshot of PostfixAdmin 3.3.13),
+  re-applied idempotently on every boot by `migrate.sh`;
+- `api` is the **seeder (leader)**: `app/provision.py` runs before uvicorn, seeds the
+  default domain + superadmin + mailbox + aliases and writes the `maild_provision`
+  sentinel row.
+
+`amavis`, `mua` and `mta` wait on that sentinel before their DB-dependent config
+stage. Full details: `.agents/services/provisioning.md`.
 
 ## Entrypoint pattern
 
@@ -225,11 +228,13 @@ DB-dependent config stage. Full details: `.agents/services/provisioning.md`.
 
 ## Database schema changes
 
-1. Never `ALTER` the PostfixAdmin core tables casually — write a migration
-   script under `db/` and run it from the db entrypoint chain (the
-   `ensure_databases.sh` slot is for *new* databases only).
+1. Never `ALTER` the catalogue tables casually — write a migration script under
+   `db/migrations/` (applied by `migrate.sh` from the db entrypoint chain; the
+   `ensure_databases.sh` slot is for *new* databases only). `002_postfixadmin_catalogue.sql`
+   is a **snapshot** of the PostfixAdmin schema: a future upstream version needs a new
+   migration with guarded `ALTER`s, never an edit of that file.
 2. Test against a disposable dev stack: `down` → `rm -rf ldata/` → bootstrap →
    verify.
-3. Remember both consumers: PostfixAdmin (admin UI) and the services' SQL
-   lookups (Dovecot/Postfix/Amavis queries).
+3. Remember every consumer: Postfix/Dovecot/Amavis SQL lookups, the AdminNG API and
+   `bootstrap-dev.sh`'s column preflight.
 4. Bump/document in `Changelog.md`.

@@ -14,7 +14,7 @@ compose network.
                         ▲                                     │                               │
                         │                              clamav :3310                    Maildir /home/vmail
                         │                                     ▲                               │
-                        └── admin :8080 / mua :8081 / db :5432 ┴─── bayes db (ldata/spamassassin)
+                        └── adminng :8083 / mua :8081 / db :5432 ┴─── bayes db (ldata/spamassassin)
 ```
 
 - **Inbound:** Postfix → amavis (content filter, port 10024) → back to Postfix → LMTP to
@@ -45,7 +45,8 @@ compose network.
 | `amavis` | `pavelmc/maild-amavis:develop` | content filter (spam/AV/DKIM) | 10024 | db |
 | `mda` | `pavelmc/maild-mda:develop` | Dovecot IMAP/POP3/Sieve | 110, 143, 993, 995, 4190, 12345 | db |
 | `mta` | `pavelmc/maild-mta:develop` | Postfix SMTP | 25, 465, 587 | db, mda, amavis, clamav |
-| `admin` | `pavelmc/maild-admin:develop` | PostfixAdmin UI | 8080 | db |
+| `adminng` | `pavelmc/maild-adminng:develop` | AdminNG PWA + `/api/v1/` proxy | 8083 (HTTP), 8084 (HTTPS, dev) | api |
+| `api` | `pavelmc/maild-api:develop` | AdminNG API + first-boot seeder | — (internal) | db |
 | `mua` | `pavelmc/maild-mua:develop` | SnappyMail webmail | 8081 | mda |
 | `cron` | `pavelmc/maild-cron:develop` | maintenance jobs | — | db |
 | `dozzle` | `amir20/dozzle:latest` | live log viewer (dev only) | 8082 | — |
@@ -56,7 +57,7 @@ compose network.
 - `depends_on` is a **start order**, not a readiness wait — `bootstrap-dev.sh` does the
   real bounded waiting (Postgres, PostfixAdmin schema, web UIs, ClamAV signatures).
 - Production images are `pavelmc/maild-<svc>:latest` (Docker Hub), `ghcr.io/stdevpavelmc/maild-<svc>:latest`
-  (GitHub) or `${IMG_<SVC>}:${TAG}` (GitLab). The web UIs (`admin`, `mua`) are exposed via
+  (GitHub) or `${IMG_<SVC>}:${TAG}` (GitLab). The web UIs (`mua`, `adminng`) are exposed via
   Traefik labels and fronted by an external ingress that terminates TLS — the stack ships none.
 
 ## Startup order
@@ -67,14 +68,15 @@ compose network.
 3. `amavis` (needs db; effectively needs clamav too).
 4. `mda` (needs db).
 5. `mta` (needs mda + amavis + clamav) — last, it hard-depends on its peers.
-6. `admin`, `mua`, `cron` — after db; the admin container creates the PostfixAdmin schema
-   on boot, which is why bootstrap waits for it.
+6. `api`, `adminng`, `mua`, `cron` — after db; the `api` container seeds the catalogue on
+   boot (and `db` creates its schema), which is why bootstrap waits for the schema first.
 
-First-boot provisioning rides on this order: the `db` entrypoint applies the `maild_provision`
-sentinel migration, the `admin` entrypoint seeds the default domain + superadmin + aliases and
-writes the sentinel, and `amavis` / `mua` / `mta` block (bounded) on that sentinel **before**
-their DB-dependent config stage (`AUTO_PROVISION`, default on). See
-`.agents/services/provisioning.md`.
+First-boot provisioning rides on this order: the `db` entrypoint applies
+`db/migrations/001_maild_provision.sql` (the sentinel table) and
+`002_postfixadmin_catalogue.sql` (the catalogue schema), the `api` seeder then writes the
+default domain + superadmin + aliases and the sentinel row, and `amavis` / `mua` / `mta`
+block (bounded) on that sentinel **before** their DB-dependent config stage
+(`AUTO_PROVISION`, default on). See `.agents/services/provisioning.md`.
 
 ## Data layout on the host (dev bind mounts)
 
@@ -104,13 +106,14 @@ their DB-dependent config stage (`AUTO_PROVISION`, default on). See
 | amavis | `/docker-entrypoint.sh` → `amavisd` (`CMD amavis`) | `/check.sh` |
 | mda | `/docker-entrypoint.sh` → `dovecot` | `/check.sh` |
 | mta | `/docker-entrypoint.sh` → `postfix` | `/check.sh` |
-| admin | `/docker-entrypoint.sh` → `apache2-foreground` | `curl -f http://localhost/` |
+| api | `/app/entrypoint.sh` → `python -m app.bootstrap` → `uvicorn app.main:app` | HTTP `GET /health` |
+| adminng | stock nginx entrypoint → `nginx -g daemon off` | busybox `wget -q -O /dev/null http://127.0.0.1/` |
 | mua | `/docker-entrypoint.sh` → apache (base image default) | `curl -f http://localhost/` |
 | cron | `/docker-entrypoint.sh` → `cron -f -L 2` | none |
 
 The `amavis`, `mua` and `mta` entrypoints additionally gate on the `maild_provision` sentinel
-before their DB-dependent config stage; the `admin` entrypoint runs `admin/seed.sh` after its
-schema step to create the sentinel. See `.agents/services/provisioning.md`.
+before their DB-dependent config stage; the `api` bootstrap (`app/provision.py`) seeds the
+catalogue and writes it. See `.agents/services/provisioning.md`.
 
 ## Cron schedule (cron/crontab, UTC)
 
@@ -130,8 +133,9 @@ SpamAssassin rule updates run on the amavis container (`amavis/sa-update-loop.sh
 
 - Hostnames, schema, env var names and volume mount points are immutable — see
   `AGENTS.md → Core principles` and `.agents/services/configuration.md`.
-- The admin container emits an OTP setup password on every boot
-  (`POSTFIXADMIN_SETUP_PASSWORD` from env is ignored by the dev entrypoint).
+- The `api` container is the only service that writes catalogue rows at boot (the seeder)
+  and can only do so because `db` created the schema first; `MAIL_ADMIN_PASSWORD` left
+  empty is generated and printed OTP-style in `docker compose logs api`.
 - SnappyMail is baked into the mua image at `/var/www/html`; only `/var/www/html/data`
   may be bind-mounted (mounting over the app dir hides it: Apache 403 and the entrypoint
   waits forever for `admin_password.txt`).

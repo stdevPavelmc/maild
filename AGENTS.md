@@ -2,7 +2,7 @@
 
 MailD is a Docker-based complete mail server (derived from MailAD) that replaces the LDAP
 backend with **PostgreSQL**: Postfix (SMTP), Dovecot (IMAP/POP3/Sieve), Amavis + ClamAV
-(content filtering), PostfixAdmin (web admin), SnappyMail (webmail) and a cron container
+(content filtering), AdminNG (web admin PWA + API), SnappyMail (webmail) and a cron container
 for maintenance jobs.
 
 ## Quick Reference
@@ -14,9 +14,8 @@ for maintenance jobs.
 | `mda`    | Dovecot — IMAP/POP3/Sieve, mail delivery          | 110, 143, 993, 995, 4190  |
 | `amavis` | Content filter (spam + AV relay, DKIM signing)    | 10024                     |
 | `clamav` | ClamAV antivirus engine                           | 3310                      |
-| `admin`  | PostfixAdmin web admin UI                         | 8080                      |
 | `mua`    | SnappyMail webmail                                | 8081                      |
-| `api`    | AdminNG API — FastAPI over the catalogue (internal only) | —                  |
+| `api`    | AdminNG API — FastAPI over the catalogue; first-boot provisioning leader (internal only) | —  |
 | `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083 (HTTP), 8084 (HTTPS, dev) |
 | `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
 | `cron`   | Scheduled jobs: db backup, traffic resume, SA…    | —                         |
@@ -24,7 +23,7 @@ for maintenance jobs.
 
 ## Core Principles — never break these
 
-- **Never rename service hostnames** (`db`, `mta`, `mda`, `amavis`, `clamav`, `admin`,
+- **Never rename service hostnames** (`db`, `mta`, `mda`, `amavis`, `clamav`,
   `mua`, `cron`, `api`, `adminng`) — they are hardcoded across entrypoints,
   Postfix/Dovecot/Amavis config and the test suite.
 - **Never change the database schema** without a migration script. `db/ensure_databases.sh`
@@ -36,15 +35,17 @@ for maintenance jobs.
 - **Never commit secrets.** `.env`, `test.creds`, `ldata/`, `*.log` and `.local/` are
   git-ignored; `env.dev` carries *fake* committed dev secrets on purpose. Warn the user if
   real passwords/certs are about to be committed.
-- **First-boot provisioning is sentinel-driven.** `admin/seed.sh` seeds the catalogue and
-  writes the `maild_provision` row; `amavis`/`mua`/`mta` wait on it before their config
-  stage (no manual `setup.php`, no stack restart). Keep the seeder idempotent and
-  non-destructive, and keep `AUTO_PROVISION=no` working as the manual fallback.
+- **First-boot provisioning is sentinel-driven.** `db/migrations/002_postfixadmin_catalogue.sql`
+  owns the catalogue schema and `adminng/api/app/provision.py` (run at `api` boot) seeds
+  `DEFAULT_DOMAIN`, the superadmin + mailbox and the default aliases, then writes the
+  `maild_provision` row; `amavis`/`mua`/`mta` wait on it before their config stage (no
+  manual setup, no stack restart). Keep the seeder idempotent and non-destructive, and keep
+  `AUTO_PROVISION=no` + `adminng.py --provision` working as the manual fallback.
 - **Password hashes are Argon2id by default** (`PASSWORD_SCHEME=argon2id`; the shared writers
-  are `admin/seed.sh`, the AdminNG API and the mua change-password driver). Legacy md5crypt
+  are the `api` seeder, the AdminNG API and the mua change-password driver). Legacy md5crypt
   `$1$` hashes coexist and migrate on password change or rehash-on-login, but **weak-scheme
   support is removed on 2027-02-01** (date-gated at runtime) — never add a new md5crypt-only
-  path. PostfixAdmin cannot verify Argon2id; it is a deprecated dev-only fallback.
+  path.
   Details: `.agents/services/configuration.md`.
 - **Compose file chain.** `docker-compose-dev.yml` is the development source of truth;
   every *perdurable* change must be mirrored into `docker-compose.yml` (the **production
@@ -54,8 +55,8 @@ for maintenance jobs.
   `.gitlab-ci.yml`). `compose-dockerhub.yml` no longer exists: `docker-compose.yml` *is* the
   Docker Hub file. Images are always named `maild-<svc>:<tag>`; `dozzle` and `pwa-test`
   are dev-only.
-- **Production HTTP is proxied.** `admin` (`mailadmin.${DEFAULT_DOMAIN}`) and `mua`
-  (`webmail.${DEFAULT_DOMAIN}`) carry Traefik labels on every production compose file, and
+- **Production HTTP is proxied.** `mua` (`webmail.${DEFAULT_DOMAIN}`) and `adminng`
+  (`adminng.${DEFAULT_DOMAIN}`) carry Traefik labels on every production compose file, and
   the stack terminates **no** TLS for them. The operator must supply an ingress controller
   that terminates TLS (Traefik, Nginx, …) and joins the external `maild` network.
 - **MTA & MDA ports** all MTA ports [25, 465, 587] are exposed to the production
@@ -88,7 +89,7 @@ cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also 
 ```
 
 - `bootstrap-dev.sh` provisions: `ldata/` dirs, self-signed certs, and the test fixtures —
-  `DEFAULT_DOMAIN` (`sysadmin@<domain>`, the PostfixAdmin superadmin) plus `example.net`
+  `DEFAULT_DOMAIN` (`sysadmin@<domain>`, the catalogue superadmin) plus `example.net`
   (`alice`, `bob`, `charlie`, `dylan`, `alice` as domain admin, default aliases), a quota
   fixture on `bob@`, and `test.creds` (mode 0600, git-ignored) with every password.
   Idempotent; refuses to run against a stack built with different secrets.

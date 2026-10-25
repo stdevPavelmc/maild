@@ -34,8 +34,8 @@ permissions:
 env:
   COMPOSE_FILE: docker-compose-dev.yml
   ENV_FILE: env.dev
-  # MailD service set (the 10 locally-built images; dozzle is dev-only/external)
-  SERVICES: db admin api adminng mua mda mta clamav amavis cron
+  # MailD service set (the 9 locally-built images; dozzle is dev-only/external)
+  SERVICES: db api adminng mua mda mta clamav amavis cron
   # Docker Hub namespace and the GitHub owner for ghcr.io
   DOCKERHUB_NAMESPACE: pavelmc
   GHCR_NAMESPACE: ghcr.io/stdevpavelmc
@@ -91,7 +91,7 @@ jobs:
           # compose-gitlab.yml interpolates ${IMG_*}:${TAG} (defined only in .gitlab-ci.yml),
           # so export harmless placeholders just to parse it.
           export IMG_DB="img/maild-db" IMG_MTA="img/maild-mta" IMG_MDA="img/maild-mda" \
-                 IMG_MUA="img/maild-mua" IMG_ADMIN="img/maild-admin" IMG_CLAMAV="img/maild-clamav" \
+                 IMG_MUA="img/maild-mua" IMG_CLAMAV="img/maild-clamav" \
                  IMG_AMAVIS="img/maild-amavis" IMG_CRON="img/maild-cron" \
                  IMG_API="img/maild-api" IMG_ADMINNG="img/maild-adminng" TAG="ci"
           for f in docker-compose-dev.yml docker-compose.yml compose-github.yml compose-gitlab.yml; do

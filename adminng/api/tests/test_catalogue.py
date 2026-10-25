@@ -83,6 +83,9 @@ class CatalogueTests(unittest.TestCase):
                 "transport": "virtual",
                 "backupmx": False,
                 "active": True,
+                # the alias/counter assertions below count only what they create;
+                # the default-alias behaviour has its own test (test_10)
+                "default_aliases": False,
             },
         )
 
@@ -284,6 +287,62 @@ class CatalogueTests(unittest.TestCase):
             for table in ("mailbox", "alias", "domain_admins", "domain"):
                 cur.execute(f"SELECT count(*) AS n FROM {table} WHERE domain = %s", (DOMAIN,))
                 self.assertEqual(cur.fetchone()["n"], 0, table)
+
+
+    def test_10_default_aliases_on_create(self):
+        """A new domain gets PostfixAdmin's four default aliases; opt-out is honoured."""
+        new_domain = "defaults.adminng-selftest.test"
+        quiet_domain = "quiet.adminng-selftest.test"
+        try:
+            created = catalogue.create_domain(
+                SUPER,
+                {
+                    "domain": new_domain,
+                    "description": "Default aliases test",
+                    "maxquota": 0,
+                    "quota": 0,
+                    "transport": "virtual",
+                    "backupmx": False,
+                    "active": True,
+                },
+            )
+            self.assertEqual(created["aliases"], len(catalogue.DEFAULT_ALIASES))
+            aliases = catalogue.list_aliases(SUPER, new_domain, None, None, 50, None)[
+                "items"
+            ]
+            self.assertEqual(
+                sorted(row["address"] for row in aliases),
+                sorted(f"{part}@{new_domain}" for part in catalogue.DEFAULT_ALIASES),
+            )
+            self.assertTrue(all(row["goto"] == SUPER.username for row in aliases))
+
+            quiet = catalogue.create_domain(
+                SUPER,
+                {
+                    "domain": quiet_domain,
+                    "description": "No default aliases",
+                    "maxquota": 0,
+                    "quota": 0,
+                    "transport": "virtual",
+                    "backupmx": False,
+                    "active": True,
+                    "default_aliases": False,
+                },
+            )
+            self.assertEqual(quiet["aliases"], 0)
+            self.assertEqual(
+                catalogue.list_aliases(SUPER, quiet_domain, None, None, 50, None)["items"],
+                [],
+            )
+        finally:
+            for dom in (new_domain, quiet_domain):
+                with connect() as conn, conn.cursor() as cur:
+                    cur.execute("DELETE FROM alias WHERE domain = %s", (dom,))
+                    conn.commit()
+                try:
+                    catalogue.delete_domain(SUPER, dom)
+                except ApiError:
+                    pass
 
 
 if __name__ == "__main__":

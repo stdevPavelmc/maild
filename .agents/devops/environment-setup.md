@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker + compose v2; bash; openssl; curl; git.
-- Free host ports: 25, 110, 143, 465, 587, 993, 995, 4190, 5432, 8080, 8081, 8082, 12345.
+- Free host ports: 25, 110, 143, 465, 587, 993, 995, 4190, 5432, 8081, 8082, 8083, 8084, 12345.
 - A local `swaks` binary is handy: `.local/bin/swaks` (git-ignored dir).
 
 ## Quick start (one command)
@@ -21,11 +21,11 @@ Re-run any time; `--help` lists all options.
 | Option | Effect |
 |--------|--------|
 | `--no-start` | assume the stack is already up, never call `up` |
-| `--skip-verify` | skip IMAP + web-login verification |
+| `--skip-verify` | skip the IMAP + admin-row verification |
 | `--skip-clamav-wait` | do not wait for the first ~230 MB signature download |
-| `--skip-default-domain` | only provision the test domain (`example.net`) |
+| `--skip-default-domain` | only provision the test domain (`example.net`); exports `AUTO_PROVISION=no` for that run |
 | `--domain` / `--users` | override the test domain / mailboxes (default `example.net`, `alice,bob,charlie,dylan`) |
-| `--superadmin` | also make the test-domain admin a PostfixAdmin superadmin |
+| `--superadmin` | also make the test-domain admin a catalogue superadmin |
 | `--rotate-creds` | new passwords even if `test.creds` exists |
 | `--creds <file>` | different credentials file |
 
@@ -42,18 +42,20 @@ docker compose --env-file env.dev -f docker-compose-dev.yml up -d
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f
 ```
 
-PostfixAdmin setup (fresh stacks): the dev stack shares production's default
-`AUTO_PROVISION=yes`, so the `admin` container seeds `sysadmin@DEFAULT_DOMAIN` by itself on the
-first boot (watch `docker compose logs admin`); `bootstrap-dev.sh` then re-asserts the
-`test.creds` passwords. The classic OTP + `http://localhost:8080/setup.php` path is still there
-when you set `AUTO_PROVISION=no`.
+First-boot provisioning (fresh stacks): the dev stack shares production's default
+`AUTO_PROVISION=yes`, so the `db` container creates the catalogue schema and the `api`
+container seeds `sysadmin@DEFAULT_DOMAIN` by itself on the first boot (watch
+`docker compose logs api`); `bootstrap-dev.sh` then re-asserts the `test.creds` passwords.
+It seeds **only** `DEFAULT_DOMAIN` + the sentinel row (`maild_provision`, which `mta`/`mda`/
+`amavis`/`mua` gate on) — the `example.net` fixtures, the vmail homes, the SnappyMail domain
+configs and `test.creds` come from `bootstrap-dev.sh`. For a hand-seeded stack set
+`AUTO_PROVISION=no` and run `docker compose exec api adminng.py --provision`.
 
 ## Access points (dev)
 
 | Service | URL / address |
 |---------|---------------|
 | Webmail (mua) | http://localhost:8081 |
-| Admin (PostfixAdmin) | http://localhost:8080 |
 | AdminNG PWA | http://localhost:8083 |
 | AdminNG PWA (TLS, dev) | https://localhost:8084 — LAN: `https://<lan-ip>:8084`; import `ldata/certs/adminng-ca.der` on the device first |
 | Log viewer (dozzle) | http://localhost:8082 |
@@ -65,9 +67,10 @@ when you set `AUTO_PROVISION=no`.
 ## Fixtures
 
 `test.creds` (mode 0600, git-ignored) holds the password of every provisioned mailbox:
-`sysadmin@<DEFAULT_DOMAIN>` (PostfixAdmin superadmin), `alice|bob|charlie|dylan@example.net`
+`sysadmin@<DEFAULT_DOMAIN>` (catalogue superadmin), `alice|bob|charlie|dylan@example.net`
 (alice is the domain admin of example.net; bob carries the 5 MB quota fixture). The same
-password works over IMAP/SMTP and the PostfixAdmin UI (md5crypt `$1$…`).
+password works over IMAP/SMTP and in AdminNG (the dev fixtures stay on md5crypt `$1$…` on
+purpose; the AdminNG API verifies legacy hashes until the 2027-02-01 removal).
 
 ## Dev vs production
 

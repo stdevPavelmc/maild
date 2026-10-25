@@ -4,7 +4,7 @@
 **Sources:** consolidates and enriches the original Spanish drafts
 (`especificacion-tecnica-uiux-mailserver.md`, `guia-complementaria-api-pwa(1).md`),
 grounded in the MailD codebase rules (`AGENTS.md`, `.agents/services/*.md`,
-`admin/seed.sh`, `cron/scripts/backup_db.sh`).
+`admin/seed.sh` — retired 2026-10-24, `cron/scripts/backup_db.sh`).
 
 AdminNG is the next-generation administration interface for MailD: a modern,
 simpler, PWA-first replacement for the PostfixAdmin UI — usable from any browser
@@ -14,9 +14,10 @@ model, two-step authentication and a full audit trail.
 
 **Companion documents:** [plan.md](plan.md) (phased roadmap) ·
 [../README.md](../README.md) (device authorization how-to). The PostfixAdmin
-`admin` service **stays** as the fallback UI and the first-boot provisioning
-leader (schema via `public/upgrade.php`, sentinel + fixtures via `seed.sh`);
-AdminNG deprecates it only later, by explicit decision (plan.md, Phase 5).
+`admin` service was **retired** (2026-10-24, plan.md Phase 5): the catalogue schema is now
+`db/migrations/002_postfixadmin_catalogue.sql` and the first-boot seeder is
+`adminng/api/app/provision.py`, so AdminNG is the only administration surface. This
+document keeps the original wording where it describes the *history* of the migration.
 
 ## 1. Overview & design goals
 
@@ -35,11 +36,11 @@ AdminNG deprecates it only later, by explicit decision (plan.md, Phase 5).
    proper enrollment flow on first login.
 5. **Full audit trail** — every mutation logged, with domain-scoped visibility.
 6. **Compatible by construction** — writes rows exactly like PostfixAdmin /
-   `admin/seed.sh` do today: no DDL on the catalogue, the same Argon2id password
+   `admin/seed.sh` did: no DDL on the catalogue, the same Argon2id password
    scheme (md5crypt accepted as legacy until 2027-02-01, §3.1), same
    `maildir`/quota formats — so Postfix, Dovecot and Amavis keep working
-   unchanged. PostfixAdmin remains a dev-only fallback (it cannot verify
-   Argon2id).
+   unchanged. PostfixAdmin is retired (its schema is now MailD's
+   `db/migrations/002_postfixadmin_catalogue.sql`).
 7. **i18n from day one** — English source language with a complete Spanish
    translation, auto-detected, user-overridable.
 
@@ -173,7 +174,7 @@ Two databases on the same server, two very different contracts:
 
 ### 3.1 The legacy catalogue — write-compatibility rules (non-negotiable)
 
-Everything here is what `admin/seed.sh`, `POSTFIXADMIN_ENCRYPT=md5crypt` and the
+Everything here is what the retired `admin/seed.sh`, `POSTFIXADMIN_ENCRYPT=md5crypt` and the
 Dovecot/Postfix/Amavis SQL consumers already rely on. A row written by AdminNG
 must be indistinguishable from a row written by PostfixAdmin:
 
@@ -184,14 +185,13 @@ must be indistinguishable from a row written by PostfixAdmin:
   `$1$<8-char-salt>$<22-char-checksum>` (md5crypt) hashes remain legal and may
   mix freely in the same column: Dovecot verifies them through
   `default_password_scheme = MD5-CRYPT` (enabled by `auth_allow_weak_schemes`).
-  The writers (`admin/seed.sh`, this API's `app/passwords.py`, the webmail
+  The writers (this API's `app/provision.py` + `app/passwords.py`, the webmail
   change-password driver) follow `PASSWORD_SCHEME` (`argon2id` default,
   `md5crypt` escape hatch). **Weak-scheme support is removed on 2027-02-01**:
   from that date the API refuses `PASSWORD_SCHEME=md5crypt`, the mda sets
   `auth_allow_weak_schemes = no`, and legacy `$1$` rows stop authenticating
   (rehash-on-login and password changes migrate them before then;
-  `adminng.py --legacy-hashes` lists the stragglers). PostfixAdmin cannot
-  verify Argon2id — it is a deprecated, dev-only fallback, accepted by design.
+  `adminng.py --legacy-hashes` lists the stragglers).
 - **`mailbox` row:** `username` (full email, PK), `password` (Argon2id, or
   legacy md5crypt during the window), `name`,
   `maildir = '<domain>/<local_part>/'` (**trailing slash**), `quota` in
@@ -206,7 +206,7 @@ must be indistinguishable from a row written by PostfixAdmin:
   §6.3, edits these rows in place).
 - **`admin` row:** `username` (full email), `password` (Argon2id/legacy md5crypt
   per the scheme above — same value as the matching `mailbox` row where it
-  exists; that is the MailD convention from `seed.sh`), `superadmin`, `active`;
+  exists; that is the MailD convention the seeder keeps), `superadmin`, `active`;
   per-domain scope via `domain_admins` (`username`, `domain`, `active`).
 - **Dovecot auth-cache caveat, carried over:** after a password change,
   Dovecot's auth cache (`auth_cache_ttl`, 1 minute in MailD) may still accept
@@ -684,11 +684,10 @@ Every phase must respect these MailD core principles:
 ## 11. Risks & open questions (for the review)
 
 1. **Password scheme — addressed (2026-10 audit F-18).** Argon2id is now the
-   default writer scheme across `seed.sh`, the API and the webmail driver, with
+   default writer scheme across the api seeder, the API and the webmail driver, with
    legacy md5crypt `$1$` coexistence (Dovecot `default_password_scheme` +
    `auth_allow_weak_schemes`) and rehash-on-login. The weak-scheme window is
-   enforced and ends **2027-02-01**; see §3.1. Remaining open point: PostfixAdmin
-   (deprecated dev-only fallback) cannot verify Argon2id — accepted by design.
+   enforced and ends **2027-02-01**; see §3.1.
 2. **Feature gap vs PostfixAdmin:** vacation, fetchmail, welcome/vacation
    templates, backup/restore UI and the setup-OTP flow are **not** in AdminNG
    v1; PostfixAdmin stays as fallback. The Phase 5 decision must scope them in

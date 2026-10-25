@@ -25,7 +25,7 @@ myorigin = $myhostname
 relayhost = _RELAY_
 
 # safe nets, local and amavis only
-mynetworks = 127.0.0.0/8, _ADMINIP_, _AMAVISIP_
+mynetworks = 127.0.0.0/8, _AMAVISIP_
 
 # only IPv4
 inet_protocols = ipv4

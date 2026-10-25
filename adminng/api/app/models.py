@@ -46,10 +46,14 @@ class DomainCreate(BaseModel):
     domain: str
     description: str = ""
     maxquota: int = Field(default=0, ge=0)
+    # Reserved for a future quota default; the catalogue stores it as given.
     quota: int = Field(default=0, ge=0)
     transport: str = "virtual"
     backupmx: bool = False
     active: bool = True
+    # PostfixAdmin created postmaster/abuse/hostmaster/webmaster with every domain
+    # (its $CONF['default_aliases']); keep that behaviour, but let the caller opt out.
+    default_aliases: bool = True
 
     @field_validator("domain")
     @classmethod

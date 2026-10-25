@@ -6,7 +6,7 @@ This is the docker version with a DB as a backend instead of a domain controler 
 
 ## Getting started
 
-The stack **provisions itself on the first boot** — no `/setup.php`, no manual domain
+The stack **provisions itself on the first boot** — no setup wizard, no manual domain
 creation, no down/up cycle. Full, automated walk-through: **[INSTALL.md](./INSTALL.md)**.
 
 TL;DR:
@@ -22,15 +22,16 @@ TL;DR:
    - **GitLab (own registry, with the shipped `.gitlab-ci.yml`):**
      `docker compose -f compose-gitlab.yml up -d`
 
-3. Wait for `seed: catalogue provisioned: ...` in `docker compose logs -f admin`, then log in
-   to PostfixAdmin as `MAIL_ADMIN_USER@DEFAULT_DOMAIN` and create your users.
+3. Wait for `api: INFO - catalogue provisioned: ...` in `docker compose logs -f api`, then
+   open AdminNG as `MAIL_ADMIN_USER@DEFAULT_DOMAIN` and create your users.
 
-The webmail (`webmail.<DEFAULT_DOMAIN>`) and admin (`mailadmin.<DEFAULT_DOMAIN>`) UIs are
+The webmail (`webmail.<DEFAULT_DOMAIN>`) and AdminNG (`adminng.<DEFAULT_DOMAIN>`) UIs are
 **not** published directly on production: front them with a reverse proxy / ingress
 controller that terminates TLS (Traefik, Nginx, …) on the external `maild` network. The
 stack ships **no** TLS for the web UIs.
 
-Prefer the classic manual setup (OTP + `/setup.php`)? Set `AUTO_PROVISION=no` in `.env`.
+Prefer to seed by hand? Set `AUTO_PROVISION=no` in `.env` and run
+`docker compose exec api adminng.py --provision` once the stack is up.
 
 ## Services
 
@@ -41,7 +42,7 @@ To create a realy dynamic setup we split the mail server in services:
 - [**AMAVIS** (Advanced filtering)](./amavis), it comprises attachments, anti-virus, anti-spam, etc.
 - [**ClamAV**](./clamav/) AV scanning solution
 - **Postgres DB** this is the database lo hold the users data.
-- [**PostfixAdmin**](./admin/) This is a simple Web Management interface
+- [**AdminNG**](./adminng/) The administration UI: PWA frontend (`adminng`) + FastAPI (`api`) over the catalogue
 - [**MUA**](./mua/) This is the mail user agent, aka: Webmail provided by [Snappy Mail]()
 - [**Cron**](./cron/) This has to deal with scheduled tasks, backups, cleanups, statistics, etc.
 
@@ -156,8 +157,9 @@ mandatory TOTP for superadmins and a full audit trail:
 - **New mandatory variable:** `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption,
   `openssl rand -hex 32`). Rotating it invalidates sessions and enrolled TOTP seeds.
 - Design and roadmap: `adminng/doc/technical-draft.md` and `adminng/doc/plan.md`;
-  operator how-to: `adminng/README.md`. PostfixAdmin (`mailadmin.<domain>`) stays as the
-  fallback UI.
+  operator how-to: `adminng/README.md`. PostfixAdmin was retired with the `admin` service:
+  AdminNG is the only web administration UI, and MailD now owns the catalogue schema
+  (`db/migrations/002_postfixadmin_catalogue.sql`).
 
 # Contributing.
 

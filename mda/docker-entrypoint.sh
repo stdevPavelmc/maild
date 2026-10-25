@@ -58,7 +58,8 @@ if [ ! -f /etc/dovecot/configured ]; then
     echo "Sieve compilation done"
 
     # NOTE: the imapsieve learning scripts are compiled lazily by dovecot
-    # on their first use, no need to sieve them here
+    # on their first use, no need to sieve them here; they cache their binary
+    # in /var/lib/dovecot/sieve/imapsieve (bin_path in 90-imapsieve.conf)
 
     # Run the configuration
     echo "Config starting"
@@ -123,7 +124,7 @@ if [ "$1" = 'dovecot' ]; then
     # Weak-scheme (md5crypt) support is a timed coexistence window: it ends on
     # 2027-02-01. Until then legacy raw $1$ hashes keep verifying (see 10-auth.conf);
     # new hashes are Argon2id ({ARGON2ID} prefix, written by the AdminNG API, the
-    # webmail change-password driver and seed.sh). This gate runs on EVERY boot
+    # webmail change-password driver and the api seeder). This gate runs on EVERY boot
     # (configure.sh only runs on first boot) so the deadline is honored by running
     # containers after a restart, not only by fresh deployments. From the date,
     # auth_allow_weak_schemes goes back to 'no' and legacy mailboxes stop

@@ -503,7 +503,7 @@ export const api = {
 
   listDomains: (q?: string, cursor?: string) =>
     request<Page<Domain>>(`/domains${qs({ q, cursor })}`),
-  createDomain: (body: { domain: string; description?: string }) =>
+  createDomain: (body: { domain: string; description?: string; default_aliases?: boolean }) =>
     request<Domain & { advisories: { code: string; message: string }[] }>('/domains', {
       method: 'POST',
       body,

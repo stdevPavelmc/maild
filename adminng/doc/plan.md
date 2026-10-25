@@ -416,11 +416,11 @@ Tasks:
    (CLI), `README.md`, `.agents/services/catalog.md` +
    `.agents/services/configuration.md` + `.agents/devops/workflows.md`,
    `env.sample` complete, `Changelog.md`.
-5. **The deprecation decision (explicit, with data):** PostfixAdmin still owns
-   vacation, fetchmail, welcome/vacation templates, backup/restore UI,
-   `POSTFIXADMIN_SETUP_PASSWORD` OTP flow. Decide per feature: port to AdminNG,
-   declare dead, or keep PostfixAdmin as the permanent escape hatch — then
-   update this plan with the Phase 6 that implements the decision.
+5. **The deprecation decision (explicit, with data):** PostfixAdmin owned
+   vacation, fetchmail, welcome/vacation templates, backup/restore UI and the
+   `POSTFIXADMIN_SETUP_PASSWORD` OTP flow. The decision (taken 2026-10-24) was full removal:
+   the catalogue schema moved to `db/migrations/002_postfixadmin_catalogue.sql` and the
+   first-boot seeder to `adminng/api/app/provision.py`.
 
 **Done when:** the audit findings are triaged and fixed; the full `./test.sh`
 suite (existing + AdminNG checks) is green on a fresh
@@ -501,7 +501,7 @@ is recorded and its follow-up plan exists.
 | 2 | Security pass | **finished** | CSP + Permissions-Policy added in nginx; no CORS (same origin); HttpOnly-free but short-lived JWTs + rotating refresh; lockout; secrets never baked; vmail mounted read-only; `FORBIDDEN_TENANT` everywhere; audit trail. |
 | 3 | `test.sh` consolidation | **validated** | **71 checks**; **71 passed / 0 failed / 0 skipped** on a fresh `down` → `rm -rf ldata/` → `bootstrap-dev.sh` cycle (2026-10-17), with the browser suite 5/5 + Lighthouse in budget on the same cycle; 41 API unit/integration tests passed. The cycle caught a real fresh-tree bug — docker auto-created the missing `ldata/` bind parent root-owned, so the bootstrap died at `mkdir ldata/certs`; `bootstrap-dev.sh` now creates `ldata/` as the invoking user first |
 | 4 | Docs final pass | **finished** | README + INSTALL AdminNG sections, `.agents/*`, `Changelog.md`, `adminng/README.md`, plan/technical draft. |
-| 5 | PostfixAdmin deprecation decision | **decided** | **PostfixAdmin stays** installed as the escape hatch, but each feature now has an explicit port/dead/keep call in the table below. AdminNG is the primary UI for domains/accounts/aliases/admins/devices/logs. |
+| 5 | PostfixAdmin deprecation decision | **decided + implemented** | **PostfixAdmin removed** (2026-10-24): the `admin` service/image/CI jobs/ingress route are gone; its schema duty moved to `db/migrations/002_postfixadmin_catalogue.sql` and its first-boot seeder to `adminng/api/app/provision.py`. Each feature keeps its explicit port/dead/keep call in the table below. AdminNG is the only UI for domains/accounts/aliases/admins/devices/logs. |
 
 **Phase 5 follow-ups (explicitly open):** the APK CI first run with the operator keystore
 (operator-side: repository secrets + a release). Closed here: WebAuthn/passkeys, browser E2E +
@@ -576,14 +576,16 @@ existing replacement in this repository.
 | 3 | Fetchmail integration | `admin` (`fetchmail` table) + cron | **Declare dead** (revisit only on operator request) | Upstream fetchmail is maintenance-only and most providers require OAuth2; a modern replacement is a different feature, not a port. Document the decision so nobody assumes parity |
 | 4 | Welcome / vacation mail templates | `admin` config keys | **Declare dead → fixed templates + docs** | AdminNG never sends welcome mail (only `bootstrap-dev.sh`/seeding creates mailboxes). Keep the templates as documentation, drop the editable UI |
 | 5 | Backup / restore UI | `admin` dump/restore pages | **Declare dead** | `cron/scripts/backup_db.sh` produces validated dumps of both databases with retention, and `db_upgrade.md` documents restore. A web restore button is a destructive surface with no operational need |
-| 6 | Setup OTP (`POSTFIXADMIN_SETUP_PASSWORD`) | `admin` entrypoint | **Declare dead** | The admin entrypoint generates and prints its own OTP per boot; AdminNG bootstraps devices through the audited `adminng.py` CLI. The variable is already ignored by the entrypoint |
+| 6 | Setup OTP (`POSTFIXADMIN_SETUP_PASSWORD`) | `admin` entrypoint | **Removed** | The per-boot OTP and `/setup.php` retired with the service; the manual path is now `docker compose exec api adminng.py --provision` |
 | 7 | Password scheme (md5crypt) | catalogue (`mailbox.password`) | **Keep for v1; separate stack-wide migration** | PostfixAdmin, Dovecot and AdminNG must switch schemes together (ARGON2/BLF-CRYPT). Tracked in §11.1; out of scope for the deprecation itself |
 | 8 | Alias domains | PostfixAdmin `alias_domain` table + Postfix PostgreSQL maps | **Ported (Phase 6.2)** | AdminNG CRUD is tenant-scoped on both endpoints; Postfix rewrites alias-domain recipients to the target while preserving the local part, with inactive aliases refused. |
 
-**Consequence for `admin`:** it remains in the stack as the escape hatch for rows 2–6 (with row 2
-being the only one the roadmap intends to port). A future Phase 7 implements vacation in AdminNG;
-after that, `admin` can be dropped from the default compose profile with a one-line change and
-the docs updated.
+**Consequence for `admin`: implemented (2026-10-24).** The service, its image, its CI jobs and
+the `mailadmin.<domain>` ingress route are gone. Its two provisioning duties were ported:
+catalogue schema → `db/migrations/002_postfixadmin_catalogue.sql`; first-boot seeder →
+`adminng/api/app/provision.py` (plus `adminng.py --provision` for the manual path). The
+deferred feature port (row 2, vacation) remains the only reason anyone would have kept it, and
+it is now tracked as normal AdminNG work rather than a blocker.
 
 
 ## Milestone summary

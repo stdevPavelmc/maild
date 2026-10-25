@@ -109,7 +109,7 @@ def _alias_out(row: dict) -> dict:
     }
 
 
-def _recount_domain(cur, domain: str) -> None:
+def recount_domain(cur, domain: str) -> None:
     """Keep domain.mailboxes / domain.aliases in step (PostfixAdmin counters)."""
     cur.execute(
         """
@@ -124,7 +124,7 @@ def _recount_domain(cur, domain: str) -> None:
 
 
 def _mirror_admin_password(cur, username: str, hashed: str) -> None:
-    """MailD convention (admin/seed.sh): admin.password == mailbox.password."""
+    """MailD convention (the api seeder): admin.password == mailbox.password."""
     cur.execute(
         "UPDATE admin SET password = %s, modified = now() WHERE username = %s",
         (hashed, username),
@@ -136,6 +136,12 @@ def _mirror_mailbox_password(cur, username: str, hashed: str) -> None:
         "UPDATE mailbox SET password = %s, modified = now() WHERE username = %s",
         (hashed, username),
     )
+
+# PostfixAdmin's $CONF['default_aliases']: the aliases every new domain used to get
+# from the "create domain" click. They point at the administrator who creates the
+# domain — the equivalent of MailD's old fixed administrator address.
+DEFAULT_ALIASES = ("postmaster", "abuse", "hostmaster", "webmaster")
+
 
 # ----------------------------------------------------------------------- domains
 def list_domains(
@@ -177,6 +183,7 @@ def get_domain(principal: Principal, domain: str) -> dict:
 
 def create_domain(principal: Principal, payload: dict) -> dict:
     ensure_domain_allowed(principal, payload["domain"])
+    domain = payload["domain"]
     with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
         try:
             cur.execute(
@@ -187,7 +194,7 @@ def create_domain(principal: Principal, payload: dict) -> dict:
                 VALUES (%s, %s, 0, 0, %s, %s, %s, %s, %s)
                 """,
                 (
-                    payload["domain"],
+                    domain,
                     payload["description"],
                     payload["maxquota"],
                     payload["quota"],
@@ -197,9 +204,24 @@ def create_domain(principal: Principal, payload: dict) -> dict:
                 ),
             )
         except psycopg.errors.UniqueViolation:
-            raise conflict(f"domain '{payload['domain']}' already exists") from None
+            raise conflict(f"domain '{domain}' already exists") from None
+
+        # The domain was created: add the same default aliases the PostfixAdmin
+        # "create domain" click always added (its $CONF['default_aliases']), in the
+        # same transaction, then fix the counters AdminNG keeps in step everywhere.
+        if payload.get("default_aliases", True):
+            cur.executemany(
+                "INSERT INTO alias (address, goto, domain, active) "
+                "VALUES (%s, %s, %s, true) ON CONFLICT DO NOTHING",
+                [
+                    (f"{alias}@{domain}", principal.username, domain)
+                    for alias in DEFAULT_ALIASES
+                ],
+            )
+            recount_domain(cur, domain)
+
         conn.commit()
-    return get_domain(principal, payload["domain"])
+    return get_domain(principal, domain)
 
 
 def update_domain(principal: Principal, domain: str, payload: dict) -> dict:
@@ -427,7 +449,7 @@ def create_mailbox(principal: Principal, payload: dict) -> dict:
         except psycopg.errors.ForeignKeyViolation:
             raise not_found("domain", domain) from None
         _mirror_admin_password(cur, username, hashed)
-        _recount_domain(cur, domain)
+        recount_domain(cur, domain)
         conn.commit()
     return get_mailbox(principal, username)
 
@@ -477,7 +499,7 @@ def delete_mailbox(principal: Principal, username: str) -> None:
             raise not_found("mailbox", username)
         cur.execute("DELETE FROM quota  WHERE username = %s", (username,))
         cur.execute("DELETE FROM quota2 WHERE username = %s", (username,))
-        _recount_domain(cur, row["domain"])
+        recount_domain(cur, row["domain"])
         conn.commit()
     # Deleting an account must cut its access immediately; the maildir stays on
     # disk (PostfixAdmin default), so recreating the address keeps its mail.
@@ -551,7 +573,7 @@ def create_alias(principal: Principal, payload: dict) -> dict:
             raise conflict(f"alias '{address}' already exists") from None
         except psycopg.errors.ForeignKeyViolation:
             raise not_found("domain", domain) from None
-        _recount_domain(cur, domain)
+        recount_domain(cur, domain)
         conn.commit()
     return get_alias(principal, address)
 
@@ -574,7 +596,7 @@ def delete_alias(principal: Principal, address: str) -> None:
     row = get_alias(principal, address)
     with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM alias WHERE address = %s", (address,))
-        _recount_domain(cur, row["domain"])
+        recount_domain(cur, row["domain"])
         conn.commit()
 
 # ------------------------------------------------------------------------ admins
