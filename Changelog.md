@@ -18,7 +18,20 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2026-10-24 1.7.0-dev
+## 2026-10-24 1.7.0
+- Fixed: `INSTALL.md`'s "at minimum set" list now includes **`ADMINNG_SECRET_KEY`**, which the
+  production compose files require (`${ADMINNG_SECRET_KEY:?…}`). Following the old list
+  verbatim made `docker compose up -d` abort with `required variable ADMINNG_SECRET_KEY is
+  missing a value`. The same section now warns against shipping the `change-me-…`
+  placeholders, documents the host `/certs` directory (self-signed `mail.crt`/`mail.key` +
+  `RSA2048.pem`), the `ADMINNG_WEBAUTHN_RP_ID`/`ADMINNG_WEBAUTHN_ORIGINS` overrides a real
+  domain needs, and a quick-check block (catalogue rows, DKIM record, both UIs answering `200`
+  inside the `maild` network) that was executed end to end on a fresh `maild.cu` deployment.
+- Security: the `api` boot logs an OTP-style warning while `ADMINNG_SECRET_KEY` still holds
+  the `change-me-openssl-rand-hex-32` value `env.sample` ships — a publicly known JWT signing
+  key, i.e. administrator tokens could be forged. It stays a warning (not a hard failure) so a
+  half-configured stack still comes up and can be finished by hand with
+  `adminng.py --provision`; `env.sample` and the GitLab CI notes now flag the placeholder too.
 - Added: the `amavis` image now carries amavisd's decompressor helpers — `bzip2`,
   `xz-utils`, `lrzip`, `lzop`, `lz4` and `rpm2cpio` — so `.bz2`/`.xz`/`.lzma`/`.lrz`/`.lzo`/
   `.lz4`/`.rpm` attachments are extracted and scanned instead of being flagged **UNCHECKED**.

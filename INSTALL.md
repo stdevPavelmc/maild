@@ -22,6 +22,12 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 - A host **hostname shared with the mail domain** (e.g. `mails.maild.cu`). It is tied to the
   first/default domain; any further domain must point its MX + SPF/DKIM/DMARC/SRV records at
   this hostname.
+- A writable **`/certs` directory on the host**. Every production compose file bind-mounts it
+  into `mta` and `mda` (`/certs:/certs`); Docker creates it when it is missing. On the first
+  boot the stack fills it with a self-signed `mail.crt`/`mail.key` pair plus
+  `RSA2048.pem` (the MDA's DH parameters, which is why the first start takes a few extra
+  seconds). Drop your own certificate under those exact names to replace the self-signed one
+  (see [Tech details](#tech-details)).
 - The default domain (and every extra domain) must have correct public DNS records: `A`/`MX`
   for the host, plus `SPF`, `DKIM` (see [DKIM](#dkim)) and `DMARC`.
 
@@ -37,9 +43,20 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 
    - `DEFAULT_DOMAIN` — your first mail domain (e.g. `maild.cu`).
    - `MAIL_ADMIN_USER` — the administrator local part (default `sysadmin`).
-   - `MAIL_ADMIN_PASSWORD` — the password of the administrator (superadmin). Leave it empty
-     to have one generated and printed in `docker compose logs api`.
-   - `POSTGRES_PASSWORD` — the database password (pick a strong one).
+   - `MAIL_ADMIN_PASSWORD` — the superadmin login *and* the password of its mailbox — is optional: comment the line out and one is generated and printed in `docker compose logs api`.
+   - `POSTGRES_PASSWORD` — the database password (`openssl rand -hex 18`).
+   - `ADMINNG_SECRET_KEY` — signs the AdminNG JWTs and encrypts the enrolled TOTP seeds
+     (`openssl rand -hex 32`).
+
+   Note that `POSTGRES_PASSWORD` and `ADMINNG_SECRET_KEY` are **enforced**, not suggested: the
+   compose files carry a `${VAR:?…}` guard, and `docker compose` refuses to start (or even to
+   interpolate) without them giving:
+   `error while interpolating services.api.environment.ADMINNG_SECRET_KEY`:
+   required variable ADMINNG_SECRET_KEY is missing a value`. **Replace the `change-me-…` 
+   placeholders that `env.sample` ships**: they are real, publicly known values, so a starter
+   that keeps `ADMINNG_SECRET_KEY=change-me-openssl-rand-hex-32` runs with a signing key anyone
+   can read here and could mint administrator tokens with (the API also logs a warning about it
+   on every boot). Rotating the key later invalidates live sessions and enrolled authenticators.
 
 2. Every tunable defaults **inside the service images** (ENV in the Dockerfiles): to
    deviate from a default, uncomment the matching line in your `.env` (the commented
@@ -71,10 +88,39 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 
    When you see `api: INFO - catalogue provisioned: domain=... admin=...` the server is ready.
 
-**Quick check before you continue:**
+**Quick check before you continue** (every item below was verified on a fresh single-host
+`maild.cu` deployment):
 
 - `docker compose -f docker-compose.yml ps` — every service should be `Up`/`healthy`
   (`clamav` may take a while the first time while it downloads ~230 MB of signatures).
+- The catalogue was seeded **exactly once** (a second `up -d` must not re-provision or
+  regenerate the DKIM key):
+
+  ```sh
+  docker compose -f docker-compose.yml logs api | grep 'catalogue provisioned'
+  docker compose -f docker-compose.yml exec db psql -U maild -d mailddb \
+    -c 'select domain from domain;' \
+    -c 'select username from mailbox;' \
+    -c 'select version from maild_provision;'
+  ```
+
+  Expect your domain, `sysadmin@<DEFAULT_DOMAIN>` and one `maild_provision` row (version `1`).
+- The DKIM key for the default domain exists (see [DKIM](#dkim) for the record to publish):
+
+  ```sh
+  docker compose -f docker-compose.yml logs amavis | grep -A12 'DKIM / DNS config'
+  ```
+
+- Both web UIs answer inside the stack — this works **before** your TLS ingress exists, and
+  it is how you tell a broken stack from a broken proxy:
+
+  ```sh
+  docker run --rm --network maild curlimages/curl:latest -s -o /dev/null -w 'adminng %{http_code}\n' http://adminng/
+  docker run --rm --network maild curlimages/curl:latest -s -o /dev/null -w 'webmail %{http_code}\n' http://mua/
+  ```
+
+  Expect `adminng 200` and `webmail 200`. `docker compose exec api adminng.py --list-devices`
+  must answer too (that one proves the API reached `ADMINNG_DB`).
 - Send a mail from an external account (e.g. Gmail) to `sysadmin@<DEFAULT_DOMAIN>` and read
   it back on the webmail: that confirms SMTP + content filtering + delivery in one go.
 
@@ -219,7 +265,14 @@ the ingress to the external `maild` network (create it once with
 listening on port 80 inside the stack.
 
 The host must carry the same name as the mail server (see Requirements) for Let's Encrypt,
-and the certs must live in the standard `/etc/letsencrypt` location.
+and the certs must live in the standard `/etc/letsencrypt` location. The two UI hostnames
+(`webmail.<DEFAULT_DOMAIN>` and `adminng.<DEFAULT_DOMAIN>`) must resolve to the ingress and be
+covered by its certificate; if you serve them under other names, also override
+`ADMINNG_WEBAUTHN_RP_ID`/`ADMINNG_WEBAUTHN_ORIGINS` (see
+[AdminNG](#adminng-optional-but-recommended)). Before the ingress exists, check the containers
+from inside the `maild` network with the `curlimages/curl` commands of the
+[quick check](#quick-start-automated): a `200` there means the stack is fine and the proxy is
+what needs fixing.
 
 ## Deploy contexts
 
@@ -307,8 +360,10 @@ and backed by the `api` container (`ADMINNG_DB` holds devices, sessions, TOTP se
 audit trail). It is the only web administration UI — PostfixAdmin and its `admin` container
 were retired in 2026-10 (see `Changelog.md`).
 
-1. **Set `ADMINNG_SECRET_KEY`** in `.env` (`openssl rand -hex 32`). It signs the AdminNG JWTs
-   and encrypts the TOTP seeds; the stack refuses to start without it. Rotating it invalidates
+1. **Set `ADMINNG_SECRET_KEY`** in `.env` (`openssl rand -hex 32`) — replace the
+   `change-me-openssl-rand-hex-32` placeholder, never ship it. It signs the AdminNG JWTs and
+   encrypts the TOTP seeds; the stack refuses to start without the *variable*, and the API
+   logs a warning for as long as the placeholder is still in place. Rotating it invalidates
    sessions and enrolled authenticators.
 2. `docker compose up -d` exposes it at `https://adminng.<DEFAULT_DOMAIN>` (Traefik) — or the
    dev stack at <http://localhost:8083>.
@@ -320,6 +375,21 @@ were retired in 2026-10 (see `Changelog.md`).
    browser is approved, any admin may sign in from it.
 4. The first superadmin login requires TOTP enrollment (QR + code). Domain admins without an
    enrolled authenticator sign in with their password (TOTP is mandatory for superadmins).
+5. **Passkeys need the real hostname.** The image defaults
+   (`ADMINNG_WEBAUTHN_RP_ID=localhost` and
+   `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084`) are for the dev
+   stack only: a browser refuses a passkey whose RP ID does not match the page's origin, so
+   the login page silently keeps offering password + TOTP. For the production URLs add to
+   `.env` and re-run `docker compose up -d`:
+
+   ```sh
+   ADMINNG_WEBAUTHN_RP_ID=adminng.maild.cu
+   ADMINNG_WEBAUTHN_ORIGINS=https://adminng.maild.cu
+   ```
+
+   List every public origin (comma-separated, no spaces, include a non-default port); they
+   must sit inside the RP ID's DNS suffix. Password + TOTP login works either way — this only
+   enables the passkey flow.
 
 Daily backups now include the AdminNG database (`maild_adminng_*.sql.gz`). Full details:
 `adminng/README.md`, `adminng/doc/technical-draft.md`, `adminng/doc/plan.md`.

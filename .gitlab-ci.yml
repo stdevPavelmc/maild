@@ -50,10 +50,11 @@ stages:
     - echo "Registry Image:" $CI_REGISTRY_IMAGE
     # deploy env file (new schema): the images carry every default, so the env
     # file only needs the CI/CD-defined values. The mandatory ones (DEFAULT_DOMAIN,
-    # MAIL_ADMIN_USER, POSTGRES_PASSWORD) must be defined as (masked) CI/CD
-    # variables; anything not defined simply stays commented in the template and
-    # the image defaults apply. compose needs the file present to resolve the
-    # env_file list, so the template is always dumped.
+    # MAIL_ADMIN_USER, POSTGRES_PASSWORD, ADMINNG_SECRET_KEY) must be defined as
+    # (masked) CI/CD variables — compose aborts on a missing
+    # ADMINNG_SECRET_KEY/POSTGRES_PASSWORD; anything not defined simply stays
+    # commented in the template and the image defaults apply. compose needs the file
+    # present to resolve the env_file list, so the template is always dumped.
     - cat env.sample_gitlab > .env
     - env | grep -E '^(DEFAULT_DOMAIN|MAIL_ADMIN_USER|POSTGRES_PASSWORD|ADMINNG_SECRET_KEY|MAIL_ADMIN_PASSWORD|MUA_ADMIN_USER|MUA_ADMIN_PASSWORD|AUTO_PROVISION|PROVISION_VERSION|PROVISION_WAIT_TIMEOUT|PROVISION_FORCE)=' >> .env || true
 

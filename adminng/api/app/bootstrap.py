@@ -21,6 +21,28 @@ from .migrate import apply_migrations
 
 log = logging.getLogger("adminng.bootstrap")
 
+# The value env.sample/env.sample_gitlab ship. A missing key is fatal (below), but a
+# *placeholder* one is worse than missing: it looks configured while the JWT signing key
+# is public (anybody could mint administrator tokens). Warning only — the operator may be
+# mid-deploy and the stack still has to come up so `adminng.py --provision`/the UI work.
+PLACEHOLDER_SECRET_KEYS = frozenset({"change-me-openssl-rand-hex-32"})
+
+
+def warn_placeholder_secret(key: str) -> bool:
+    """Log an OTP-style warning when the operator kept env.sample's placeholder."""
+    if key not in PLACEHOLDER_SECRET_KEYS:
+        return False
+    log.warning("#################### !!! #############################")
+    log.warning(
+        "ADMINNG_SECRET_KEY still holds the env.sample placeholder (%s...): it is a "
+        "publicly known value, so administrator tokens can be forged. Generate your own "
+        "with `openssl rand -hex 32` and restart this container (live sessions and "
+        "enrolled authenticators are invalidated).",
+        key[:12],
+    )
+    log.warning("#################### !!! #############################")
+    return True
+
 
 def main() -> int:
     logging.basicConfig(
@@ -35,6 +57,7 @@ def main() -> int:
             "`openssl rand -hex 32`."
         )
         return 2
+    warn_placeholder_secret(settings.ADMINNG_SECRET_KEY)
     log.info(
         "waiting for PostgreSQL (catalogue=%s, adminng=%s)",
         settings.POSTGRES_DB,

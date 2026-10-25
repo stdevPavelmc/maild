@@ -25,3 +25,5 @@ adminng/pwa/build.sh
 # AdminNG browser suite artifacts (dev-only service pwa-test)
 adminng/pwa-test/test-results/
 adminng/pwa-test/playwright-report/
+
+.env
