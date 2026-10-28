@@ -349,7 +349,28 @@ more. See `.agents/services/provisioning.md`.
 
 - Runs `cron -f`; jobs in `cron/crontab` (UTC): traffic resume 01:10, maildir check
   02:13 monthly, Junk purge 03:00, Bayes learning 03:30, outbound volume watch
-  hourly (:23), db backup 08:00 (scripts in `cron/scripts/`).
+  hourly (:23), DNS health check 04:20, db backup 08:00 (scripts in `cron/scripts/`).
+- `check_dns.sh` (daily 04:20): read-only probe of the **public** DNS for every active
+  domain in the catalogue — delegation (NS/SOA), MX (resolution, CNAME, private IPs, the
+  declared set), SPF (presence, terminal qualifier, syntax, 10-lookup budget, MX-IP
+  coverage), DMARC (presence/inheritance, `p`/`sp`/`pct`, `rua` routing), DKIM (the
+  published selector compared byte-for-byte with the key Amavis really signs with),
+  PTR/FCrDNS of the MX IPs, MTA-STS/TLS-RPT when published and the blocklists
+  (`DNS_CHECK_BLOCKLISTS`/`DNS_CHECK_IP_BLOCKLISTS`). Every finding carries
+  found → expected → impact → action, and the report is mailed to
+  `postmaster@DEFAULT_DOMAIN` (aliased to the admin) only when a finding reaches
+  `DNS_CHECK_ALERT_LEVEL` (`critical|warning|notice`, default `warning`); silence means
+  all good. The expected MX set is `MX_HOSTNAME` (comma-separated); unset it is inferred
+  from `DEFAULT_DOMAIN`'s live MX and reported as a notice, which also downgrades the MX
+  mismatch to a warning. `DNS_CHECK_DOMAINS` replaces the catalogue list (`none` disables
+  the job — the dev escape hatch), `DNS_CHECK_RESOLVER` pins the resolver (the free
+  Spamhaus zones refuse public resolvers with `127.255.255.x`, reported as a notice, never
+  as a listing), `DNS_CHECK_DKIM=no` skips the key comparison, `DNS_CHECK_TIMEOUT` bounds
+  each query. `--dry-run` prints the report without mailing it, `--domains a,b` and
+  `--mx-hostname ''` are the ad-hoc probes, and `--fixture-dir` answers queries from
+  `<TYPE>.<name>` files (what `test.sh` G15–G23 drive it with). Exit codes: 0 nothing at
+  the gate, 1 findings mailed, 2 the check could not run, 3 the report could not be
+  mailed.
 - `outbound_watch.sh` (audit F-12, alerting half): parses the production syslog for the
   day's per-user submission volume (`sasl_username=` on queue-id `from=` lines) and the
   mta's `maild-ratelimit: throttled` lines, and mails an `[ALERT]` to the admin via
@@ -376,13 +397,17 @@ more. See `.agents/services/provisioning.md`.
   rules refresh runs in `amavis`).
 - Volumes: `ldata/logs:/var/log` (empty in dev — JSON logging), `ldata/vmail:/home/vmail`,
   `ldata/backups:/backups` (prod parity: without it `backup_db.sh` dumps into the
-  container's writable layer and the dump vanishes on recreate). It does **not** mount the shared
-  SpamAssassin volume: its `sa-learn` runs with `HOME=/tmp`, so the "shared bayes db" contract only
-  holds for amavis (known drift, see `.local/caveats.md`).
+  container's writable layer and the dump vanishes on recreate), and `ldata/amavis:/var/lib/amavis:ro`
+  (prod: `amavis:/var/lib/amavis:ro`) so `check_dns.sh` can compare each domain's published
+  DKIM selector against the key it signs with — read-only, the job never writes there. It does
+  **not** mount the shared SpamAssassin volume: its `sa-learn` runs with `HOME=/tmp`, so the
+  "shared bayes db" contract only holds for amavis (known drift, see `.local/caveats.md`).
 - HEALTHCHECK: `/var/run/crond.pid` + `kill -0` (added with the resolute move).
 - env: defaults baked in `cron/Dockerfile` (`JUNK_RETENTION_DAYS`, `SA_HAM_SAMPLE_*`,
-  `MTA`); the operator file is the `env_file:` and overrides any of them. The entrypoint
-  dumps the whole environment into `/etc/environment`, from where every cron job sources it.
+  `MTA`, `DNS_CHECK_*`); the operator file is the `env_file:` and overrides any of them. The
+  entrypoint dumps the whole environment into `/etc/environment` **shell-quoted** (a raw `env`
+  dump broke `source` as soon as a value had spaces: dev's `BANNER_TITLE=MailD Dev Override`
+  printed "Dev: command not found" on every job), from where every cron job sources it.
 
 ## dozzle — log viewer (dev only)
 

@@ -63,7 +63,16 @@ ENV POSTGRES_HOST=db \
     SA_HAM_SAMPLE_PER_USER=25 \
     SA_HAM_SAMPLE_MAX=400 \
     OUTBOUND_ALERT_MESSAGES=150 \
-    OUTBOUND_ALERT_IGNORE_USERS=
+    OUTBOUND_ALERT_IGNORE_USERS= \
+    DNS_CHECK_DOMAINS= \
+    DNS_CHECK_TO= \
+    DNS_CHECK_ALERT_LEVEL=warning \
+    DNS_CHECK_RESOLVER= \
+    DNS_CHECK_BLOCKLISTS=multi.surbl.org \
+    DNS_CHECK_IP_BLOCKLISTS=zen.spamhaus.org \
+    DNS_CHECK_DKIM=auto \
+    DNS_CHECK_SPF_MX_COVERAGE=warning \
+    DNS_CHECK_TIMEOUT=10
 
 # the daemon stays in the foreground (CMD) and every job appends to /proc/1/fd/1; the healthcheck
 # just proves cron is alive: it is the pidfile Debian's cron writes at start-up
@@ -83,7 +92,7 @@ CMD ["cron","-f", "-L", "2"]
 
 # OCI labels (kept last; the pre-commit hook rewrites the created date)
 LABEL org.opencontainers.image.title="MailD maintenance jobs" \
-      org.opencontainers.image.description="MailD scheduled maintenance: db backups, traffic resume, Bayes learning and Junk purge" \
+      org.opencontainers.image.description="MailD scheduled maintenance: db backups, traffic resume, Bayes learning, Junk purge, outbound watch and the daily DNS health check" \
       org.opencontainers.image.authors="Pavel Milanes <pavelmc@gmail.com>" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \

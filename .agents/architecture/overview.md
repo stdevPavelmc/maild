@@ -88,7 +88,7 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 | `ldata/spool` | `/var/spool/` | mda, mta, amavis |
 | `ldata/certs` | `/certs` | mda, mta, adminng (read-only TLS certs in dev) |
 | `ldata/clamav` | `/var/lib/clamav` | clamav |
-| `ldata/amavis` | `/var/lib/amavis` | clamav, amavis (quarantine in `virusmails/`) |
+| `ldata/amavis` | `/var/lib/amavis` | clamav, amavis (quarantine in `virusmails/`); cron **read-only** (the DKIM keys `dkim/db.txt` + `dkim/*.txt` for `check_dns.sh`) |
 | `ldata/spamassassin` | `/var/lib/spamassassin` | amavis (bayes db), cron (learning) |
 | `ldata/mua_web` | `/var/www/html/data` | mua (only the writable `data/` dir!) |
 | `ldata/logs` | `/var/log` | cron (empty in dev — JSON logging, see DEV-SETUP.md) |
@@ -126,9 +126,16 @@ catalogue and writes it. See `.agents/services/provisioning.md`.
 | 03:00 | `purge_junk.sh` | delete Junk older than `JUNK_RETENTION_DAYS` |
 | 03:30 | `learn_from_folders.sh` | Bayes learning from Junk + INBOX samples |
 | hourly (:23) | `outbound_watch.sh` | per-user outbound volume + throttle alerts (needs syslog) |
+| 04:20 | `check_dns.sh` | public-DNS health check per active domain (MX/SPF/DMARC/DKIM/PTR/blocklists) → mails only the deviations |
 | 08:00 | `backup_db.sh` | catalogue dump to `/backups/db` |
 
 SpamAssassin rule updates run on the amavis container (`amavis/sa-update-loop.sh`), not cron.
+
+`check_dns.sh` compares the published records against what this deployment intends: the
+expected MX set is `MX_HOSTNAME` (comma-separated; unset = inferred from `DEFAULT_DOMAIN`'s
+live MX plus a notice) and the DKIM key is the one on the amavis volume, mounted read-only
+into `cron` (`amavis:/var/lib/amavis:ro`). It is silent unless a finding reaches
+`DNS_CHECK_ALERT_LEVEL` (default `warning`), and `DNS_CHECK_DOMAINS=none` disables the job.
 
 ## Critical constraints
 

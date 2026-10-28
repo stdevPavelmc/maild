@@ -1,20 +1,104 @@
-# Mail Delivery Agent (MDA) aka: Dovecot service for mailad
+# Mail Delivery Agent (MDA) — Dovecot for MailD
 
-This is the docker image that holds the MDA service, aka: Dovecot part for MailAD
+The `mda` container runs Dovecot 2.4 and handles IMAP/POP3 mailbox access, Sieve filtering,
+LMTP local delivery, SASL authentication for the MTA, and mailbox quota enforcement.
 
-## It's all about ENV vars
+## Overview
 
-See the sample `docker-compose.yml` file, it has almost all you need, but I will explain some details.
+- **Mailbox protocols:** IMAP (143/993), POP3 (110/995), and ManageSieve (4190).
+- **Local delivery:** Dovecot LMTP receives filtered mail from Postfix and writes directly
+  to Maildir storage under `/home/vmail/<domain>/<user>`.
+- **Catalogue authentication:** Directly queries PostgreSQL (`db`) using SQL passdb and userdb
+  lookups for credentials, active status, and mailbox quotas.
+- **MTA services:**
+  - SASL listener on `:12345` authenticates submission clients for Postfix.
+  - Quota-status listener on `:12340` allows Postfix to enforce recipient quota policies at `RCPT TO` time.
+- **Password schemes & migration (F-18):** Argon2id is the default hashing scheme. Legacy
+  MD5-CRYPT (`$1$`) hashes coexist and are migrated automatically to Argon2id upon successful
+  login via `scripts/rehash-password.sh`. Weak scheme support is date-gated and will be disabled
+  on **2027-02-01**.
+- **Instant SpamAssassin Bayes learning:** ImapSieve triggers scripts in `/usr/lib/dovecot/sieve-pipe/`
+  whenever a user moves mail into (`learn-spam.sh`) or out of (`learn-ham.sh`) the `Junk` folder.
+- **Daily quota reporting:** A background loop runs `/scripts/quota_report.sh` daily, emailing
+  the administrator a summary of mailboxes exceeding the quota warning threshold.
+- **Self-signed TLS generation:** Generates fallback self-signed certificates and DH parameters
+  on first boot if none are mounted into `/certs`.
 
-- `DOVECOT_DOMAIN`: Domain for the server
-- `DOVECOT_LDAP_URI`: Ldap uri, by now just ldap [not ldaps, WiP to fix this] for example "ldap://dc:389", the `dc` here is the name/ip.container_name of the Domain Controller, and will detected and used in other parts of the config.
-- `DOVECOT_LDAP_SEARCH_BASE`: Ldap search base, DN of the ldap tree that point to the OU that holds the user data, for example "OU=MAILAD,DC=mailad,DC=cu"
-- `DOVECOT_LDAP_BINDUSER`: Ldap DN to the user that will be used to link the MTA to the Ldap, for example: CN=linux,CN=Users,DC=mailad,DC=cu"
-- `DOVECOT_LDAP_BINDUSER_PASSWD`: Password for the above user
+## Ports
 
-## Important details
+| Port  | Protocol | Description |
+|-------|----------|-------------|
+| 110   | POP3     | Plaintext / STARTTLS POP3 |
+| 143   | IMAP     | Plaintext / STARTTLS IMAP |
+| 993   | IMAPS    | Implicit TLS IMAP |
+| 995   | POP3S    | Implicit TLS POP3 |
+| 4190  | Sieve    | ManageSieve protocol |
+| 12345 | SASL     | Internal Dovecot auth socket for Postfix |
 
-The AD-DC LDAP structure will have the structure stated on the [original document](https://github.com/stdevPavelmc/mailad/blob/master/AD_Requirements.md):
+> [!NOTE]
+> In production dockerfiles, only the encrypted ports (993, 995) and internal ports are exposed;
+> plaintext POP3/IMAP ports are restricted.
 
-- **Do not change the container name from 'mda', Squared! other containers on this swarm will relay on that name!**
-- If any doubts go to the MailAD official docs to see a more detailed explanation.
+## Volumes
+
+| Container Path | Host / Source | Description |
+|----------------|---------------|-------------|
+| `/certs` | `ldata/certs` | TLS certificates (`mail.crt`, `mail.key`, `dh.pem`) |
+| `/home/vmail` | `ldata/vmail` | User mailboxes and Sieve scripts (owned by `5000:5000`) |
+
+## Variables
+
+Every tunable defaults inside the image (`mda/Dockerfile`). The operator file (`.env` in
+production, `env.dev` in development) overrides any value.
+
+### Mandatory deployment variables
+- `DEFAULT_DOMAIN`: Primary domain served by this MailD instance.
+- `MAIL_ADMIN_USER`: Local part for the mail administrator.
+- `POSTGRES_PASSWORD`: Password for the PostgreSQL catalogue.
+
+### Image defaults (overridable)
+- `POSTGRES_HOST=db`: Database service hostname.
+- `POSTGRES_DB=mailddb`: Catalogue database name.
+- `POSTGRES_USER=maild`: Catalogue database user.
+- `PASSWORD_SCHEME=argon2id`: Password hash scheme (`argon2id` recommended, `md5crypt` legacy).
+- `DEFAULT_MAILBOX_SIZE=200M`: Fallback mailbox quota if none set in the database.
+- `QUOTA_REPORT_HOUR=0`: Hour (UTC) to send the daily mailbox quota report.
+- `QUOTA_REPORT_MINUTE=1`: Minute (UTC) to send the daily mailbox quota report.
+- `COUNTRY=JM`, `STATE=Kingston`, `CITY=Kingston`, `ORG=MailD`, `OU=MailD`: Self-signed TLS certificate subject fields.
+
+### Optional overrides
+- `QUOTA_REPORT_THRESHOLD`: Percentage threshold to flag mailboxes in daily report (default 80).
+- `QUOTA_REPORT_CRITICAL`: Critical percentage threshold in daily report (default 99).
+- `QUOTA_REPORT_ONLY_WHEN_WARN`: Only send email when mailboxes exceed the threshold (default true).
+- `QUOTA_REPORT_MAX_PER_SLOT`: Maximum mailboxes listed per threshold bracket.
+- `QUOTA_REPORT_MAX_ATTEMPTS`: Retry attempts for report delivery if MDA is unavailable.
+- `MDA_DEBUG_INIT=1`: Verbose container startup logging.
+- `MDA_DEBUG_AUTH=1`: Verbose Dovecot authentication logging.
+- `MDA_DEBUG_AUTH_PASSWORD=1`: Password mismatch debugging.
+- `MDA_DEBUG_MAIL=1`: Mail storage and delivery debugging.
+- `MDA_DEBUG_SSL=1`: SSL/TLS handshake debugging.
+
+## Operational commands
+
+```bash
+# Health check
+docker compose exec mda /check.sh
+
+# View live Dovecot logs
+docker compose logs -f mda
+
+# Dovecot status and active connections
+docker compose exec mda doveadm who
+
+# Flush authentication cache
+docker compose exec mda doveadm auth cache flush
+
+# Run mailbox quota report on-demand (dry-run to stdout)
+docker compose exec mda /scripts/quota_report.sh --now --dry-run
+
+# Run and send mailbox quota report immediately
+docker compose exec mda /scripts/quota_report.sh --now
+```
+
+> [!WARNING]
+> Never change the container hostname from `mda` — other services in the stack rely on this hostname to route and deliver mail.

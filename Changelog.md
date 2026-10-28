@@ -18,6 +18,42 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-10-25 1.8.0
+- Added: **daily public-DNS health check** — `cron/scripts/check_dns.sh`, scheduled at 04:20 UTC
+  in `cron/crontab`. For every active domain in the catalogue it verifies what the outside world
+  sees: delegation (NS/SOA), MX (resolution, CNAME targets, private IPs, and the set declared in
+  the new `MX_HOSTNAME`), SPF (presence, terminal qualifier, syntax, the 10-DNS-lookup budget,
+  MX-IP coverage), DMARC (presence/inheritance, `p`/`sp`/`pct`, `rua` routing), DKIM (the
+  published selector compared with the key Amavis really signs with), PTR/forward-confirmed rDNS
+  of the MX IPs, MTA-STS/TLS-RPT when published, and domain/IP blocklists. Each finding is
+  reported as found → expected → impact → action and mailed to `postmaster@<DEFAULT_DOMAIN>`
+  (aliased to the admin by the seeder) only when it reaches `DNS_CHECK_ALERT_LEVEL` (default
+  `warning`): **silence means healthy**, there is no daily "all good" mail. Read-only: it never
+  touches mail state. New knobs, all defaulted in `cron/Dockerfile`: `MX_HOSTNAME` (unset ⇒ the
+  expected MX set is inferred from `DEFAULT_DOMAIN`, reported as a notice),
+  `DNS_CHECK_DOMAINS` (`none` disables the job), `DNS_CHECK_TO`, `DNS_CHECK_RESOLVER` (the free
+  Spamhaus zones refuse public resolvers with `127.255.255.x` — reported as a notice, never as a
+  listing), `DNS_CHECK_BLOCKLISTS`, `DNS_CHECK_IP_BLOCKLISTS`, `DNS_CHECK_DKIM`,
+  `DNS_CHECK_ALERT_LEVEL`, `DNS_CHECK_SPF_MX_COVERAGE`, `DNS_CHECK_TIMEOUT`. The job also takes
+  `--dry-run` (print the report instead of mailing it), `--domains`, `--mx-hostname` and
+  `--fixture-dir`. Every compose file now mounts `amavis:/var/lib/amavis:ro` (dev:
+  `./ldata/amavis`) into `cron`, which is what makes the DKIM comparison possible.
+- Fixed: the `cron` entrypoint dumps the environment into `/etc/environment` shell-quoted. The raw
+  `env` dump broke `source /etc/environment` on any value carrying spaces, so every cron job
+  printed `/etc/environment: line 22: Dev: command not found` (dev's
+  `BANNER_TITLE=MailD Dev Override`) before doing anything.
+- Fixed: `INSTALL.md` documented the mail host as `mails.<domain>`; it is `mta.<domain>` (the
+  `mta` container's `hostname -f`). The new [DNS health check](#dns-health-check) section
+  documents `MX_HOSTNAME`, the resolver caveat and how to run the job by hand.
+- Added: `test.sh` G15–G23 (9 checks) drive the job against a fixture DNS tree pushed into the
+  cron container: the crontab entry, the read-only DKIM mount + `DNS_CHECK_*` defaults, a clean
+  domain (exit 0, silent), an unset `MX_HOSTNAME` (notice, still silent), a broken domain (exit 1,
+  report delivered through the `postmaster@` alias, body naming each broken record with its
+  impact/action) and `DNS_CHECK_DOMAINS=none`.
+- Docs: `AGENTS.md`, `DEV-SETUP.md`, `.agents/architecture/overview.md` (cron schedule + data
+  layout), `.agents/services/catalog.md` (cron) and `.agents/services/configuration.md`
+  (variable matrix) updated with the check, the volume and the new variables.
+
 ## 2026-10-24 1.7.0
 - Fixed: `INSTALL.md`'s "at minimum set" list now includes **`ADMINNG_SECRET_KEY`**, which the
   production compose files require (`${ADMINNG_SECRET_KEY:?…}`). Following the old list

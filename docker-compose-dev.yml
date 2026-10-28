@@ -305,6 +305,9 @@ services:
       # parity with production (`/var/backups/maild:/backups`): without it /scripts/backup_db.sh
       # writes into the container's writable layer and the daily dump vanishes on every recreate.
       - ./ldata/backups:/backups
+      # read-only view of the DKIM keys Amavis signs with: check_dns.sh compares every
+      # domain's published selector/key against the real key (it never writes here)
+      - ./ldata/amavis:/var/lib/amavis:ro
     depends_on:
       - db
     networks:

@@ -19,9 +19,10 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 - Access to the container registry (Docker Hub, GitHub `ghcr.io` or your own). Some networks
   block Docker Hub (Cuba, behind a proxy): use the GitHub compose or a pre-built registry.
   That is out of scope here — google it.
-- A host **hostname shared with the mail domain** (e.g. `mails.maild.cu`). It is tied to the
-  first/default domain; any further domain must point its MX + SPF/DKIM/DMARC/SRV records at
-  this hostname.
+- A host **hostname shared with the mail domain** (e.g. `mta.maild.cu` — the `mta` container's
+  own `hostname -f`). It is tied to the first/default domain; any further domain must point its
+  MX + SPF/DKIM/DMARC/SRV records at this hostname. Declare it in `MX_HOSTNAME` so the daily
+  DNS health check knows which MX set is legitimate (see [DNS health check](#dns-health-check)).
 - A writable **`/certs` directory on the host**. Every production compose file bind-mounts it
   into `mta` and `mda` (`/certs:/certs`); Docker creates it when it is missing. On the first
   boot the stack fills it with a self-signed `mail.crt`/`mail.key` pair plus
@@ -231,6 +232,42 @@ Publish the name `<selector>._domainkey.<domain>` as a `TXT` record whose conten
 quoted lines joined into one line. The key is stored in the amavis volume and survives
 reboots. If you add a **new** domain later through the UI, `docker compose restart amavis`
 so it generates that domain's key, then read it from the logs again.
+
+## DNS health check
+
+`cron` runs `check_dns.sh` every day at **04:20 UTC**: for every active domain in the
+catalogue it verifies what the outside world sees — delegation (`NS`/`SOA`), `MX`
+(resolution, CNAME, private IPs, the declared set), `SPF` (syntax, terminal qualifier, the
+10-lookup budget, MX-IP coverage), `DMARC` (presence/inheritance, `p`/`sp`/`pct`, `rua`
+routing), `DKIM` (the published selector compared with the key Amavis really signs with),
+`PTR`/FCrDNS of the MX IPs, `MTA-STS`/`TLS-RPT` when published, and the blocklists.
+Deviations are mailed to `postmaster@<DEFAULT_DOMAIN>` (the first-boot seeder aliases it to
+the admin mailbox) with the found and expected values, the impact and the fix.
+**Silence means everything is fine** — there is no daily "all good" mail.
+
+What it needs from you:
+
+- `MX_HOSTNAME` in `.env` — the MX target(s) this deployment owns, e.g.
+  `MX_HOSTNAME=mta.maild.cu` (comma-separated for several). Unset, the expected set is
+  inferred from `DEFAULT_DOMAIN`'s live MX, the report says so, and the MX comparison is
+  then only a warning.
+- `DNS_CHECK_RESOLVER` — point it at your own recursive resolver. The free Spamhaus zones
+  refuse queries from public resolvers (`127.255.255.x`); the job reports that as a notice
+  instead of calling the IP clean.
+- Optional: `DNS_CHECK_ALERT_LEVEL` (`warning` by default, `critical` for less noise,
+  `notice` for everything), `DNS_CHECK_DOMAINS` (probe that list instead of the catalogue,
+  or `none` to disable the job), `DNS_CHECK_TO` (another recipient), `DNS_CHECK_DKIM=no`.
+
+Run it by hand at any time (read-only, it never touches mail):
+
+```sh
+docker compose -f docker-compose.yml exec cron /scripts/check_dns.sh --dry-run
+docker compose -f docker-compose.yml exec cron /scripts/check_dns.sh --domains maild.cu --dry-run
+```
+
+`--dry-run` prints the report instead of mailing it. Exit codes: `0` nothing at/above the
+gate, `1` findings, `2` the check could not run (catalogue/limits), `3` the report could not
+be mailed.
 
 ## Isolated / restricted networks
 

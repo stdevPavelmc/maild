@@ -1,17 +1,75 @@
-# ClamAV (anti-virus) solution image
+# Antivirus Engine (ClamAV) for MailD
 
-This is the docker image that server the AV scanning to amavis processing
+The `clamav` container runs ClamAV daemon (`clamd`) and FreshClam signature updater,
+providing high-throughput antivirus scanning for the Amavis content filter.
 
-## It's all about ENV vars
+## Overview
 
-See the sample `docker-compose.yml` file, it has almost all you need, but I will explain some details.
+- **Service daemon:** Runs `clamd` listening on TCP port 3310.
+- **Amavis integration:** Amavis requests scans using `CONTSCAN <path>` over TCP port 3310.
+  Clamd directly inspects unpacked message files in the shared `/var/lib/amavis` volume.
+- **Permissions:** To access Amavis temporary files (`/var/lib/amavis/tmp`), the container
+  user `clamav` is joined to group `amavis` (`AMAVIS_GID=994`).
+- **Signature updates:** FreshClam downloads and maintains official virus signature databases
+  in `/var/lib/clamav` (~230 MB on first boot).
+- **Isolation:** ClamAV does not access the PostgreSQL database and does not receive the
+  operator `.env` file via `env_file`. Knobs are passed strictly as explicit environment entries.
 
-- `CLAMAV_PROXY_SERVER`: If you use proxy, this is the hostname/ip, like this: 10.1.2.3
-- `CLAMAV_PROXY_PORT`: the port of the proxy server
-- `CLAMAV_ALTERNATE_MIRROR`: if you need/want to specify a local/alternate db mirror, this is the hostname (https and a valid cert is needed)
+## Ports
 
-## Important details
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 3310 | TCP      | ClamAV daemon listener (used internally by Amavis; published in dev for debugging) |
 
-- All interaction is via 3310/tcp port
-- There is a volume to preserve the AV dabatabase, see the dockerfile/composer
-- This image has a built in healthcheck, see the docker-compose.yml file for an example.
+## Volumes
+
+| Container Path | Host / Source | Description |
+|----------------|---------------|-------------|
+| `/var/lib/clamav` | `ldata/clamav` | ClamAV signature database (`main.cvd`, `daily.cvd`, `bytecode.cvd`) |
+| `/var/lib/amavis` | `ldata/amavis` (or named volume `amavis`) | Shared mount for Amavis temporary files and extracted message parts |
+
+## Variables
+
+ClamAV requires no catalogue access or mandatory credentials. All settings are optional overrides:
+
+- `ALTERNATE_MIRROR`: Custom or local signature mirror URL for FreshClam (e.g. `clamav.internal.lan` or `clamav.ddns.net`). Crucial on restricted or air-gapped networks.
+- `CLAMAV_DEBUG=1`: Enables verbose logging in `freshclam` and `clamd`.
+
+## Operational commands
+
+```bash
+# Health check
+docker compose exec clamav /check.sh
+
+# Probe ClamAV TCP port
+nc -z localhost 3310
+
+# View ClamAV logs
+docker compose logs -f clamav
+
+# Check signature database freshness inside container
+docker compose exec clamav sigtool -i /var/lib/clamav/daily.cvd
+
+# Run manual freshclam update
+docker compose exec clamav freshclam
+```
+
+> [!WARNING]
+> Never change the container hostname from `clamav` — the Amavis content filter relies on `clamav:3310` to scan mail attachments.
+
+# Probe ClamAV TCP port
+nc -z localhost 3310
+
+# View ClamAV logs
+docker compose logs -f clamav
+
+# Check signature database freshness inside container
+docker compose exec clamav sigtool -i /var/lib/clamav/daily.cvd
+
+# Run manual freshclam update
+docker compose exec clamav freshclam
+```
+
+> [!WARNING]
+> Never change the container hostname from `clamav` — the Amavis content filter relies on `clamav:3310` to scan mail attachments.
+

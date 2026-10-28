@@ -1,28 +1,116 @@
-# Mail Transport Agent (MTA) aka: Postfix image for MailAD
+# Mail Transport Agent (MTA) — Postfix for MailD
 
-This is the docker image that holds the MTA service, aka: Postfix part for MailAD
+The `mta` container runs Postfix 3.10 and handles inbound and outbound mail transfer,
+client submission, recipient policy enforcement, and inter-service routing.
 
-## It's all about ENV vars
+## Overview
 
-See the sample `docker-compose.yml` file, it has almost all you need, but I will explain some details.
+- **Inbound / Outbound SMTP:** Listens on port 25 (SMTP), 465 (SMTPS), and 587 (Submission).
+- **Catalogue integration:** Connects to PostgreSQL (`db`) for live virtual domains,
+  mailboxes, aliases, and alias domains (including catch-all rewriting).
+- **Authentication:** Delegates SASL authentication on ports 465/587 to Dovecot (`mda:12345`).
+- **Quota status policy:** Checks mailbox quota at `RCPT TO` time against Dovecot (`mda:12340`),
+  rejecting mail with 552 before accepting messages that would exceed quota limits.
+- **Content filtering:** Hands mail off to Amavis (`amavis:10024`) for SpamAssassin and ClamAV
+  scanning and DKIM signing, receiving scanned mail back on port 10025.
+- **Delivery:** Routes scanned local mail to Dovecot via LMTP.
+- **Anti-enumeration tarpit (F-07):** Delays rejecting unknown recipients on port 25 by
+  `SMTP_TARPIT_DELAY` seconds, slowing down dictionary and harvesting attacks.
+- **Outbound throttle (F-12):** Supervised internal `ratelimitd` daemon (`127.0.0.1:12341`)
+  tracks submission recipient counts per authenticated user over `OUTBOUND_RATE_WINDOW`,
+  deferring (`450`) once `OUTBOUND_RATE_RECIPIENTS` is reached. Accounts in
+  `OUTBOUND_RATE_EXEMPT_USERS` bypass the throttle.
+- **Peer IP watchdog:** Background loop resolves and tracks IP changes for `amavis`, `mda`,
+  and `mua`, updating Postfix configurations and reloading seamlessly when containers restart.
+- **First-boot gate:** Synchronizes with the `maild_provision` database sentinel to ensure
+  the catalogue and default aliases exist before finalizing virtual alias maps.
 
-- `POSTFIX_MAX_MESSAGESIZE`: By default is 2264924 (~2Mb, the formula is like this: 1024 *1024* MB * 1.08) if you don't set it, it will get set to ~2Mb.
-- `POSTFIX_REALY`: [Optional] Relay/smart host, only if you are in a internal network, this is the upstream server that you need to send messages to the outer world.
-- `POSTFIX_ALWAYS_BCC`: [Optional] Some enterprises rules that all mails must be copied/archived, this is the email mailbox that will hold the background copy carbon. Warning: this mailbox must exist from the very provision or you will get a bounce for **EVERY** mail sent.
-- `POSTFIX_NATIONAL`: [Optional] If you want to have some users locked to a country/domain this is the domain to lock on, for example, to have a group of users locked to the .edu.cu domain you must set  this option to `edu.cu` (without the starting dot). If you don't need that feature just don't set this option.
-- `POSTFIX_EVERYONE`: [Optional] If you want an automatic list for everyone in the domian, this is it: the full list name with the domain, it will be created and you must check that it not clash with an existing email address.
-- `POSTFIX_SPF_ENABLE`: [Optional] Enable the SPF checking, if not set: disabled, to activate set it to one of these: yes, Yes, true, True
-- `POSTFIX_DNSBL`: [Optional] Enable DNSBL checking, if not set: disabled, to activate set it to one of these: yes, Yes, true, True
-- `POSTFIX_DOMAIN`: Domain for the server
-- `POSTFIX_MAILADMIN`: Mail address of the mail administrator, may be a group or list, but must exists, you will get notifications, alerts, etc via this email.
-- `POSTFIX_LDAP_URI`: Ldap uri, by now just ldap [not ldaps, WiP to fix this] for example "ldap://dc:389", the `dc` here is the name/ip.container_name of the Domain Controller, and will detected and used in other parts of the config.
-- `POSTFIX_LDAP_SEARCH_BASE`: Ldap search base, DN of the ldap tree that point to the OU that holds the user data, for example "OU=MAILAD,DC=mailad,DC=cu"
-- `POSTFIX_LDAP_BINDUSER`: Ldap DN to the user that will be used to link the MTA to the Ldap, for example: CN=linux,CN=Users,DC=mailad,DC=cu"
-- `POSTFIX_LDAP_BINDUSER_PASSWD`: Password for the above user
+## Ports
 
-## Important details
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 25   | SMTP     | Public mail exchange (MX) |
+| 465  | SMTPS    | Implicit TLS mail submission (authenticated) |
+| 587  | Submission | STARTTLS mail submission (authenticated) |
 
-The AD-DC LDAP structure will have the structure stated on the [original document](https://github.com/stdevPavelmc/mailad/blob/master/AD_Requirements.md):
+## Volumes
 
-- **Do not change the container name from 'mta', Squared! other containers on this swarm will relay on that name!**
-- If any doubts go to the MailAD official docs to see a more detailed explanation.
+| Container Path | Host / Source | Description |
+|----------------|---------------|-------------|
+| `/certs` | `ldata/certs` | TLS certificate (`mail.crt`) and private key (`mail.key`) |
+| `/home/vmail` | `ldata/vmail` | Mail storage volume (owned by `5000:5000`) |
+| `/var/spool` | `ldata/spool` | Postfix mail queue spool |
+
+## Variables
+
+Every tunable defaults inside the image (`mta/Dockerfile`). The operator file (`.env` in
+production, `env.dev` in development) overrides any value.
+
+### Mandatory deployment variables
+- `DEFAULT_DOMAIN`: Primary domain served by this MailD instance (e.g. `example.com`).
+- `MAIL_ADMIN_USER`: Local part for the mail administrator (e.g. `sysadmin`).
+- `POSTGRES_PASSWORD`: Password for the PostgreSQL catalogue.
+
+### Image defaults (overridable)
+- `POSTGRES_HOST=db`: Database service hostname.
+- `POSTGRES_DB=mailddb`: Catalogue database name.
+- `POSTGRES_USER=maild`: Catalogue database user.
+- `MAX_MESSAGESIZE=34865152`: Maximum message size in bytes (~25 MB; formula `1024 * 1024 * MB * 1.33`).
+- `SPF_ENABLE=True`: Enable SPF policy checks via `policyd-spf`.
+- `DNSBL_ENABLE=true`: Enable DNS-based blackhole list checks.
+- `DNSBL_LIST=zen.spamhaus.org=127.0.0.[2..11]*2,psbl.surriel.com,bl.spamcop.net,bl.spameatingmonkey.net`: Comma-separated DNSBL list.
+- `SMTP_TARPIT_DELAY=2`: Seconds to sleep before rejecting unknown recipients on port 25 (`0` disables).
+- `OUTBOUND_RATE_RECIPIENTS=200`: Maximum outbound recipients per user per rate window (`0` disables).
+- `OUTBOUND_RATE_WINDOW=3600`: Outbound rate limit window in seconds (default 1 hour).
+- `OUTBOUND_RATE_EXEMPT_USERS=`: Comma-separated addresses exempt from outbound rate limiting (e.g. `no-reply@example.com`).
+- `PEER_WAIT_TIMEOUT=120`: Seconds to wait at boot for peer services (`amavis`, `mda`) to resolve.
+- `PEER_WATCH_INTERVAL=30`: Seconds between peer IP watchdog checks (`0` disables).
+- `AMAVIS=amavis`: Amavis content filter container hostname.
+- `MDA=mda`: Dovecot MDA container hostname.
+- `MUA=MUA`: Webmail container hostname.
+- `AUTO_PROVISION=yes`: Await sentinel row written by `api` seeder before map configuration.
+- `PROVISION_VERSION=1`: Sentinel schema version expected.
+- `PROVISION_WAIT_TIMEOUT=180`: Seconds to wait for catalogue provisioning sentinel.
+
+### Optional overrides
+- `RELAY`: Upstream relay / smart host (e.g. `[smtp.relay.net]:587`).
+- `ALWAYS_BCC`: Address to receive hidden carbon copies of all inbound/outbound mail.
+- `POSTMASTER_ABUSE_SETUP=true`: Point domain postmaster and abuse aliases to the administrator.
+- `DEBUG=true`: Dumps the generated virtual alias mapping file at boot.
+- `MTA_DEBUG=1`: Verbose logging in Postfix daemon processes.
+
+## Operational commands
+
+```bash
+# Check Postfix health / status
+docker compose exec mta /check.sh
+
+# View Postfix live mail logs
+docker compose logs -f mta
+
+# Inspect the mail queue
+docker compose exec mta mailq
+
+# Flush the mail queue
+docker compose exec mta postfix flush
+
+# Reload configuration
+docker compose exec mta postfix reload
+```
+
+> [!WARNING]
+> Never change the container hostname from `mta` — other services in the stack rely on this hostname to route mail.
+
+# Inspect the mail queue
+docker compose exec mta mailq
+
+# Flush the mail queue
+docker compose exec mta postfix flush
+
+# Reload configuration
+docker compose exec mta postfix reload
+```
+
+> [!WARNING]
+> Never change the container hostname from `mta` — other services in the stack rely on this hostname to route mail.
+

@@ -296,6 +296,9 @@ services:
       - /var/log:/var/log
       - vmail:/home/vmail
       - db_backups:/backups
+      # read-only view of the DKIM keys Amavis signs with: check_dns.sh compares every
+      # domain's published selector/key against the real key (it never writes here)
+      - amavis:/var/lib/amavis:ro
     depends_on:
       - db
     networks:

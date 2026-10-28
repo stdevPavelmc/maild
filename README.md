@@ -11,19 +11,25 @@ creation, no down/up cycle. Full, automated walk-through: **[INSTALL.md](./INSTA
 
 TL;DR:
 
-1. `cp env.sample .env` and set `DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `MAIL_ADMIN_PASSWORD`
-   and `POSTGRES_PASSWORD`.
-2. Pick the compose file for your case and start the stack:
+1. `cp env.sample .env` and set `DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `POSTGRES_PASSWORD` and
+   **`ADMINNG_SECRET_KEY`** (`openssl rand -hex 32`); `MAIL_ADMIN_PASSWORD` is optional —
+   comment the line out and one is generated and printed in `docker compose logs api`.
+2. Create the external `maild` network once (if it isn't already): `docker network create maild`.
+   Pick the compose file for your case and start the stack:
 
    - **Docker Hub — preferred, general use (from the internet):**
+     `docker compose -f docker-compose.yml pull`
      `docker compose -f docker-compose.yml up -d`
    - **GitHub `ghcr.io` — restricted countries (e.g. Cuba) / Docker Hub blocked:**
+     `docker compose -f compose-github.yml pull`
      `docker compose -f compose-github.yml up -d`
    - **GitLab (own registry, with the shipped `.gitlab-ci.yml`):**
+     `docker compose -f compose-gitlab.yml pull`
      `docker compose -f compose-gitlab.yml up -d`
 
-3. Wait for `api: INFO - catalogue provisioned: ...` in `docker compose logs -f api`, then
-   open AdminNG as `MAIL_ADMIN_USER@DEFAULT_DOMAIN` and create your users.
+3. Wait for `api: INFO - catalogue provisioned: domain=... admin=...` in `docker compose logs -f api`, then
+   log in to AdminNG as `MAIL_ADMIN_USER@DEFAULT_DOMAIN`, approve the browser server-side and
+   enroll TOTP, then create your users.
 
 The webmail (`webmail.<DEFAULT_DOMAIN>`) and AdminNG (`adminng.<DEFAULT_DOMAIN>`) UIs are
 **not** published directly on production: front them with a reverse proxy / ingress
@@ -35,20 +41,20 @@ Prefer to seed by hand? Set `AUTO_PROVISION=no` in `.env` and run
 
 ## Services
 
-To create a realy dynamic setup we split the mail server in services:
+To create a really dynamic setup we split the mail server in services:
 
-- [**MTA** (Mail Transport Agent)](./mta/) this is the Postfix field, basically the reception and dispatching of mails to and form the mail server/users.
+- [**MTA** (Mail Transport Agent)](./mta/) this is the Postfix field, basically the reception and dispatching of mails to and from the mail server/users.
 - [**MDA** (Mail Delivery Agent)](./mda/) This is the Dovecot field, this has to do with the users checking his mails from the mailbox, quotas, etc.
-- [**AMAVIS** (Advanced filtering)](./amavis), it comprises attachments, anti-virus, anti-spam, etc.
+- [**AMAVIS** (Advanced filtering)](./amavis/) it comprises attachments, anti-virus, anti-spam, etc.
 - [**ClamAV**](./clamav/) AV scanning solution
-- **Postgres DB** this is the database lo hold the users data.
+- [**Postgres DB**](./db/) this is the database to hold the user's data.
 - [**AdminNG**](./adminng/) The administration UI: PWA frontend (`adminng`) + FastAPI (`api`) over the catalogue
-- [**MUA**](./mua/) This is the mail user agent, aka: Webmail provided by [Snappy Mail]()
+- [**MUA**](./mua/) This is the mail user agent, aka: Webmail provided by [Snappy Mail](https://snappymail.eu/)
 - [**Cron**](./cron/) This has to deal with scheduled tasks, backups, cleanups, statistics, etc.
 
 Follow the links for each service to get details for each docker image.
 
-Warning!: Under no cirscuntance change the name of the hostnames, it will break the setup.
+Warning!: Under no circumstance change the name of the hostnames, it will break the setup.
 
 ## SpamAssassin: rule updates, learning & maintenance
 
@@ -132,6 +138,81 @@ Note: a mailbox created with a quota of 0 in PostfixAdmin has *no* limit (doveco
 reports `-` for it), so it counts as unlimited and is never reported. Give such
 mailboxes a real quota for them to show up in the report.
 
+## Daily public-DNS health check
+
+The cron container runs `check_dns.sh` daily at 04:20 UTC and reports what the
+outside world sees for every active domain in the catalogue: delegation (NS/SOA),
+MX (resolution, CNAME targets, private IPs, and the set declared in
+`MX_HOSTNAME`), SPF (presence, terminal qualifier, syntax, the 10-DNS-lookup
+budget, MX-IP coverage), DMARC (presence/inheritance, `p`/`sp`/`pct`, `rua`
+routing), DKIM (the published selector vs. the key Amavis actually signs with),
+PTR/forward-confirmed rDNS of the MX IPs, MTA-STS/TLS-RPT when published, and
+domain/IP blocklists. Each finding is reported as *found → expected → impact →
+action* and mailed to `postmaster@<DEFAULT_DOMAIN>` (aliased to the admin) only
+when it reaches `DNS_CHECK_ALERT_LEVEL` (default `warning`): **silence means
+healthy**, there is no daily "all good" mail. Read-only: it never touches mail
+state. New knobs, all defaulted in the cron image: `MX_HOSTNAME` (unset ⇒ the
+expected MX set is inferred from `DEFAULT_DOMAIN`, reported as a notice),
+`DNS_CHECK_DOMAINS` (`none` disables the job), `DNS_CHECK_TO`, `DNS_CHECK_RESOLVER`
+(public resolvers matching Spamhaus's `127.255.255.x` are reported as a notice,
+never as a listing), `DNS_CHECK_BLOCKLISTS`, `DNS_CHECK_IP_BLOCKLISTS`,
+`DNS_CHECK_DKIM`, `DNS_CHECK_ALERT_LEVEL`, `DNS_CHECK_SPF_MX_COVERAGE`,
+`DNS_CHECK_TIMEOUT`. The job also takes `--dry-run` (print the report instead of
+mailing it), `--domains`, `--mx-hostname` and `--fixture-dir`.
+
+## SMTP security: local-part harvesting tarpit & outbound throttle
+
+The `mta` enforces two security mitigation:
+
+- **Local-part harvesting tarpit on :25** (F-07): external mail to your own
+  domains pays a `SMTP_TARPIT_DELAY` (image default 2 s, `0` disables) before the
+  `reject_unlisted_recipient` 550, and `smtpd_recipient_restrictions` was
+  reordered so relay attempts and authenticated clients skip the DB lookups and
+  the tarpit. Submission/smtps and the amavis reinjection override the list.
+  The progressive error slowdown now fires correctly (`soft=10`/`hard=60`).
+- **Per-user outbound submission throttle with a hard per-account exemption**
+  (F-12): the `mta` entrypoint supervises `ratelimitd`, a policy daemon on
+  loopback `12341`; `submission`/`smtps` defer (`450`) past
+  `OUTBOUND_RATE_RECIPIENTS` (default 200 envelope recipients per user per
+  `OUTBOUND_RATE_WINDOW`, default 1h; `0` disables).
+  `OUTBOUND_RATE_EXEMPT_USERS` (e.g. `no-reply@`, `sysadmin@`) bypasses the
+  throttle for notification senders. Fail-open by contract: a dead daemon stops
+  no mail, but the mta healthcheck goes unhealthy and restart-loops it. The cron
+  container gains `outbound_watch.sh`: it parses the production syslog for
+  per-user submission volume and `maild-ratelimit: throttled` lines and mails
+  the admin an `[ALERT]` past `OUTBOUND_ALERT_MESSAGES` (150/day/user, `0` =
+  off), honouring `OUTBOUND_ALERT_IGNORE_USERS`, once per user per day. Port 25
+  and the amavis reinjection stay unlimited by design (MX + internal paths).
+
+## Password security: Argon2id hashing, rehash-on-login & weak-scheme deprecation
+
+Mailbox and administrator passwords use **Argon2id** hashes by default
+(`{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…`), the scheme PostfixAdmin's
+catalogue writers and Dovecot's SQL passdb share. A new shared `PASSWORD_SCHEME`
+knob (`argon2id` default, `md5crypt` legacy escape hatch) selects the scheme in
+the admin, api, mda and mua images. Legacy `$1$` (MD5-CRYPT) hashes coexist and
+**rehash-on-login**: `mda/scripts/rehash-password.sh`, wired as an
+`imap-postlogin`/`pop3-postlogin` service, migrates a legacy `$1$` row to
+Argon2id on the user's next successful IMAP/POP3 login. `adminng.py --legacy-hashes`
+lists the rows still on legacy hashes, and the mda logs a startup warning with
+the remaining count every boot.
+
+**Weak-scheme (md5crypt) support ends stack-wide on 2027-02-01**, enforced at
+runtime: `mda/docker-entrypoint.sh` date-gates `auth_allow_weak_schemes` on
+every boot and the API refuses to boot with `PASSWORD_SCHEME=md5crypt` after the
+deadline — from then legacy `$1$` hashes stop authenticating. Documented in
+`env.sample`, `INSTALL.md`, `.agents/services/configuration.md` and
+`adminng/doc/technical-draft.md` §3.1.
+
+## Amavis: attachment decompressor helpers
+
+The `amavis` image carries amavisd's decompressor helpers — `bzip2`,
+`xz-utils`, `lrzip`, `lzop`, `lz4` and `rpm2cpio` — so `.bz2`/`.xz`/`.lzma`/
+`.lrz`/`.lzo`/`.lz4`/`.rpm` attachments are extracted and scanned instead of
+being flagged **UNCHECKED**. Package names differ from the binaries amavisd's
+`@decoders` table calls: `xz` comes from `xz-utils` and `lz4c` is a symlink
+shipped by the `lz4` package (neither has a same-named distro package).
+
 ## Installation & server setup
 
 The installation, the first-boot provisioning, the first login, DKIM and the manual fallback
@@ -141,7 +222,8 @@ The installation, the first-boot provisioning, the first login, DKIM and the man
 
 MailD also ships **AdminNG**, a PWA-first administration UI (domains, accounts, aliases,
 alias domains, administrators, devices and audit logs) with a zero-trust device model,
-mandatory TOTP for superadmins and a full audit trail:
+mandatory TOTP for superadmins, device-scoped WebAuthn (biometric) sign-in, and a full
+audit trail:
 
 - **Dev:** <http://localhost:8083> · **Production:** `https://adminng.<DEFAULT_DOMAIN>`
   through your ingress (Traefik labels are already in the production compose files).
@@ -156,6 +238,11 @@ mandatory TOTP for superadmins and a full audit trail:
   `adminng/pwa/app-generate.sh` (see `adminng/README.md`).
 - **New mandatory variable:** `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption,
   `openssl rand -hex 32`). Rotating it invalidates sessions and enrolled TOTP seeds.
+- **Device trust & biometric sign-in:** approving a browser is device-scoped; a
+  successful TOTP login arms a fixed `ADMINNG_REMEMBER_TTL` window (default 24 h)
+  that skips the TOTP challenge on subsequent logins from that browser. A dismissible
+  biometric (WebAuthn/passkey) enrollment prompt appears after the first login, and
+  the PWA supports user-verified biometric sign-in and destructive-action re-auth.
 - Design and roadmap: `adminng/doc/technical-draft.md` and `adminng/doc/plan.md`;
   operator how-to: `adminng/README.md`. PostfixAdmin was retired with the `admin` service:
   AdminNG is the only web administration UI, and MailD now owns the catalogue schema

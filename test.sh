@@ -1460,6 +1460,139 @@ else
     if [ "$RES_SEEDED" = 1 ] ; then
         info "the materialised /var/log/syslog is removed from the cron container on exit"
     fi
+    # ------------------------------------------------ daily DNS health check ---
+    # check_dns.sh (cron, `20 04 * * *`) verifies what the OUTSIDE world sees for every
+    # active domain (MX, SPF, DMARC, DKIM against the keys Amavis really signs with,
+    # PTR/FCrDNS, MTA-STS/TLS-RPT when published, blocklists) and mails the admin only when
+    # a finding reaches DNS_CHECK_ALERT_LEVEL — silence is the success signal. The answers
+    # below come from a fixture tree pushed into the cron container (`--fixture-dir`: one
+    # `<TYPE>.<name>` file per answer holding raw `host` output, a missing file = NXDOMAIN),
+    # so nothing here depends on the public DNS or on the fictitious dev domains.
+    if ! dcx cron sh -c 'grep -q "^20 04 \* \* \* .*check_dns\.sh" /etc/crontab' ; then
+        t_fail "G15 the DNS health check is scheduled in the cron crontab (no 04:20 check_dns.sh entry)"
+    else
+        t_ok "G15 the DNS health check is scheduled daily at 04:20 in the cron crontab"
+    fi
+
+    DNS_GATE="$(dcx cron printenv DNS_CHECK_ALERT_LEVEL 2>/dev/null | tr -d '\r')"
+    if dcx cron test -r /var/lib/amavis/dkim/db.txt && [ -n "$DNS_GATE" ] ; then
+        t_ok "G16 the cron container reads the amavis DKIM keys (read-only mount) and carries the DNS_CHECK_* defaults (gate=$DNS_GATE)"
+    else
+        t_fail "G16 the cron container reads the amavis DKIM keys and carries the DNS_CHECK_* defaults (db.txt readable? gate='${DNS_GATE}': without the mount the DKIM comparison degrades to a notice)"
+    fi
+
+    DNS_DOM_OK=good.example
+    DNS_DOM_BAD=broken.example
+    DNS_SUBJ="[ALERT] MailD DNS health"
+    DNSFIX="$TMPRUN/dnsfix"
+    rm -rf "$DNSFIX" ; mkdir -p "$DNSFIX"
+    dnsfix() { printf '%s\n' "$3" > "$DNSFIX/$1.$2" ; }
+    # a healthy domain: delegated, one MX that resolves, SPF "mx -all", DMARC reject with a
+    # routed rua, matching PTR/FCrDNS, no optional records and clean blocklists
+    dnsfix SOA "$DNS_DOM_OK" "$DNS_DOM_OK has SOA record ns1.$DNS_DOM_OK. hostmaster.$DNS_DOM_OK. 2026010101 3600 600 604800 300"
+    dnsfix NS "$DNS_DOM_OK" "$DNS_DOM_OK name server ns1.$DNS_DOM_OK."
+    dnsfix MX "$DNS_DOM_OK" "$DNS_DOM_OK mail is handled by 10 mta.$DNS_DOM_OK."
+    dnsfix CNAME "mta.$DNS_DOM_OK" "mta.$DNS_DOM_OK has no CNAME record"
+    dnsfix A "mta.$DNS_DOM_OK" "mta.$DNS_DOM_OK has address 203.0.113.10."
+    dnsfix AAAA "mta.$DNS_DOM_OK" "mta.$DNS_DOM_OK has no IPv6 address"
+    dnsfix TXT "$DNS_DOM_OK" "$DNS_DOM_OK descriptive text \"v=spf1 mx -all\""
+    dnsfix TXT "_dmarc.$DNS_DOM_OK" "_dmarc.$DNS_DOM_OK descriptive text \"v=DMARC1; p=reject; rua=mailto:postmaster@$DNS_DOM_OK\""
+    dnsfix CNAME "_dmarc.$DNS_DOM_OK" "_dmarc.$DNS_DOM_OK has no CNAME record"
+    dnsfix PTR 10.113.0.203.in-addr.arpa "10.113.0.203.in-addr.arpa domain name pointer mta.$DNS_DOM_OK."
+    dnsfix TXT "_mta-sts.$DNS_DOM_OK" "_mta-sts.$DNS_DOM_OK has no TXT record"
+    dnsfix A "mta-sts.$DNS_DOM_OK" "mta-sts.$DNS_DOM_OK has no A record"
+    dnsfix AAAA "mta-sts.$DNS_DOM_OK" "mta-sts.$DNS_DOM_OK has no IPv6 address"
+    dnsfix TXT "_smtp._tls.$DNS_DOM_OK" "_smtp._tls.$DNS_DOM_OK has no TXT record"
+    dnsfix A "$DNS_DOM_OK.multi.surbl.org" "$DNS_DOM_OK.multi.surbl.org has no A record"
+    dnsfix A 10.113.0.203.zen.spamhaus.org "10.113.0.203.zen.spamhaus.org has no A record"
+    # a broken domain: MX on a foreign host, SPF +all, no DMARC, a PTR that does not confirm
+    # forward, listed on the domain blocklist and a "refused" answer on the IP blocklist
+    dnsfix SOA "$DNS_DOM_BAD" "$DNS_DOM_BAD has SOA record ns1.$DNS_DOM_BAD. hostmaster.$DNS_DOM_BAD. 1 3600 600 604800 300"
+    dnsfix NS "$DNS_DOM_BAD" "$DNS_DOM_BAD name server ns1.$DNS_DOM_BAD."
+    dnsfix MX "$DNS_DOM_BAD" "$DNS_DOM_BAD mail is handled by 10 mx.elsewhere.example."
+    dnsfix CNAME mx.elsewhere.example "mx.elsewhere.example has no CNAME record"
+    dnsfix A mx.elsewhere.example "mx.elsewhere.example has address 198.51.100.7."
+    dnsfix AAAA mx.elsewhere.example "mx.elsewhere.example has no IPv6 address"
+    dnsfix TXT "$DNS_DOM_BAD" "$DNS_DOM_BAD descriptive text \"v=spf1 +all\""
+    dnsfix CNAME "_dmarc.$DNS_DOM_BAD" "_dmarc.$DNS_DOM_BAD has no CNAME record"
+    dnsfix TXT "_dmarc.$DNS_DOM_BAD" "_dmarc.$DNS_DOM_BAD has no TXT record"
+    dnsfix PTR 7.100.51.198.in-addr.arpa "7.100.51.198.in-addr.arpa domain name pointer host7.isp.example."
+    dnsfix A host7.isp.example "host7.isp.example has address 198.51.100.8."
+    dnsfix TXT "_mta-sts.$DNS_DOM_BAD" "_mta-sts.$DNS_DOM_BAD has no TXT record"
+    dnsfix A "mta-sts.$DNS_DOM_BAD" "mta-sts.$DNS_DOM_BAD has no A record"
+    dnsfix AAAA "mta-sts.$DNS_DOM_BAD" "mta-sts.$DNS_DOM_BAD has no IPv6 address"
+    dnsfix TXT "_smtp._tls.$DNS_DOM_BAD" "_smtp._tls.$DNS_DOM_BAD has no TXT record"
+    dnsfix A "$DNS_DOM_BAD.multi.surbl.org" "$DNS_DOM_BAD.multi.surbl.org has address 127.0.0.2."
+    dnsfix A 7.100.51.198.zen.spamhaus.org "7.100.51.198.zen.spamhaus.org has address 127.255.255.254."
+    tar -C "$DNSFIX" -cf - . | dcx cron sh -c 'rm -rf /tmp/dnsfix && mkdir -p /tmp/dnsfix && tar -C /tmp/dnsfix -xf -' || true
+
+    DNS_MAIL_BEFORE="$(subj_count "$DEPLOY_ADMIN" INBOX "$DNS_SUBJ")"
+    dcx cron /scripts/check_dns.sh --dry-run --fixture-dir /tmp/dnsfix \
+        --domains "$DNS_DOM_OK" --mx-hostname "mta.$DNS_DOM_OK" > "$TMPRUN/dns-ok.log" 2>&1
+    DNS_OK_RC=$?
+    if [ "$DNS_OK_RC" -eq 0 ] && grep -q 'no findings at/above' "$TMPRUN/dns-ok.log" ; then
+        t_ok "G17 check_dns.sh exits 0 and stays silent when every record of $DNS_DOM_OK is healthy"
+    else
+        t_fail "G17 check_dns.sh exits 0 and stays silent when every record is healthy (rc=$DNS_OK_RC)"
+        info "$(grep -E 'MailD: dns check' "$TMPRUN/dns-ok.log" | tail -n 8 | sed 's/^/        /')"
+    fi
+
+    dcx cron /scripts/check_dns.sh --dry-run --fixture-dir /tmp/dnsfix \
+        --domains "$DNS_DOM_OK" --mx-hostname '' > "$TMPRUN/dns-infer.log" 2>&1
+    DNS_INFER_RC=$?
+    if [ "$DNS_INFER_RC" -eq 0 ] && grep -q 'MX_HOSTNAME is unset' "$TMPRUN/dns-infer.log" ; then
+        t_ok "G18 an unset MX_HOSTNAME degrades to the documented inference path (notice, exit 0, no mail)"
+    else
+        t_fail "G18 an unset MX_HOSTNAME degrades to the inference path (rc=$DNS_INFER_RC)"
+        info "$(grep -E 'MailD: dns check' "$TMPRUN/dns-infer.log" | tail -n 8 | sed 's/^/        /')"
+    fi
+
+    dcx cron /scripts/check_dns.sh --fixture-dir /tmp/dnsfix \
+        --domains "$DNS_DOM_BAD" --mx-hostname "mta.$DNS_DOM_OK" > "$TMPRUN/dns-bad.log" 2>&1
+    DNS_BAD_RC=$?
+    if [ "$DNS_BAD_RC" -eq 1 ] ; then
+        t_ok "G19 check_dns.sh exits 1 and mails when $DNS_DOM_BAD has findings above the gate"
+    else
+        t_fail "G19 check_dns.sh exits 1 when there are findings above the gate (rc=$DNS_BAD_RC)"
+        info "$(grep -E 'MailD: dns check' "$TMPRUN/dns-bad.log" | tail -n 8 | sed 's/^/        /')"
+    fi
+
+    if ! wait_subj_count_gt "$DEPLOY_ADMIN" INBOX "$DNS_SUBJ" "${DNS_MAIL_BEFORE:-0}" 240 ; then
+        t_fail "G20 the DNS report reached $DEPLOY_ADMIN's INBOX through postmaster@$DEFAULT_DOMAIN (still $(subj_count "$DEPLOY_ADMIN" INBOX "$DNS_SUBJ") match(es), had ${DNS_MAIL_BEFORE:-0})"
+        info "$(grep -E 'MailD: dns check' "$TMPRUN/dns-bad.log" | tail -n 6 | sed 's/^/        /')"
+    else
+        t_ok "G20 the DNS report reached $DEPLOY_ADMIN's INBOX through the postmaster@$DEFAULT_DOMAIN alias"
+        DNS_UID="$(msg_newest_uid "$DEPLOY_ADMIN" INBOX "$DNS_SUBJ")"
+        msg_text "$DEPLOY_ADMIN" INBOX "${DNS_UID:-0}" > "$TMPRUN/dns-mail.txt" 2>&1
+        DNS_MISS=""
+        grep -qF "$DNS_DOM_BAD" "$TMPRUN/dns-mail.txt" || DNS_MISS="$DNS_MISS domain-not-named;"
+        grep -qF '+all' "$TMPRUN/dns-mail.txt" || DNS_MISS="$DNS_MISS spf-not-reported;"
+        grep -qF 'mx.elsewhere.example' "$TMPRUN/dns-mail.txt" || DNS_MISS="$DNS_MISS mx-mismatch-not-reported;"
+        grep -q 'blocklist' "$TMPRUN/dns-mail.txt" || DNS_MISS="$DNS_MISS blocklist-not-reported;"
+        grep -q 'PTR' "$TMPRUN/dns-mail.txt" || DNS_MISS="$DNS_MISS ptr-not-reported;"
+        if [ -z "$DNS_MISS" ] ; then
+            t_ok "G21 the report names each broken record of $DNS_DOM_BAD (SPF +all, foreign MX, blocklist listing, PTR)"
+        else
+            t_fail "G21 the report names each broken record of $DNS_DOM_BAD (${DNS_MISS})"
+            info "$(sed -n '/^Domain:/,$p' "$TMPRUN/dns-mail.txt" | head -n 20 | sed 's/^/        /')"
+        fi
+        if [ "$(grep -c 'impact' "$TMPRUN/dns-mail.txt")" -ge 3 ] && \
+           [ "$(grep -c 'action' "$TMPRUN/dns-mail.txt")" -ge 3 ] ; then
+            t_ok "G22 every reported finding carries a found/expected/impact/action block (recommendations, not just alarms)"
+        else
+            t_fail "G22 every reported finding carries a found/expected/impact/action block (impact=$(grep -c 'impact' "$TMPRUN/dns-mail.txt") action=$(grep -c 'action' "$TMPRUN/dns-mail.txt"))"
+        fi
+    fi
+
+    if dcx cron /scripts/check_dns.sh --dry-run --domains none > "$TMPRUN/dns-off.log" 2>&1 && \
+       grep -q 'disabled by DNS_CHECK_DOMAINS=none' "$TMPRUN/dns-off.log" ; then
+        t_ok "G23 DNS_CHECK_DOMAINS=none disables the job without touching the catalogue (exit 0, no mail)"
+    else
+        t_fail "G23 DNS_CHECK_DOMAINS=none disables the job (see $TMPRUN/dns-off.log)"
+        info "$(tail -n 4 "$TMPRUN/dns-off.log" | sed 's/^/        /')"
+    fi
+    dcx cron rm -rf /tmp/dnsfix > /dev/null 2>&1 || true
+
 fi
 
 

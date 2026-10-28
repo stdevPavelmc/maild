@@ -85,6 +85,41 @@ cd adminng/pwa && npm run build           # i18n gate -> tsc --noEmit -> Vite
   `ldata/e2e/`.
 - CI: `.github/workflows/pwa-e2e.yml` (manual dispatch) builds the stack and runs the gate.
 
+## Variables
+
+Every tunable defaults inside the respective service image (`adminng/api/Dockerfile`).
+The operator file (`.env` in production, `env.dev` in development) overrides any value.
+
+### Mandatory deployment variables
+- `ADMINNG_SECRET_KEY`: 32-byte hex key (`openssl rand -hex 32`) for JWT signing and TOTP encryption.
+- `DEFAULT_DOMAIN`: Primary domain served by MailD.
+- `MAIL_ADMIN_USER`: Superadmin username (e.g. `sysadmin`).
+- `POSTGRES_PASSWORD`: PostgreSQL catalogue password.
+
+### Image defaults (overridable via `.env`)
+- `ADMINNG_DB=adminng`: Dedicated database for AdminNG state (devices, sessions, 2FA credentials, audit trail).
+- `ADMINNG_ACCESS_TTL=600`: Access token lifetime in seconds (10 minutes).
+- `ADMINNG_REFRESH_IDLE_TTL=900`: Refresh token idle expiration window (15 minutes).
+- `ADMINNG_REMEMBER_TTL=86400`: Trust window duration for remembered devices (24 hours).
+- `ADMINNG_REAUTH_TTL=30`: Lifespan of the validation token required for destructive actions.
+- `ADMINNG_TOTP_REQUIRED=superadmin`: TOTP policy (`superadmin` | `all` | `none`).
+- `ADMINNG_AUTO_APPROVE_FIRST=no`: If `yes`, the very first superadmin login automatically approves that browser.
+- `ADMINNG_PENDING_TTL_DAYS=3`: Expiration for unapproved device requests.
+- `ADMINNG_WEBAUTHN_RP_ID=localhost`: Relying Party ID for WebAuthn passkeys (override in production with domain name).
+- `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084`: Allowed WebAuthn origins (override in production with public HTTPS origin).
+- `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300`: WebAuthn challenge lifetime in seconds.
+- `ADMINNG_SEARCH_LIMIT=20`: Maximum results per category in rapid search.
+- `ADMINNG_QUOTA_CACHE_TTL=300`: Mailbox quota cache TTL in seconds.
+- `PASSWORD_SCHEME=argon2id`: Password hash format (`argon2id` default, `md5crypt` legacy).
+
+### Optional overrides
+- `MAIL_ADMIN_PASSWORD`: Superadmin password. If commented out or empty, generated at first boot and logged.
+
+### Frontend build-time variables (`adminng/pwa`)
+`adminng` is a static Vite/React bundle served by nginx:
+- `VITE_API_BASE`: Empty by default (same-origin relative `/api/v1/` proxy).
+- `VITE_REQUIRE_SERVER_URL`: Unset by default; set to `1` for bundled asset builds requiring explicit server address prompt.
+
 
 ## Android APK (Phase 4)
 

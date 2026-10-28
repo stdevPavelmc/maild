@@ -22,4 +22,8 @@
 # engagement alerts; needs the production syslog like the daily resume
 23 * * * * root /scripts/outbound_watch.sh >/proc/1/fd/1 2>/proc/1/fd/2
 
+# daily public-DNS health check: MX/SPF/DMARC/DKIM/PTR/blocklists for every active domain,
+# mailed to postmaster@DEFAULT_DOMAIN only when something is off (silent when all is well)
+20 04 * * * root /scripts/check_dns.sh >/proc/1/fd/1 2>/proc/1/fd/2
+
 # An empty line is required at the end of this file for a valid cron file.
