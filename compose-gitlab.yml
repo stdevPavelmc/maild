@@ -315,6 +315,8 @@ services:
       MCP_SMTP_PORT:
       MCP_ACCESS_TTL:
       MCP_USER_SESSION_TTL:
+      MCP_ADMIN_SESSION_TTL:
+      MCP_MASTER_TOKEN_MAX_TTL:
       MCP_SEND_RATE_RECIPIENTS:
       MCP_SEND_RATE_WINDOW:
       # the mta's message-size limit, applied by the MCP before it submits

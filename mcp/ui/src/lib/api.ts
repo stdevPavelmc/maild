@@ -24,6 +24,9 @@ export interface Prefs {
   signature: string
   hidden_folders: string[]
   allow_attachments: boolean
+  notify_new_token: boolean
+  notify_new_client: boolean
+  notify_master_access: boolean
 }
 
 export interface Account {

@@ -53,7 +53,15 @@
     "invalid_sender": "El remitente predeterminado debe ser una dirección confirmada de esta cuenta.",
     "signature_too_long": "La firma es demasiado larga.",
     "too_many_folders": "Demasiadas carpetas ocultas.",
-    "inbox_not_hideable": "INBOX no se puede ocultar a los agentes."
+    "inbox_not_hideable": "INBOX no se puede ocultar a los agentes.",
+    "weak_password": "Use al menos 12 caracteres.",
+    "invalid_code": "Este código ya no es válido: empiece de nuevo.",
+    "too_many_attempts": "Demasiados códigos erróneos: empiece de nuevo.",
+    "wrong_code": "Código incorrecto.",
+    "invalid_setting": "Un valor está fuera de rango.",
+    "unknown_domain": "Dominio desconocido.",
+    "invalid_cidr": "No es una red válida (CIDR).",
+    "invalid_kind": "Registro desconocido."
   },
   "confirm": {
     "title": "Confirmar una dirección",
@@ -185,12 +193,158 @@
     "signatureHint": "Se añade al correo que envían los agentes (hasta 2000 caracteres).",
     "hiddenFolders": "Carpetas ocultas a los agentes",
     "hiddenHint": "Nombres de carpeta separados por comas. Los agentes nunca las listan, buscan ni tocan (INBOX no se puede ocultar).",
-    "allowAttachments": "Permitir que los agentes descarguen adjuntos"
+    "allowAttachments": "Permitir que los agentes descarguen adjuntos",
+    "notifyTitle": "Avisarme por correo cuando",
+    "notify_new_token": "se cree un token nuevo para mi cuenta",
+    "notify_new_client": "un token se use desde una dirección o cliente nuevo",
+    "notify_master_access": "el token maestro del administrador abra mi buzón (si el administrador activó estos avisos)"
   },
   "activity": {
     "title": "Actividad",
     "refresh": "Actualizar",
     "none": "Todavía nada.",
     "token": "token"
+  },
+  "admin": {
+    "title": "MailD MCP — administración",
+    "saved": "Guardado.",
+    "login": {
+      "subtitle": "Acceso del administrador",
+      "username": "Usuario",
+      "codeTitle": "Revise su correo",
+      "codeSent": "Se envió un código de 6 dígitos a {{to}}. Es válido durante 10 minutos.",
+      "code": "Código",
+      "verify": "Verificar",
+      "forgot": "¿Olvidó la contraseña?"
+    },
+    "recover": {
+      "title": "Restablecer la contraseña de administración",
+      "email": "Correo del administrador",
+      "send": "Enviar el enlace",
+      "sent": "Si es la dirección del administrador, un enlace de restablecimiento (válido 30 minutos) va en camino.",
+      "back": "Volver al acceso"
+    },
+    "reset": {
+      "title": "Elija una nueva contraseña de administración",
+      "submit": "Guardar la nueva contraseña",
+      "done": "Contraseña cambiada. Entre con ella ahora."
+    },
+    "password": {
+      "current": "Contraseña actual",
+      "new": "Nueva contraseña",
+      "again": "Repita la nueva contraseña",
+      "rules": "Al menos 12 caracteres.",
+      "mismatch": "Las dos contraseñas no coinciden.",
+      "change": "Cambiar la contraseña",
+      "code": "Código enviado a {{to}}",
+      "confirm": "Confirmar",
+      "changed": "Contraseña cambiada; se cerraron las demás sesiones de administración."
+    },
+    "user": {
+      "title": "Usuario administrador",
+      "signedIn": "{{user}} — los avisos y códigos van a {{email}}",
+      "newEmail": "Nuevo correo del administrador",
+      "sendCodes": "Enviar los códigos",
+      "codeOld": "Código enviado a la dirección ANTIGUA ({{to}})",
+      "codeNew": "Código enviado a la dirección NUEVA ({{to}})",
+      "confirmEmail": "Cambiar el correo",
+      "emailChanged": "Se cambió el correo del administrador."
+    },
+    "domains": {
+      "title": "Dominios",
+      "allowed": "Permitidos",
+      "denied": "Denegados",
+      "allow": "Permitir el dominio seleccionado",
+      "deny": "Denegar el dominio seleccionado",
+      "inactive": "inactivo en el catálogo",
+      "hint": "Se listan todos los dominios del servidor; los nuevos empiezan denegados. Haga doble clic en un dominio (o selecciónelo y use las flechas) para moverlo."
+    },
+    "logging": {
+      "title": "Registros",
+      "enabled": "Registro de auditoría activado",
+      "cat": {
+        "web_login": "Accesos web",
+        "bearer_access": "Accesos con token (MCP / REST)",
+        "mail_actions": "Acciones de correo",
+        "token_lifecycle": "Cambios de tokens y direcciones",
+        "admin_changes": "Cambios de administración",
+        "errors": "Errores",
+        "security": "Eventos de seguridad (bloqueos, captcha, permisos denegados, límites)"
+      },
+      "masterAlways": "El uso de tokens maestros siempre se registra, digan lo que digan estos interruptores.",
+      "rotation": "Nuevo archivo cada",
+      "rotations": {
+        "day": "día",
+        "week": "semana",
+        "month": "mes"
+      },
+      "retention": "Archivos conservados por registro",
+      "retentionHint": "Habitual: 90 días, 26 semanas o 12 meses."
+    },
+    "policy": {
+      "title": "Política de usuarios",
+      "max_tokens": "Máximo de tokens por usuario",
+      "pat_default_days": "Duración predeterminada del token (días)",
+      "pat_idle_days": "Desactivar tokens sin uso durante (días, máx. 30)",
+      "send_rate_recipients": "Destinatarios por ventana",
+      "send_rate_window": "Ventana del límite (segundos)",
+      "max_message_size": "Tamaño máximo de mensaje (bytes)",
+      "max_attachment_bytes": "Adjunto máximo entregado a agentes (bytes)",
+      "magic_link_hours": "Validez del enlace mágico (horas)",
+      "resend_base_seconds": "Primera espera de reenvío (segundos, se duplica)",
+      "max_secondary": "Máximo de direcciones secundarias",
+      "pat_forever_allowed": "Los usuarios pueden crear tokens sin caducidad",
+      "allow_external": "Los agentes pueden enviar fuera de este servidor",
+      "force_confirm": "Todo envío de un agente requiere confirmación",
+      "allow_no_confirm": "Los usuarios pueden desactivar la confirmación de envío",
+      "master_notify_user": "Avisar al titular cuando un token maestro accede a su buzón"
+    },
+    "master": {
+      "title": "Tokens maestros",
+      "hint": "Un token maestro abre cualquier buzón de un dominio permitido, ignorando el interruptor MCP y las direcciones del titular. Cada petición indica el buzón en la cabecera X-MailD-Act-As y siempre queda registrada.",
+      "ttl": "Duración (horas, como máximo {{max}})",
+      "cidrs": "Redes de origen permitidas (opcional)",
+      "cidrsHint": "CIDR separados por comas; vacío = cualquier origen.",
+      "create": "Crear el token maestro",
+      "showOnce": "Copie el token ahora: solo se muestra una vez.",
+      "howTo": "Los clientes envían Authorization: Bearer <token> y X-MailD-Act-As: usuario@dominio."
+    },
+    "service": {
+      "title": "Correo de servicio",
+      "sender": "Remitente: {{address}}",
+      "inactive": "inactivo",
+      "inactiveHint": "El buzón de servicio está inactivo: el correo de servicio sale, pero se pierden las respuestas y rebotes.",
+      "internal": "Interno (amavis, firmado DKIM)",
+      "external": "Servidor SMTP externo",
+      "host": "Servidor",
+      "port": "Puerto",
+      "tls": "Cifrado",
+      "tlsModes": {
+        "none": "Ninguno",
+        "starttls": "STARTTLS",
+        "implicit": "TLS implícito"
+      },
+      "user": "Usuario (opcional)",
+      "password": "Contraseña",
+      "passwordKept": "Hay una contraseña guardada; déjelo vacío para conservarla.",
+      "testTitle": "Probar el correo de servicio",
+      "testHint": "Envía un mensaje de prueba a {{to}} con la configuración guardada.",
+      "test": "Enviar un mensaje de prueba",
+      "testing": "Probando…",
+      "testOk": "El mensaje de prueba fue aceptado.",
+      "testFail": "La prueba falló.",
+      "verifyTls": "Verificar el certificado del servidor",
+      "verifyOff": "La verificación del certificado está desactivada: la conexión va cifrada pero el servidor no se autentica (cualquiera en el camino podría suplantarlo). Úselo solo con un servidor autofirmado o de CA privada que usted controle."
+    },
+    "logs": {
+      "title": "Registros",
+      "kind": "Registro",
+      "filter": "Filtro",
+      "kinds": {
+        "audit": "Auditoría",
+        "access": "Accesos",
+        "errors": "Errores"
+      }
+    }
   }
 }

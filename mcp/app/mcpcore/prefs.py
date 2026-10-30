@@ -37,7 +37,7 @@ def update(account: Account, data: dict) -> dict:
             if any(n.upper() == "INBOX" for n in names):
                 raise AccountError("inbox_not_hideable", "INBOX cannot be hidden from agents.")
             value = sorted(set(names))
-        if key == "allow_attachments":
+        if key in ("allow_attachments", "notify_new_token", "notify_new_client", "notify_master_access"):
             value = bool(value)
         current[key] = value
     account.prefs = current

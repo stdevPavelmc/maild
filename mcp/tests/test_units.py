@@ -146,3 +146,50 @@ def test_subjects_and_quote():
 def test_outgoing_recipients_are_unique_and_include_bcc():
     out = sending.Outgoing(sender="a@x.cu", to=["b@x.cu"], cc=["b@x.cu", "c@x.cu"], bcc=["d@x.cu"])
     assert out.recipients == ["b@x.cu", "c@x.cu", "d@x.cu"]
+
+
+# ------------------------------------------------------------------- P3 ---
+from mcpcore import adminauth, settings_store, tokens as tok_mod  # noqa: E402
+
+
+def test_policy_bounds():
+    cur = settings_store.defaults("user_policy")
+    with pytest.raises(settings_store.SettingsError):
+        settings_store._validate("user_policy", {"pat_idle_days": 31}, cur)      # D12: never above 30
+    with pytest.raises(settings_store.SettingsError):
+        settings_store._validate("user_policy", {"max_message_size": settings_store.env_max_messagesize() + 1}, cur)
+    ok = settings_store._validate("user_policy", {"pat_idle_days": 7, "force_confirm": True}, cur)
+    assert ok["pat_idle_days"] == 7 and ok["force_confirm"] is True and ok["max_tokens"] == cur["max_tokens"]
+
+
+def test_logging_and_service_email_validation():
+    lg = settings_store._validate("logging", {"rotation": "week", "retention": 26,
+                                              "categories": {"mail_actions": False}}, settings_store.defaults("logging"))
+    assert lg["rotation"] == "week" and lg["categories"]["mail_actions"] is False and lg["categories"]["security"] is True
+    with pytest.raises(settings_store.SettingsError):
+        settings_store._validate("logging", {"rotation": "hour"}, settings_store.defaults("logging"))
+    se = settings_store.defaults("service_email")
+    with pytest.raises(settings_store.SettingsError):
+        settings_store._validate("service_email", {"transport": "external", "host": ""}, se)
+    out = settings_store._validate("service_email", {"transport": "external", "host": "smtp.x", "password": "s3cret"}, se)
+    assert out["password"] and out["password"] != "s3cret"          # stored encrypted
+    from mcpcore import crypto
+    assert crypto.decrypt(out["password"]) == "s3cret"
+    kept = settings_store._validate("service_email", {"host": "smtp.y"}, out)
+    assert kept["password"] == out["password"]                       # "" / absent keeps it
+    assert out["verify_tls"] is True                                 # default on
+
+
+def test_master_token_cidr_allowlist():
+    t = Token(kind=Token.MASTER, allowed_cidrs=["192.0.2.0/24", "2001:db8::/32"])
+    assert tok_mod.ip_allowed(t, "192.0.2.7") and tok_mod.ip_allowed(t, "2001:db8::1")
+    assert not tok_mod.ip_allowed(t, "198.51.100.1") and not tok_mod.ip_allowed(t, "not-an-ip")
+    assert tok_mod.ip_allowed(Token(kind=Token.MASTER, allowed_cidrs=None), "198.51.100.1")
+
+
+def test_admin_codes_and_password_rules():
+    codes = {adminauth._code() for _ in range(200)}
+    assert all(len(c) == 6 and c.isdigit() for c in codes) and len(codes) > 150
+    with pytest.raises(Exception):
+        adminauth.check_password_rules("short")
+    adminauth.check_password_rules("a" * 12)

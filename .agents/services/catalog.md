@@ -519,8 +519,33 @@ more. See `.agents/services/provisioning.md`.
   `default_sender`, `signature`, `hidden_folders` (never listed, searched, threaded, watched or
   touched; INBOX cannot be hidden), `allow_attachments`; `GET /webapi/user/activity` = the last
   50 audit actions of the account (per-request `bearer.access` records excluded).
-- **Service mail** (magic links, notices) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10026, bank
-  INTERNAL) as `MCP_SERVICE_EMAIL`, EN/ES, `Auto-Submitted: auto-generated`.
+- **Admin panel (P3)** at `/adminmcp` — a separate Vite entry (no admin code in the user page's
+  chunks) over `/webapi/admin/*`. Sign-in = username + password + ALTCHA + a **6-digit code mailed
+  to the admin address at every login** (10 min, 5 attempts; `otp_challenge`), lockout 5/15 min,
+  72 h session (`MCP_ADMIN_SESSION_TTL`, refresh cookie `mdmcp_admin_refresh`, Path=/webapi/admin).
+  Recovery link (30 min, neutral answer), password change (current + code), email change (codes to
+  the old AND new address, checked together), CLI `manage.py mcp_admin_reset [--password …]`
+  (revokes the admin sessions). Settings groups in the `setting` table (`mcpcore/settings_store.py`,
+  validated, cached 2 s per worker): `logging` (on/off, 7 category switches, day/week/month
+  rotation, retention), `user_policy` (token limits, idle ≤ 30 d, send limits, size ≤ the mta's
+  `MAX_MESSAGESIZE`, `allow_external`, `force_confirm`, `allow_no_confirm`, magic-link/resend,
+  `master_notify_user`), `service_email` (internal | external SMTP: host, port, none/STARTTLS/
+  implicit, `verify_tls` opt-out (default on; off = encrypted but unauthenticated, with a UI
+  warning), user, Fernet-encrypted write-only password; the Test button returns a step
+  transcript). `mcpcore/policy.py` resolves the tunable values from `user_policy` on every access.
+  Domains dual list (PUT = the allowed set). Logs viewer (`audit`/`access`/`errors`, filter).
+- **Master tokens (P3, D7)** `mdmcp_mst_…`: admin-created, 24 h default, at most
+  `MCP_MASTER_TOKEN_MAX_TTL` (7 d), never forever, optional source-CIDR allowlist, scopes,
+  Active/Disabled/Revoked tabs. Every request names the mailbox in **`X-MailD-Act-As`** (400
+  `act_as_required`; 403 `act_as_denied` for an inactive mailbox or a denied domain; 403
+  `ip_not_allowed`). It ignores the owner's MCP switch, addresses and preferences (policy
+  defaults apply), is rate-limited as `master:<id>`, and is **always audited** (the logging
+  switches cannot silence it: `security/master_token_use` + the tool calls). Owner notice only when
+  the admin enables `master_notify_user` (once per token and mailbox per day).
+- **User notifications (P3)**, preferences `notify_new_token`, `notify_new_client` (first use of a
+  token from a new IP/client pair), `notify_master_access`; mailed to the main address.
+- **Service mail** (magic links, notices, admin codes) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10026, bank
+  INTERNAL) or the admin's external SMTP as `MCP_SERVICE_EMAIL`, EN/ES, `Auto-Submitted: auto-generated`.
 - **Logs**: JSON Lines `audit-/access-/errors-YYYY-MM-DD.log` in `MCP_LOG_DIR` (O_APPEND, 90 files
   kept); never passwords, tokens, codes, bodies or subjects.
 - Domain allow-list (D6): `manage.py mcp_domains list|allow|deny <domain>` (audited) until the
@@ -547,7 +572,8 @@ more. See `.agents/services/provisioning.md`.
 - Ports: dev publishes `8085:8080`; production has no published port, Traefik labels route
   `${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}` to 8080 (TLS at the operator's ingress).
 - `test.sh` J7–J11 (role grants, service mailbox, healthz), G4c (backup archive), G14b (MCP sends
-  in the outbound alert), M1–M15 (write tools, confirmations, sending, preferences) and K1–K22
+  in the outbound alert), M1–M15 (write tools, confirmations, sending, preferences), N1–N10 + N7b
+  (admin panel, master tokens, external SMTP via mta:587) and K1–K22
   (user side + read tools through the SDK client, `tests/mcp_call.py`); browser flows:
   `./adminng/pwa-test/run.sh mcp`; unit tests: `mcp/tests/test_units.py` (pytest, run in a
   throwaway container — command in `mcp/tests/conftest.py`).

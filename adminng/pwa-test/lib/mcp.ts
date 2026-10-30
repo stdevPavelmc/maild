@@ -76,3 +76,56 @@ export async function magicToken(address: string, seconds = 60): Promise<string>
   }
   throw new Error(`no magic link reached ${address} within ${seconds}s`)
 }
+
+// ------------------------------------------------------------- admin (P3) ---
+function mcpExec(args: string[]): string {
+  return dockerExec(MCP, args)
+}
+
+/** Snapshot the admin row (password hash + email) and the settings, to restore after the flow. */
+export function snapshotAdmin(): void {
+  mcpSql('DROP TABLE IF EXISTS e2e_bak_admin, e2e_bak_setting, e2e_bak_policy; ' +
+    'CREATE TABLE e2e_bak_admin AS SELECT * FROM admin_user; CREATE TABLE e2e_bak_setting AS SELECT * FROM setting; ' +
+    'CREATE TABLE e2e_bak_policy AS SELECT * FROM domain_policy;')
+}
+
+export function restoreAdmin(): void {
+  mcpSql("DELETE FROM token WHERE kind='master' AND name LIKE 'e2e-%'; DELETE FROM otp_challenge; " +
+    "DELETE FROM web_session WHERE kind='admin'; " +
+    'UPDATE admin_user a SET password_hash=b.password_hash, email=b.email FROM e2e_bak_admin b WHERE a.id=b.id; ' +
+    'DELETE FROM setting; INSERT INTO setting SELECT * FROM e2e_bak_setting; ' +
+    'DELETE FROM domain_policy; INSERT INTO domain_policy SELECT * FROM e2e_bak_policy; ' +
+    'DROP TABLE IF EXISTS e2e_bak_admin, e2e_bak_setting, e2e_bak_policy;')
+}
+
+export function adminReset(password: string): void {
+  mcpExec(['python', 'manage.py', 'mcp_admin_reset', '--password', password])
+}
+
+export function adminEmail(): string {
+  return mcpSql('SELECT email FROM admin_user ORDER BY id LIMIT 1')
+}
+
+function codeSubjects(address: string): number[] {
+  const found = dockerExec(MDA, ['doveadm', 'search', '-u', address, 'mailbox', 'INBOX', 'subject', 'MailD MCP admin code']).trim()
+  return found.split('\n').map((l) => Number(l.trim().split(/\s+/)[1])).filter((n) => Number.isFinite(n) && n > 0)
+}
+
+export function adminCodeCount(address: string): number {
+  return codeSubjects(address).length
+}
+
+/** The newest admin code mailed to `address` after `before` codes were already there. */
+export async function adminCode(address: string, before: number, seconds = 60): Promise<string> {
+  const deadline = Date.now() + seconds * 1000
+  while (Date.now() < deadline) {
+    const uids = codeSubjects(address)
+    if (uids.length > before) {
+      const hdr = dockerExec(MDA, ['doveadm', 'fetch', '-u', address, 'hdr', 'mailbox', 'INBOX', 'uid', String(Math.max(...uids))])
+      const m = hdr.match(/^Subject: MailD MCP admin code: (\d{6})/m)
+      if (m) return m[1]
+    }
+    await new Promise((r) => setTimeout(r, 2000))
+  }
+  throw new Error(`no admin code reached ${address} within ${seconds}s`)
+}

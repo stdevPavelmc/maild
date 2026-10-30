@@ -53,7 +53,15 @@
     "invalid_sender": "The default sender must be a confirmed address of this account.",
     "signature_too_long": "The signature is too long.",
     "too_many_folders": "Too many hidden folders.",
-    "inbox_not_hideable": "INBOX cannot be hidden from agents."
+    "inbox_not_hideable": "INBOX cannot be hidden from agents.",
+    "weak_password": "Use at least 12 characters.",
+    "invalid_code": "This code is not valid any more: start again.",
+    "too_many_attempts": "Too many wrong codes: start again.",
+    "wrong_code": "Wrong code.",
+    "invalid_setting": "A value is out of range.",
+    "unknown_domain": "Unknown domain.",
+    "invalid_cidr": "That is not a valid network (CIDR).",
+    "invalid_kind": "Unknown log."
   },
   "confirm": {
     "title": "Confirm an address",
@@ -185,12 +193,158 @@
     "signatureHint": "Appended to mail sent by agents (up to 2000 characters).",
     "hiddenFolders": "Folders hidden from agents",
     "hiddenHint": "Comma-separated folder names. Agents never list, search or touch them (INBOX cannot be hidden).",
-    "allowAttachments": "Let agents download attachments"
+    "allowAttachments": "Let agents download attachments",
+    "notifyTitle": "Mail me when",
+    "notify_new_token": "a new token is created for my account",
+    "notify_new_client": "a token is used from a new address or client",
+    "notify_master_access": "the server administrator's master token opens my mailbox (if the admin enabled these notices)"
   },
   "activity": {
     "title": "Activity",
     "refresh": "Refresh",
     "none": "Nothing yet.",
     "token": "token"
+  },
+  "admin": {
+    "title": "MailD MCP — administration",
+    "saved": "Saved.",
+    "login": {
+      "subtitle": "Administrator sign-in",
+      "username": "Username",
+      "codeTitle": "Check your mail",
+      "codeSent": "A 6-digit code was mailed to {{to}}. It is valid for 10 minutes.",
+      "code": "Code",
+      "verify": "Verify",
+      "forgot": "Forgot the password?"
+    },
+    "recover": {
+      "title": "Reset the admin password",
+      "email": "Admin email address",
+      "send": "Send the reset link",
+      "sent": "If that is the admin address, a reset link (valid 30 minutes) is on its way.",
+      "back": "Back to sign-in"
+    },
+    "reset": {
+      "title": "Choose a new admin password",
+      "submit": "Set the new password",
+      "done": "Password changed. Sign in with it now."
+    },
+    "password": {
+      "current": "Current password",
+      "new": "New password",
+      "again": "New password again",
+      "rules": "At least 12 characters.",
+      "mismatch": "The two passwords differ.",
+      "change": "Change the password",
+      "code": "Code sent to {{to}}",
+      "confirm": "Confirm",
+      "changed": "Password changed; every other admin session was signed out."
+    },
+    "user": {
+      "title": "Admin user",
+      "signedIn": "{{user}} — notifications and codes go to {{email}}",
+      "newEmail": "New admin email",
+      "sendCodes": "Send the codes",
+      "codeOld": "Code sent to the OLD address ({{to}})",
+      "codeNew": "Code sent to the NEW address ({{to}})",
+      "confirmEmail": "Change the email",
+      "emailChanged": "The admin email was changed."
+    },
+    "domains": {
+      "title": "Domains",
+      "allowed": "Allowed",
+      "denied": "Denied",
+      "allow": "Allow the selected domain",
+      "deny": "Deny the selected domain",
+      "inactive": "inactive in the catalogue",
+      "hint": "Every domain of the mail server is listed; new domains start denied. Double-click a domain (or select it and use the arrows) to move it."
+    },
+    "logging": {
+      "title": "Logging",
+      "enabled": "Audit logging enabled",
+      "cat": {
+        "web_login": "Web sign-ins",
+        "bearer_access": "Token (MCP / REST) access",
+        "mail_actions": "Mail actions",
+        "token_lifecycle": "Token and address changes",
+        "admin_changes": "Admin changes",
+        "errors": "Errors",
+        "security": "Security events (lockouts, captcha, denied scope, rate limits)"
+      },
+      "masterAlways": "Master-token use is always logged, whatever these switches say.",
+      "rotation": "New log file every",
+      "rotations": {
+        "day": "day",
+        "week": "week",
+        "month": "month"
+      },
+      "retention": "Files kept per log",
+      "retentionHint": "Typical: 90 days, 26 weeks or 12 months."
+    },
+    "policy": {
+      "title": "User policy",
+      "max_tokens": "Max tokens per user",
+      "pat_default_days": "Default token lifetime (days)",
+      "pat_idle_days": "Disable tokens idle for (days, at most 30)",
+      "send_rate_recipients": "Recipients per window",
+      "send_rate_window": "Rate window (seconds)",
+      "max_message_size": "Max message size (bytes)",
+      "max_attachment_bytes": "Max attachment returned to agents (bytes)",
+      "magic_link_hours": "Magic link valid for (hours)",
+      "resend_base_seconds": "First resend wait (seconds, doubles each time)",
+      "max_secondary": "Max secondary addresses",
+      "pat_forever_allowed": "Users may create tokens that never expire",
+      "allow_external": "Agents may send outside this server",
+      "force_confirm": "Every agent send needs a confirmation",
+      "allow_no_confirm": "Users may turn send confirmation off",
+      "master_notify_user": "Mail the mailbox owner when a master token accesses it"
+    },
+    "master": {
+      "title": "Master tokens",
+      "hint": "A master token opens any mailbox of an allowed domain, ignoring the owners' MCP switch and addresses. Every request names the mailbox in the X-MailD-Act-As header and is always logged.",
+      "ttl": "Lifetime (hours, at most {{max}})",
+      "cidrs": "Allowed source networks (optional)",
+      "cidrsHint": "Comma-separated CIDRs; empty = any source.",
+      "create": "Create the master token",
+      "showOnce": "Copy the token now: it is shown only once.",
+      "howTo": "Clients send Authorization: Bearer <token> and X-MailD-Act-As: user@domain."
+    },
+    "service": {
+      "title": "Service email",
+      "sender": "Sender: {{address}}",
+      "inactive": "inactive",
+      "inactiveHint": "The service mailbox is inactive: service mail still goes out, but replies and bounces are lost.",
+      "internal": "Internal (amavis, DKIM-signed)",
+      "external": "External SMTP server",
+      "host": "Host",
+      "port": "Port",
+      "tls": "Encryption",
+      "tlsModes": {
+        "none": "None",
+        "starttls": "STARTTLS",
+        "implicit": "Implicit TLS"
+      },
+      "user": "Username (optional)",
+      "password": "Password",
+      "passwordKept": "A password is stored; leave empty to keep it.",
+      "testTitle": "Test the service email",
+      "testHint": "Sends a test message to {{to}} with the saved settings.",
+      "test": "Send a test message",
+      "testing": "Testing…",
+      "testOk": "The test message was accepted.",
+      "testFail": "The test failed.",
+      "verifyTls": "Verify the server certificate",
+      "verifyOff": "Certificate verification is off: the connection is encrypted but the server is not authenticated (anyone in the path could impersonate it). Use only for a self-signed or private-CA server you control."
+    },
+    "logs": {
+      "title": "Logs",
+      "kind": "Log",
+      "filter": "Filter",
+      "kinds": {
+        "audit": "Audit",
+        "access": "Access",
+        "errors": "Errors"
+      }
+    }
   }
 }

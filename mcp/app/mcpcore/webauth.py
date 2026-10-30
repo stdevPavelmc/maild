@@ -25,6 +25,8 @@ ALTCHA_MAX_NUMBER = 100_000
 ALTCHA_TTL = 600
 REFRESH_COOKIE = "mdmcp_refresh"
 REFRESH_PATH = "/webapi"
+ADMIN_REFRESH_COOKIE = "mdmcp_admin_refresh"
+ADMIN_REFRESH_PATH = "/webapi/admin"
 
 
 # ------------------------------------------------------------------- altcha ---
@@ -107,7 +109,7 @@ def _access_token(sess: WebSession) -> str:
 def open_session(kind: str, subject_id: int, login_email: str, ip: str, ua: str) -> tuple[str, str, WebSession]:
     """→ (access JWT, refresh token, row)."""
     refresh = secrets.token_urlsafe(32)
-    ttl = settings.MCP_USER_SESSION_TTL
+    ttl = settings.MCP_ADMIN_SESSION_TTL if kind == "admin" else settings.MCP_USER_SESSION_TTL
     sess = WebSession.objects.create(
         jti=new_id(), kind=kind, subject_id=subject_id, refresh_hash=token_hash(refresh),
         expires_at=timezone.now() + dt.timedelta(seconds=ttl), login_email=login_email,
@@ -151,6 +153,12 @@ def verify_access(token: str, kind: str) -> WebSession | None:
     if sess is None or sess.revoked_at or sess.expires_at <= timezone.now():
         return None
     return sess
+
+
+def revoke_all(kind: str, subject_id: int, keep: str = "") -> int:
+    """Revoke every live session of a subject (password reset / change), optionally keeping one."""
+    return WebSession.objects.filter(kind=kind, subject_id=subject_id, revoked_at__isnull=True).exclude(
+        jti=keep).update(revoked_at=timezone.now())
 
 
 def revoke(sess: WebSession) -> None:

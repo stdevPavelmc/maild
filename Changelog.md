@@ -18,7 +18,7 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## Unreleased — MailD MCP (P0, P1, P1b, P2 — `mcp/progress.md`)
+## Unreleased — MailD MCP (P0, P1, P1b, P2, P3 — `mcp/progress.md`)
 - Added: new `mcp` service (image `maild-mcp`, hostname `mcp`) — P0 skeleton: Django + uvicorn,
   `/healthz`, first-boot admin seed and the service mailbox `MCP_SERVICE_EMAIL` (default
   `mcp@<DEFAULT_DOMAIN>`, created when missing, never modified; generated passwords printed once
@@ -43,6 +43,13 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Security: `rehash-password.sh` skips master-user logins — without it the first MCP access to
   a mailbox still on a legacy `$1$` hash would have replaced that user's password with the
   master password.
+- Added (P3): the MCP admin panel `/adminmcp` — sign-in with password, captcha and a code mailed
+  to the admin at every login; recovery link and `manage.py mcp_admin_reset`; admin email/password
+  change with codes; the domains allow-list, logging (category switches, rotation, retention), user
+  policy and service email (internal or external SMTP with a Test button) groups; a logs viewer;
+  **master tokens** (admin-created, at most `MCP_MASTER_TOKEN_MAX_TTL`, optional source CIDRs,
+  one mailbox per request via the `X-MailD-Act-As` header, always audited, optional owner notice).
+  Users get email notices for new tokens and for a token used from a new place.
 - Added (P2): 13 MCP write tools — flags, move, folders, drafts; spam/ham, trash/restore and
   folder delete behind a two-step confirmation handle (nothing is ever deleted for good); and
   send/reply/forward through amavis:10026 with sender ownership, a recipient rate limit

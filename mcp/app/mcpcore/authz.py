@@ -34,7 +34,7 @@ class Denied(Exception):
 @dataclass
 class Principal:
     token: Token
-    account: Account
+    account: Account | None
     ip: str = ""
     client: str = ""
     request_id: str = ""
@@ -49,6 +49,9 @@ class Principal:
 
     def audit_actor(self) -> dict:
         return {"type": "token", "account": self.account.id, "email": self.account.main_email}
+
+    def rate_subjects(self, sender: str) -> list[str]:
+        return [f"acct:{self.account.id}", f"addr:{sender}"]
 
     def addresses(self) -> list[dict]:
         """Every address of the account with its usability for this token, computed once per request."""
@@ -103,3 +106,34 @@ class Principal:
             why = row["reason"] if row else "not an address of this account"
             raise Denied(f"'{account}' cannot be used by this token ({why})")
         return [account]
+
+
+@dataclass
+class MasterPrincipal(Principal):
+    """A master token acting on one mailbox (D7): the `X-MailD-Act-As` address. It ignores the
+    owner's MCP switch, address states and preferences (policy defaults apply), but the mailbox
+    must be active and its domain MCP-allowed. Always audited."""
+
+    act_as: str = ""
+
+    def addresses(self) -> list[dict]:
+        if self._addresses is None:
+            reason = ""
+            if not domains.address_allowed(self.act_as):
+                reason = "domain_not_allowed"
+            elif catalogue.mailbox_state(self.act_as) is not True:
+                reason = "mailbox_inactive"
+            self._addresses = [{"address": self.act_as, "main": True, "status": "active",
+                                "usable": not reason, "reason": reason}]
+        return self._addresses
+
+    def prefs(self) -> dict:
+        from mcpcore import policy
+
+        return dict(policy.DEFAULT_PREFS)
+
+    def audit_actor(self) -> dict:
+        return {"type": "master", "admin": self.token.admin.username if self.token.admin else "", "act_as": self.act_as}
+
+    def rate_subjects(self, sender: str) -> list[str]:
+        return [f"master:{self.token.id}", f"addr:{sender}"]

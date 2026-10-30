@@ -7,6 +7,12 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   base: '/',
-  build: { outDir: 'dist', assetsDir: 'assets', sourcemap: false },
+  // two entries: the user page (/) and the admin panel (/adminmcp) — no admin code is shipped to /
+  build: {
+    outDir: 'dist',
+    assetsDir: 'assets',
+    sourcemap: false,
+    rollupOptions: { input: { main: 'index.html', admin: 'adminmcp/index.html' } },
+  },
   server: { proxy: { '/webapi': 'http://localhost:8085' } },
 })

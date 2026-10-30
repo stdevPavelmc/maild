@@ -273,3 +273,9 @@ def create_token(request, data: TokenIn):
 @api.post("/user/tokens/{token_id}/{action}", auth=user_auth)
 def token_action(request, token_id: int, action: str):
     return tokens.serialize(tokens.change_status(request.account, token_id, action, _ip(request)))
+
+
+# the admin panel's API lives in its own module, mounted at /webapi/admin/
+from webapi.admin import router as admin_router  # noqa: E402
+
+api.add_router("/admin/", admin_router)

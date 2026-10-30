@@ -75,3 +75,24 @@ def open_handle(handle: str, kind: str, bind: str) -> dict:
     if "e" in body and body["e"] < time.time():
         raise ValueError("handle expired")
     return body["p"]
+
+
+# ------------------------------------------------------- secrets at rest ---
+# Fernet with a key derived from MCP_SECRET_KEY (proposal §3.2): the external SMTP password.
+def _fernet():
+    from cryptography.fernet import Fernet
+
+    return Fernet(base64.urlsafe_b64encode(derived_key("fernet")))
+
+
+def encrypt(value: str) -> str:
+    return _fernet().encrypt(value.encode()).decode()
+
+
+def decrypt(token: str) -> str:
+    from cryptography.fernet import InvalidToken
+
+    try:
+        return _fernet().decrypt(token.encode()).decode()
+    except (InvalidToken, ValueError):
+        return ""   # MCP_SECRET_KEY rotated: the admin has to enter the password again

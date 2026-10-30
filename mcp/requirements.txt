@@ -11,3 +11,4 @@ PyJWT==2.15.1
 html2text==2025.4.15
 nh3==0.3.7
 whitenoise==6.12.0
+cryptography==50.0.2

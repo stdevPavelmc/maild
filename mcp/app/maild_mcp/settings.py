@@ -126,6 +126,9 @@ MCP_SMTP_PORT = int(env("MCP_SMTP_PORT", "10026"))
 # web sessions (proposal §7.1): short access JWT + rotating refresh cookie
 MCP_ACCESS_TTL = env_duration("MCP_ACCESS_TTL", "15m")
 MCP_USER_SESSION_TTL = env_duration("MCP_USER_SESSION_TTL", "24h")
+MCP_ADMIN_SESSION_TTL = env_duration("MCP_ADMIN_SESSION_TTL", "72h")
+# master tokens: never forever, at most this long (proposal §7.2)
+MCP_MASTER_TOKEN_MAX_TTL = env_duration("MCP_MASTER_TOKEN_MAX_TTL", "7d")
 
 # logs (proposal §11)
 MCP_LOG_DIR = env("MCP_LOG_DIR", "/var/log/maild-mcp")

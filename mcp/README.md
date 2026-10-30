@@ -6,7 +6,7 @@ on behalf of a mailbox owner, through MCP (Streamable HTTP), a REST mirror and a
 - Design and decisions: [`technical-proposal.md`](technical-proposal.md)
 - Delivery status and log: [`progress.md`](progress.md)
 
-## Current state: P0–P1b done, P2 in progress (see progress.md)
+## Current state: P0–P2 done, P3 in progress (see progress.md)
 
 - Django 6.1 + uvicorn + MCP SDK 2.3, non-root (uid 10001), read-only rootfs.
 - `GET /healthz` → 200 when the `mcp` database, the catalogue and the mda IMAP greeting answer.
@@ -22,7 +22,11 @@ on behalf of a mailbox owner, through MCP (Streamable HTTP), a REST mirror and a
   - send (`mail.send`): `send_email`, `reply_email`, `forward_email` via amavis:10026, copy in
     Sent, rate-limited, confirmation for recipients outside the server (preference).
 - User preferences: confirmation mode, default sender, signature, folders hidden from agents,
-  attachment download; Activity list.
+  attachment download, email notifications; Activity list.
+- Admin panel `/adminmcp`: sign-in with a mailed code, recovery link, admin email/password
+  change, domains allow-list, logging, user policy, master tokens (`X-MailD-Act-As` header,
+  always audited), service email (internal or external SMTP + Test), logs viewer. CLI fallback:
+  `manage.py mcp_admin_reset`.
 - Mailbox access goes through a Dovecot master user over IMAP STARTTLS (`mda:143`, certificate
   pinned); the container never mounts the mail storage.
 - Database access only as the restricted `maild_mcp` role (`db/ensure_roles.sh`); the
@@ -36,7 +40,8 @@ Optional (image defaults in `Dockerfile`, documented in `env.sample`): `MCP_HOST
 `MCP_ADMIN_USER/PASSWORD/EMAIL` (first boot only), `MCP_SERVICE_EMAIL/PASSWORD`,
 `MCP_DOVECOT_MASTER_USER`, `MCP_DB`, `MCP_DB_USER`, `MCP_IMAP_*`, `MCP_PUBLIC_URL`,
 `MCP_TRUSTED_PROXIES`, `MCP_SMTP_HOST/PORT`, `MCP_ACCESS_TTL`, `MCP_USER_SESSION_TTL`,
-`MCP_SEND_RATE_RECIPIENTS`, `MCP_SEND_RATE_WINDOW`, `MAX_MESSAGESIZE`, `MCP_WORKERS`, `MCP_DEBUG`.
+`MCP_SEND_RATE_RECIPIENTS`, `MCP_SEND_RATE_WINDOW`, `MAX_MESSAGESIZE`, `MCP_ADMIN_SESSION_TTL`,
+`MCP_MASTER_TOKEN_MAX_TTL`, `MCP_WORKERS`, `MCP_DEBUG`.
 
 ## Operations
 
@@ -46,6 +51,7 @@ curl -s http://localhost:8085/healthz                                       # de
 docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py showmigrations
 docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py mcp_domains list
 docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py mcp_jobs --once
+docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py mcp_admin_reset   # new admin password, printed once
 ```
 
 Connect an MCP client (Claude Code example, dev stack):

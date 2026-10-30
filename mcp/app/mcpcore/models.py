@@ -176,3 +176,35 @@ class SendCounter(models.Model):
     class Meta:
         db_table = "send_counter"
         constraints = [models.UniqueConstraint(fields=["subject", "window_start"], name="send_counter_subject_window")]
+
+
+class Setting(models.Model):
+    """One row per admin settings group (proposal §10); validated by mcpcore.settings_store."""
+
+    key = models.CharField(max_length=64, primary_key=True)
+    value = models.JSONField(default=dict)
+    updated_by = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "setting"
+
+
+class OtpChallenge(models.Model):
+    """Emailed one-time codes (admin login, email change, password change) and recovery links.
+    Only the HMAC of a code is stored; `attempts` caps guessing."""
+
+    id = models.CharField(max_length=32, primary_key=True)
+    purpose = models.CharField(max_length=32)        # login | email_old | email_new | password | recovery
+    admin = models.ForeignKey(AdminUser, on_delete=models.CASCADE)
+    group = models.CharField(max_length=32, blank=True, default="")   # pairs the two email-change codes
+    target_email = models.CharField(max_length=255)
+    code_hash = models.CharField(max_length=64)
+    payload = models.JSONField(default=dict, blank=True)
+    expires_at = models.DateTimeField()
+    attempts = models.IntegerField(default=0)
+    used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "otp_challenge"

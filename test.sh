@@ -312,6 +312,7 @@ IMAPSIEVE_TOUCHED=0
 MCP_TOUCHED=0
 MCP_K_TOUCHED=0
 MCP_M_TOUCHED=0
+MCP_N_TOUCHED=0
 MCP_LEGACY_USER="mcp-legacy-probe@${DOMAIN}"
 MCP_INACTIVE_USER="mcp-inactive-probe@${DOMAIN}"
 cleanup() {
@@ -337,6 +338,25 @@ cleanup() {
             dcx mda rm -rf "/home/vmail/${DOMAIN}/${MCP_LEGACY_USER%%@*}" "/home/vmail/${DOMAIN}/${MCP_INACTIVE_USER%%@*}" \
                 > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+        fi
+        # Phase N (MCP admin): restore the admin row, the settings and the domain policy as found, the
+        # service mailbox hash, drop the master tokens and admin sessions/codes the phase made.
+        if [ "$MCP_N_TOUCHED" = 1 ]; then
+            dcx db psql -U maild -d mcp -q -c "
+                DELETE FROM confirm_handle WHERE token_id IN (SELECT id FROM token WHERE kind='master' AND name LIKE 'n-%');
+                DELETE FROM token WHERE kind='master' AND name LIKE 'n-%';
+                DELETE FROM otp_challenge; DELETE FROM web_session WHERE kind='admin';
+                DELETE FROM notice_throttle WHERE kind IN ('master_access','token_seen');
+                UPDATE admin_user a SET password_hash=b.password_hash, email=b.email FROM n_bak_admin b WHERE a.id=b.id;
+                DELETE FROM setting; INSERT INTO setting SELECT * FROM n_bak_setting;
+                DELETE FROM domain_policy; INSERT INTO domain_policy SELECT * FROM n_bak_policy;
+                DROP TABLE IF EXISTS n_bak_admin, n_bak_setting, n_bak_policy;" > /dev/null 2>&1 || true
+            [ -n "${N_SVC_HASH:-}" ] && sql "UPDATE mailbox SET password='$N_SVC_HASH' WHERE username='$N_SVC'" > /dev/null 2>&1 || true
+            dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+            for n_box in "$DEPLOY_ADMIN" "alice@$DOMAIN" "bob@$DOMAIN" "dylan@$DOMAIN" ; do
+                dcx mda doveadm expunge -u "$n_box" mailbox INBOX header From "MailD MCP" > /dev/null 2>&1 || true
+                dcx mda doveadm expunge -u "$n_box" mailbox INBOX subject "maild-p3-" > /dev/null 2>&1 || true
+            done
         fi
         # Phase M (MCP write/send): every maild-p2-* message and folder, the send counters.
         if [ "$MCP_M_TOUCHED" = 1 ]; then
@@ -2916,6 +2936,232 @@ else
         t_ok "M15 the Activity list (GET /webapi/user/activity) shows the account's recent tool calls"
     else
         t_fail "M15 activity (code=$K_CODE events=$(printf '%s' "$M15" | head -c 160))"
+    fi
+fi
+
+# ================================= N. MailD MCP admin panel (P3) ==============
+# mcp/technical-proposal.md §7.2, D7 and the 2026-10-30 decisions in mcp/progress.md: admin
+# sign-in (password + ALTCHA + mailed code, lockout), CLI reset, recovery link, password and email
+# change with codes, the settings groups (user policy bounds, the "never"/force-confirm switches,
+# logging switches), the domains dual list, master tokens (TTL cap, X-MailD-Act-As, CIDR, denied
+# domain, always audited, optional owner notice), the user notifications, external service SMTP
+# through mta:587 with the Test transcript, and the logs viewer. Self-cleaning: the admin row, the
+# settings, the domain policy and the service mailbox hash are snapshotted and restored.
+section "N. MailD MCP admin panel (sign-in, settings, domains, master tokens, service email)"
+
+N_ADMIN_MAIL="$(env_value "$ENV_FILE" MCP_ADMIN_EMAIL || true)"; N_ADMIN_MAIL="${N_ADMIN_MAIL:-$DEPLOY_ADMIN}"
+N_JAR="$TMPRUN/n.cookies"
+n_sql() { dcx db psql -U maild -d mcp -tAc "$1" 2>/dev/null | tr -d '\r'; }
+n_api() { # <method> <path> [json] [access] [jar] → K_CODE, body in $K_OUT (admin API)
+    local args=(-s -o "$K_OUT" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' --max-time 60)
+    [ -n "${3:-}" ] && args+=(--data "$3")
+    [ -n "${4:-}" ] && args+=(-H "Authorization: Bearer $4")
+    [ -n "${5:-}" ] && args+=(-b "$5" -c "$5")
+    K_CODE="$(curl "${args[@]}" "$MCP_HTTP/webapi/admin$2")"
+}
+n_code() { # <to> <subject prefix> <count before> → the newest code mailed with that subject
+    wait_subj_count_gt "$1" INBOX "$2" "$3" 60 || return 1
+    local uid; uid="$(msg_newest_uid "$1" INBOX "$2")"
+    dcx mda doveadm fetch -u "$1" hdr mailbox INBOX uid "$uid" 2>/dev/null | sed -n "s/^Subject: .*: \([0-9]\{6\}\).*/\1/p" | head -n1
+}
+n_login() { # <password> → N_AT (or empty); K_CODE of the last step
+    local before ch code
+    before="$(subj_count "$N_ADMIN_MAIL" INBOX "MailD MCP admin code")"
+    n_api POST /login "{\"username\":\"admin\",\"password\":\"$1\",\"altcha\":\"$(k_altcha)\"}"
+    N_AT=""; [ "$K_CODE" = 200 ] || return 1
+    ch="$(k_json "d['challenge_id']")"; code="$(n_code "$N_ADMIN_MAIL" "MailD MCP admin code" "${before:-0}")"
+    rm -f "$N_JAR"
+    n_api POST /login/verify "{\"challenge_id\":\"$ch\",\"code\":\"$code\"}" "" "$N_JAR"
+    N_AT="$(k_json "d.get('access_token','')")"
+}
+n_settings() { n_api PUT "/settings/$1" "$2" "$N_AT"; sleep 3; }   # 2 s settings cache per worker
+
+if [ "$HAVE_DC" != 1 ] || [ -z "$MCP_DB_PW" ] || [ -z "${K_PA:-}" ] ; then
+    t_skip "MailD MCP admin checks (need docker, MCP secrets and the $DOMAIN fixtures)"
+else
+    MCP_N_TOUCHED=1
+    dcx db psql -U maild -d mcp -q -c "DROP TABLE IF EXISTS n_bak_admin, n_bak_setting, n_bak_policy;
+        CREATE TABLE n_bak_admin AS SELECT * FROM admin_user; CREATE TABLE n_bak_setting AS SELECT * FROM setting;
+        CREATE TABLE n_bak_policy AS SELECT * FROM domain_policy;" > /dev/null 2>&1
+    N_SVC="$(env_value "$ENV_FILE" MCP_SERVICE_EMAIL || true)"; N_SVC="${N_SVC:-mcp@$DEFAULT_DOMAIN}"
+    N_SVC_HASH="$(sql "SELECT password FROM mailbox WHERE username='$N_SVC'" | tr -d '\r')"
+    N_PW1="n-$(chrono | cut -c1-20)"; N_PW2="n2-$(chrono | cut -c1-20)"; N_PW3="n3-$(chrono | cut -c1-20)"
+
+    # N1 — CLI reset sets a known password; sign-in = password + ALTCHA + the code mailed to the admin
+    dcx mcp python manage.py mcp_admin_reset --password "$N_PW1" > /dev/null 2>&1
+    n_api POST /login "{\"username\":\"admin\",\"password\":\"wrong-$RANDOM\",\"altcha\":\"$(k_altcha)\"}"; N1_BAD="$K_CODE"
+    N1_BEFORE="$(subj_count "$N_ADMIN_MAIL" INBOX "MailD MCP admin code")"
+    n_api POST /login "{\"username\":\"admin\",\"password\":\"$N_PW1\",\"altcha\":\"$(k_altcha)\"}"; N1_S1="$K_CODE"; N1_CH="$(k_json "d['challenge_id']")"
+    N1_CODE="$(n_code "$N_ADMIN_MAIL" "MailD MCP admin code" "${N1_BEFORE:-0}")"
+    n_api POST /login/verify "{\"challenge_id\":\"$N1_CH\",\"code\":\"000000\"}"; N1_WRONG="$K_CODE"
+    rm -f "$N_JAR"
+    N1_HDR="$(curl -s -D - -o "$K_OUT" -X POST "$MCP_HTTP/webapi/admin/login/verify" -H 'Content-Type: application/json' -c "$N_JAR" \
+              --data "{\"challenge_id\":\"$N1_CH\",\"code\":\"$N1_CODE\"}" | tr -d '\r')"
+    N_AT="$(k_json "d.get('access_token','')")"
+    N1_CK="$(printf '%s\n' "$N1_HDR" | grep -i '^set-cookie: mdmcp_admin_refresh=')"
+    n_api GET /me "" "$N_AT"; N1_ME="$K_CODE"
+    if [ "$N1_BAD" = 401 ] && [ "$N1_S1" = 200 ] && [ -n "$N1_CODE" ] && [ "$N1_WRONG" = 400 ] && [ "$N1_ME" = 200 ] &&
+       printf '%s' "$N1_CK" | grep -qi 'httponly' && printf '%s' "$N1_CK" | grep -qi 'path=/webapi/admin' && printf '%s' "$N1_CK" | grep -qi 'samesite=strict' ; then
+        t_ok "N1 admin sign-in: wrong password 401; password + ALTCHA mail a code to $N_ADMIN_MAIL; a wrong code is refused; the right one opens a session (cookie Path=/webapi/admin)"
+    else
+        t_fail "N1 admin sign-in (bad=$N1_BAD step1=$N1_S1 code=${N1_CODE:+yes} wrong=$N1_WRONG me=$N1_ME cookie='${N1_CK:-none}')"
+    fi
+
+    # N2 — CLI reset revokes the sessions; recovery link (neutral answer) sets a new password, once
+    dcx mcp python manage.py mcp_admin_reset --password "$N_PW2" > /dev/null 2>&1
+    n_api GET /me "" "$N_AT"; N2_REVOKED="$K_CODE"
+    N2_R0="$(subj_count "$N_ADMIN_MAIL" INBOX "admin password reset")"
+    n_api POST /recover "{\"email\":\"nobody@$DOMAIN\",\"altcha\":\"$(k_altcha)\"}"; N2_UNK="$K_CODE"; N2_UNK_MSG="$(k_json "d['message']")"
+    n_api POST /recover "{\"email\":\"$N_ADMIN_MAIL\",\"altcha\":\"$(k_altcha)\"}"; N2_KNOWN_MSG="$(k_json "d['message']")"
+    N2_TOKEN=""
+    if wait_subj_count_gt "$N_ADMIN_MAIL" INBOX "admin password reset" "${N2_R0:-0}" 60 ; then
+        N2_UID="$(msg_newest_uid "$N_ADMIN_MAIL" INBOX "admin password reset")"
+        N2_TOKEN="$(msg_text "$N_ADMIN_MAIL" INBOX "$N2_UID" | sed '1{/^text:/d}' | python3 -c 'import email,email.policy,re,sys
+m = email.message_from_bytes(sys.stdin.buffer.read(), policy=email.policy.default)
+f = re.search(r"reset#(mdmcp_rc_[A-Za-z0-9_-]+)", (m.get_body(("plain",)) or m).get_content())
+print(f.group(1) if f else "")' 2>/dev/null)"
+    fi
+    n_api POST /reset "{\"token\":\"$N2_TOKEN\",\"password\":\"$N_PW3\",\"altcha\":\"$(k_altcha)\"}"; N2_RESET="$K_CODE"
+    n_api POST /reset "{\"token\":\"$N2_TOKEN\",\"password\":\"$N_PW3\",\"altcha\":\"$(k_altcha)\"}"; N2_AGAIN="$K_CODE"
+    n_login "$N_PW3"; N2_LOGIN="$K_CODE"
+    if [ "$N2_REVOKED" = 401 ] && [ "$N2_UNK" = 200 ] && [ "$N2_UNK_MSG" = "$N2_KNOWN_MSG" ] && [ -n "$N2_TOKEN" ] &&
+       [ "$N2_RESET" = 200 ] && [ "$N2_AGAIN" = 404 ] && [ "$N2_LOGIN" = 200 ] ; then
+        t_ok "N2 the CLI reset revokes admin sessions; recovery answers alike for any address, mails a single-use link, and the new password works"
+    else
+        t_fail "N2 reset/recovery (revoked=$N2_REVOKED neutral=$([ "$N2_UNK_MSG" = "$N2_KNOWN_MSG" ] && echo yes || echo no) link=${N2_TOKEN:+yes} reset=$N2_RESET again=$N2_AGAIN login=$N2_LOGIN)"
+    fi
+
+    # N3 — password change: current password + code; email change: one code to the OLD, one to the NEW address
+    n_api POST /password/start "{\"current\":\"wrong\",\"new\":\"$N_PW1\"}" "$N_AT"; N3_WRONGCUR="$K_CODE"
+    N3_B="$(subj_count "$N_ADMIN_MAIL" INBOX "MailD MCP admin code")"
+    n_api POST /password/start "{\"current\":\"$N_PW3\",\"new\":\"$N_PW1\"}" "$N_AT"; N3_CH="$(k_json "d['challenge_id']")"
+    N3_CODE="$(n_code "$N_ADMIN_MAIL" "MailD MCP admin code" "${N3_B:-0}")"
+    n_api POST /password/confirm "{\"challenge_id\":\"$N3_CH\",\"code\":\"$N3_CODE\"}" "$N_AT"; N3_PW="$K_CODE"
+    N3_OB="$(subj_count "$N_ADMIN_MAIL" INBOX "MailD MCP admin code")"; N3_NB="$(subj_count "$K_A" INBOX "MailD MCP admin code")"
+    n_api POST /email/start "{\"new_email\":\"$K_A\"}" "$N_AT"; N3_G="$(k_json "d['group']")"
+    N3_CO="$(n_code "$N_ADMIN_MAIL" "MailD MCP admin code" "${N3_OB:-0}")"; N3_CN="$(n_code "$K_A" "MailD MCP admin code" "${N3_NB:-0}")"
+    n_api POST /email/confirm "{\"group\":\"$N3_G\",\"code_old\":\"$N3_CO\",\"code_new\":\"000000\"}" "$N_AT"; N3_HALF="$K_CODE"
+    n_api POST /email/confirm "{\"group\":\"$N3_G\",\"code_old\":\"$N3_CO\",\"code_new\":\"$N3_CN\"}" "$N_AT"; N3_EM="$K_CODE"; N3_NEWMAIL="$(k_json "d.get('email')")"
+    dcx db psql -U maild -d mcp -q -c "UPDATE admin_user SET email='$N_ADMIN_MAIL'" > /dev/null 2>&1   # back (codes would go to alice)
+    n_login "$N_PW1"; N3_LOGIN="$K_CODE"
+    if [ "$N3_WRONGCUR" = 401 ] && [ "$N3_PW" = 200 ] && [ "$N3_HALF" = 400 ] && [ "$N3_EM" = 200 ] && [ "$N3_NEWMAIL" = "$K_A" ] && [ "$N3_LOGIN" = 200 ] ; then
+        t_ok "N3 the admin password changes with the current password + a mailed code; the email changes only with both codes (old and new address)"
+    else
+        t_fail "N3 password/email change (wrong-current=$N3_WRONGCUR pw=$N3_PW half=$N3_HALF email=$N3_EM→$N3_NEWMAIL login=$N3_LOGIN)"
+    fi
+
+    # N4 — settings: bounds are enforced; the admin's switches drive the user side
+    n_api PUT /settings/user_policy '{"pat_idle_days":31}' "$N_AT"; N4_BOUND="$K_CODE"
+    k_login "$K_A" "$K_PA"; N_UAT="$K_AT"
+    k_api PUT /user/prefs '{"confirm_send":"never"}' "$N_UAT"; N4_NEVER_OFF="$K_CODE"
+    n_settings user_policy '{"allow_no_confirm":true,"force_confirm":true}'
+    k_api PUT /user/prefs '{"confirm_send":"never"}' "$N_UAT"; N4_NEVER_ON="$K_CODE"
+    k_api POST /user/tokens '{"name":"n-send","scopes":["mail.read","mail.send"]}' "$N_UAT"; N_PATS="$(k_json "d.get('token','')")"
+    m_call "$N_PATS" send_email "{\"to\":[\"$K_B\"],\"subject\":\"maild-p3-force\",\"body_text\":\"x\"}"; N4_FORCE="$(m_res "d['structured']['status']")"
+    n_settings user_policy '{"allow_no_confirm":false,"force_confirm":false}'
+    k_api PUT /user/prefs '{"confirm_send":"external"}' "$N_UAT"
+    if [ "$N4_BOUND" = 400 ] && [ "$N4_NEVER_OFF" = 400 ] && [ "$N4_NEVER_ON" = 200 ] && [ "$N4_FORCE" = confirmation_required ] ; then
+        t_ok "N4 user policy: the idle limit cannot exceed 30 days; 'never confirm' only once the admin allows it; 'force confirmation' covers internal sends"
+    else
+        t_fail "N4 policy (idle-31=$N4_BOUND never-before=$N4_NEVER_OFF never-after=$N4_NEVER_ON forced=$N4_FORCE)"
+    fi
+
+    # N5 — the domains dual list is the allow-list (D6)
+    n_api PUT /domains '{"allowed":[]}' "$N_AT"; k_login "$K_C" "$K_PC"; N5_DENIED="$K_CODE"
+    n_api PUT /domains "{\"allowed\":[\"$DOMAIN\"]}" "$N_AT"; N5_PUT="$K_CODE"; k_login "$K_C" "$K_PC"; N5_OK="$K_CODE"
+    n_api PUT /domains '{"allowed":["no-such-domain.invalid"]}' "$N_AT"; N5_UNK="$K_CODE"
+    if [ "$N5_DENIED" = 403 ] && [ "$N5_PUT" = 200 ] && [ "$N5_OK" = 200 ] && [ "$N5_UNK" = 400 ] ; then
+        t_ok "N5 the Domains dual list is the MCP allow-list (empty → login 403; $DOMAIN allowed → 200; unknown domains refused)"
+    else
+        t_fail "N5 domains (denied=$N5_DENIED put=$N5_PUT allowed=$N5_OK unknown=$N5_UNK)"
+    fi
+
+    # N6 — master tokens: TTL cap and never forever; X-MailD-Act-As; a mailbox without any MCP account; denied
+    # domain; CIDR allowlist; revoke
+    n_api POST /master-tokens '{"name":"n-long","ttl_hours":100000,"scopes":["mail.read"]}' "$N_AT"; N6_LONG="$K_CODE"
+    n_api POST /master-tokens '{"name":"n-master","ttl_hours":1,"scopes":["mail.read"]}' "$N_AT"; N_MT="$(k_json "d.get('token','')")"; N_MT_ID="$(k_json "d.get('id','')")"
+    n_api POST /master-tokens '{"name":"n-cidr","ttl_hours":1,"scopes":["mail.read"],"allowed_cidrs":["192.0.2.0/24"]}' "$N_AT"; N_MTC="$(k_json "d.get('token','')")"
+    n_rpc() { curl -s -o "$K_OUT" -w '%{http_code}' --max-time 30 -X POST "$MCP_HTTP/api/v1/mcp" -H 'Content-Type: application/json' \
+        -H 'Accept: application/json, text/event-stream' -H 'MCP-Protocol-Version: 2025-11-25' -H "Authorization: Bearer $1" ${2:+-H "X-MailD-Act-As: $2"} \
+        --data '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_accounts","arguments":{}}}'; }
+    N6_NOACT="$(n_rpc "$N_MT")"
+    N6_DYLAN="$(n_rpc "$N_MT" "$K_D")"; N6_WHO="$(python3 -c "import json; print(json.load(open('$K_OUT'))['result']['structuredContent']['default_sender'])" 2>/dev/null)"
+    N6_DENIED="$(n_rpc "$N_MT" "$DEPLOY_ADMIN")"
+    N6_CIDR="$(n_rpc "$N_MTC" "$K_D")"
+    if [ "$N6_LONG" = 400 ] && [ "$N6_NOACT" = 400 ] && [ "$N6_DYLAN" = 200 ] && [ "$N6_WHO" = "$K_D" ] &&
+       [ "$N6_DENIED" = 403 ] && [ "$N6_CIDR" = 403 ] ; then
+        t_ok "N6 master tokens: capped TTL, X-MailD-Act-As required, act on a mailbox with no MCP account, denied domain and foreign source refused (403)"
+    else
+        t_fail "N6 master token (long=$N6_LONG no-act-as=$N6_NOACT act-as=$N6_DYLAN/$N6_WHO denied-domain=$N6_DENIED cidr=$N6_CIDR)"
+    fi
+
+    # N7 — D7: master-token use is audited even with logging switched off; the owner notice is optional
+    n_settings logging '{"enabled":false}'
+    N7_DAY="$(date -u +%Y-%m-%d)"
+    N7_A0="$(dcx mcp sh -c "grep -c '\"event\":\"master_token_use\"' /var/log/maild-mcp/audit-$N7_DAY.log" 2>/dev/null | tr -d '\r')"
+    N7_M0="$(dcx mcp sh -c "grep -c '\"event\":\"list_accounts\"' /var/log/maild-mcp/audit-$N7_DAY.log" 2>/dev/null | tr -d '\r')"
+    N7_N0="$(subj_count "$K_D" INBOX "administrator access to $K_D")"
+    n_rpc "$N_MT" "$K_D" > /dev/null
+    m_call "$N_PATS" list_accounts '{}'
+    N7_A1="$(dcx mcp sh -c "grep -c '\"event\":\"master_token_use\"' /var/log/maild-mcp/audit-$N7_DAY.log" 2>/dev/null | tr -d '\r')"
+    N7_M1="$(dcx mcp sh -c "grep -c '\"event\":\"list_accounts\"' /var/log/maild-mcp/audit-$N7_DAY.log" 2>/dev/null | tr -d '\r')"
+    n_settings logging '{"enabled":true}'
+    n_settings user_policy '{"master_notify_user":true}'
+    n_rpc "$N_MT" "$K_D" > /dev/null; n_rpc "$N_MT" "$K_D" > /dev/null
+    wait_subj_count_gt "$K_D" INBOX "administrator access to $K_D" "${N7_N0:-0}" 60; sleep 3
+    N7_N1="$(subj_count "$K_D" INBOX "administrator access to $K_D")"
+    n_settings user_policy '{"master_notify_user":false}'
+    if [ "$((N7_A1 - N7_A0))" -ge 1 ] && [ "$((N7_M1 - N7_M0))" -ge 1 ] && [ "$(( ${N7_N1:-0} - ${N7_N0:-0} ))" = 1 ] ; then
+        t_ok "N7 with logging off, the master token's calls are still audited (a PAT's are not); the opt-in owner notice arrives once for two accesses"
+    else
+        t_fail "N7 D7 audit/notice (master lines +$((N7_A1 - N7_A0)) master tool lines +$((N7_M1 - N7_M0)) notices ${N7_N0:-0}→${N7_N1:-0})"
+    fi
+    N7_PAT_LINES="$(dcx mcp sh -c "grep '\"event\":\"list_accounts\"' /var/log/maild-mcp/audit-$N7_DAY.log | grep -c '\"kind\":\"pat\"'" 2>/dev/null | tr -d '\r')"
+    n_api POST "/master-tokens/$N_MT_ID/revoke" "" "$N_AT"; N7_REV="$(n_rpc "$N_MT" "$K_D")"
+    if [ "$N7_REV" = 401 ] ; then t_ok "N7b a revoked master token is refused (401)"; else t_fail "N7b revoked master token (got $N7_REV)"; fi
+
+    # N8 — user notifications: a new token, and its first use from a new client (only once)
+    N8_T0="$(subj_count "$K_A" INBOX "new access token \"n-notice\"")"
+    k_api POST /user/tokens '{"name":"n-notice","scopes":["mail.read"]}' "$N_UAT"; N_PATN="$(k_json "d.get('token','')")"
+    N8_U0="$(subj_count "$K_A" INBOX "token \"n-notice\" used from a new place")"
+    m_call "$N_PATN" list_accounts '{}'; m_call "$N_PATN" list_accounts '{}'
+    wait_subj_count_gt "$K_A" INBOX "token \"n-notice\" used from a new place" "${N8_U0:-0}" 60; sleep 3
+    N8_T1="$(subj_count "$K_A" INBOX "new access token \"n-notice\"")"; N8_U1="$(subj_count "$K_A" INBOX "token \"n-notice\" used from a new place")"
+    if [ "$(( ${N8_T1:-0} - ${N8_T0:-0} ))" = 1 ] && [ "$(( ${N8_U1:-0} - ${N8_U0:-0} ))" = 1 ] ; then
+        t_ok "N8 the owner is mailed when a token is created and when it is first used from a new IP/client (once)"
+    else
+        t_fail "N8 notifications (new-token ${N8_T0:-0}→${N8_T1:-0}, new-client ${N8_U0:-0}→${N8_U1:-0})"
+    fi
+
+    # N9 — external service SMTP = mta:587 (STARTTLS + AUTH as the service mailbox); the Test transcript
+    N9_PW="svc-$(chrono | cut -c1-24)"
+    N9_HASH="$(dcx mda doveadm pw -s ARGON2ID -p "$N9_PW" 2>/dev/null | tr -d '\r')"
+    sql "UPDATE mailbox SET password='$N9_HASH' WHERE username='$N_SVC'" > /dev/null; dcx mda doveadm auth cache flush > /dev/null 2>&1
+    # the dev mta presents the self-signed CN=maild.cu cert: strict verification must refuse it first,
+    # then the admin's opt-out (decision 2026-10-30) lets the encrypted, unauthenticated test through
+    n_settings service_email "{\"transport\":\"external\",\"host\":\"mta\",\"port\":587,\"tls\":\"starttls\",\"verify_tls\":true,\"user\":\"$N_SVC\",\"password\":\"$N9_PW\"}"
+    n_api POST /service-email/test "" "$N_AT"; N9_STRICT="$(k_json "d['ok']")"; N9_STRICT_ERR="$(k_json "'CERTIFICATE_VERIFY_FAILED' in d['error']")"
+    n_settings service_email '{"verify_tls":false}'
+    n_api GET /settings/service_email "" "$N_AT"; N9_SECRET="$(grep -c "$N9_PW" "$K_OUT")"; N9_SET="$(k_json "d['password_set']")"
+    N9_B="$(subj_count "$N_ADMIN_MAIL" INBOX "service email test")"
+    n_api POST /service-email/test "" "$N_AT"
+    N9_OK="$(k_json "d['ok']")"; N9_STEPS="$(k_json "','.join(s['step'] for s in d['steps'])")"
+    wait_subj_count_gt "$N_ADMIN_MAIL" INBOX "service email test" "${N9_B:-0}" 90; N9_DEL=$?
+    n_settings service_email '{"transport":"internal","verify_tls":true,"clear_password":true}'
+    if [ "$N9_STRICT" = False ] && [ "$N9_STRICT_ERR" = True ] && [ "$N9_OK" = True ] && [ "$N9_STEPS" = "connect,starttls,auth,send" ] &&
+       [ "$N9_DEL" = 0 ] && [ "$N9_SET" = True ] && [ "$N9_SECRET" = 0 ] ; then
+        t_ok "N9 external service SMTP (mta:587): a self-signed cert fails verification; with verification switched off the Test reports connect → STARTTLS → AUTH → send and the mail arrives; the password is never returned"
+    else
+        t_fail "N9 external SMTP (strict=$N9_STRICT/$N9_STRICT_ERR ok=$N9_OK steps=$N9_STEPS delivered=$N9_DEL password-set=$N9_SET leaked=$N9_SECRET)"
+    fi
+
+    # N10 — the logs viewer and the separate admin bundle
+    n_api GET "/logs?kind=audit&q=master_token_use&limit=5" "" "$N_AT"; N10_LOGS="$(k_json "len(d['items'])")"; N10_ONLY="$(k_json "all('master_token_use' in str(i) for i in d['items'])")"
+    N10_USER="$(curl -s "$MCP_HTTP/" | grep -c 'admin-')"; N10_ADM="$(curl -s "$MCP_HTTP/adminmcp" | grep -c '/assets/admin-')"
+    if [ "${N10_LOGS:-0}" -ge 1 ] && [ "$N10_ONLY" = True ] && [ "$N10_USER" = 0 ] && [ "$N10_ADM" -ge 1 ] ; then
+        t_ok "N10 the logs viewer filters the audit trail; /adminmcp loads its own bundle and the user page ships no admin code"
+    else
+        t_fail "N10 logs/bundles (items=$N10_LOGS filtered=$N10_ONLY user-page-admin-refs=$N10_USER admin-bundle=$N10_ADM)"
     fi
 fi
 

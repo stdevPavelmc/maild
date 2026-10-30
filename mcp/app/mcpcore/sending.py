@@ -28,7 +28,7 @@ from django.db import transaction
 from django.db.models import F
 from django.utils import timezone
 
-from mcpcore import audit, catalogue, imap, mail, policy, prefs
+from mcpcore import audit, catalogue, imap, mail, policy
 from mcpcore.accounts import EMAIL_RE
 from mcpcore.models import SendCounter
 
@@ -95,7 +95,7 @@ def choose_sender(principal, requested: str | None, hint: list[str] | None = Non
     for addr in hint or []:
         if addr in usable:
             return addr
-    preferred = prefs.get(principal.account).get("default_sender")
+    preferred = principal.prefs().get("default_sender")
     if preferred in usable:
         return preferred
     if not usable:
@@ -110,7 +110,7 @@ def external_recipients(recipients: list[str]) -> list[str]:
 
 def confirmation_reason(principal, recipients: list[str]) -> str:
     """Why this send needs the two-step confirmation, '' when it does not."""
-    mode = prefs.get(principal.account)["confirm_send"]
+    mode = principal.prefs()["confirm_send"]
     if policy.FORCE_CONFIRM or mode == "always":
         return "always"
     if mode == "external":
@@ -122,7 +122,7 @@ def confirmation_reason(principal, recipients: list[str]) -> str:
 
 # ---------------------------------------------------------------- building ---
 def _with_signature(principal, text: str) -> str:
-    sig = (prefs.get(principal.account).get("signature") or "").strip()
+    sig = (principal.prefs().get("signature") or "").strip()
     return f"{text.rstrip()}\n\n-- \n{sig}\n" if sig else text
 
 
@@ -174,7 +174,7 @@ def _window_start() -> dt.datetime:
 
 
 def _subjects(principal, sender: str) -> list[str]:
-    return [f"acct:{principal.account.id}", f"addr:{sender}"]
+    return principal.rate_subjects(sender)
 
 
 def check_rate(principal, sender: str, n: int) -> None:

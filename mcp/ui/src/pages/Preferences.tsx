@@ -145,6 +145,16 @@ export function PreferencesCard({ account, onChange }: { account: Account; onCha
           {t('prefs.allowAttachments')}
         </label>
 
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-sm text-slate-300">{t('prefs.notifyTitle')}</legend>
+          {(['notify_new_token', 'notify_new_client', 'notify_master_access'] as const).map((k) => (
+            <label key={k} className="inline-flex min-h-[40px] items-center gap-2 text-sm">
+              <input type="checkbox" checked={form[k]} onChange={(e) => setForm({ ...form, [k]: e.target.checked })} />
+              {t(`prefs.${k}`)}
+            </label>
+          ))}
+        </fieldset>
+
         {notice && <Alert kind={notice.kind}>{notice.text}</Alert>}
         <div className="flex flex-wrap gap-2">
           <Button onClick={update} disabled={busy || !dirty} data-testid="prefs-update">

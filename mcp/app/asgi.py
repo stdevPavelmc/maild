@@ -9,6 +9,8 @@ The bearer wrapper answers what the SDK cannot know (proposal §8.2):
   401 + WWW-Authenticate resource_metadata   missing / invalid / expired / idle token
   403 mcp_disabled                           the account's MCP switch is off
   403 insufficient_scope                     tools/call for a tool outside the token's scopes
+  400 act_as_required / 403 act_as_denied / 403 ip_not_allowed   master tokens (D7, P3):
+      X-MailD-Act-As names the one mailbox the request acts on; the CIDR allowlist is checked
 and hands the Principal to the tools through the request state.
 """
 
@@ -29,7 +31,7 @@ django_app = get_asgi_application()
 from django.conf import settings  # noqa: E402
 from django.db import connections  # noqa: E402
 
-from mcpcore import audit, authz, jobs, tokens  # noqa: E402
+from mcpcore import audit, authz, jobs, notices, tokens  # noqa: E402
 from mcpserver.server import http_app  # noqa: E402
 
 log = logging.getLogger("mcp.asgi")
@@ -105,8 +107,18 @@ def _scope_needed(body: bytes) -> list[str]:
 def _touch(p: "authz.Principal"):
     try:
         tokens.touch(p.token, p.ip, p.client)
-        # account + addresses are re-read per request (nothing cached in the token)
-        p.account.refresh_from_db()
+        if p.account is not None:
+            # account + addresses are re-read per request (nothing cached in the token)
+            p.account.refresh_from_db()
+        notices.after_auth(p)
+    finally:
+        connections.close_all()
+
+
+def _act_as_check(p: "authz.MasterPrincipal") -> str:
+    try:
+        rows = p.addresses()
+        return rows[0]["reason"]
     finally:
         connections.close_all()
 
@@ -124,9 +136,31 @@ async def mcp_endpoint(scope, receive, send):
                     _www_authenticate("invalid_token" if raw else ""))
         return
     tok = result.token
-    p = authz.Principal(token=tok, account=tok.account, ip=ip, client=ua, request_id=scope["state"]["request_id"])
+    if tok.kind == tok.MASTER:
+        if not tokens.ip_allowed(tok, ip):
+            audit.event("security", "master_token_use", result="ip_not_allowed", token={"public_id": tok.public_id,
+                        "kind": tok.kind}, ip=ip, ua=ua, level="warning")
+            await _json(send, 403, {"error": "ip_not_allowed", "error_description": "source address not in the token's allowlist"})
+            return
+        act_as = _header(scope, b"x-maild-act-as").strip().lower()
+        if not act_as:
+            await _json(send, 400, {"error": "act_as_required",
+                                    "error_description": "master tokens need the X-MailD-Act-As: <mailbox> header"})
+            return
+        p = authz.MasterPrincipal(token=tok, account=None, ip=ip, client=ua,
+                                  request_id=scope["state"]["request_id"], act_as=act_as)
+        reason = await asyncio.to_thread(_act_as_check, p)
+        if reason:
+            audit.event("security", "master_token_use", result=reason, actor=p.audit_actor(), token=p.audit_token(),
+                        ip=ip, ua=ua, level="warning")
+            await _json(send, 403, {"error": "act_as_denied", "error_description": f"{act_as}: {reason}"})
+            return
+        audit.event("security", "master_token_use", actor=p.audit_actor(), token=p.audit_token(), ip=ip, ua=ua,
+                    request_id=p.request_id)
+    else:
+        p = authz.Principal(token=tok, account=tok.account, ip=ip, client=ua, request_id=scope["state"]["request_id"])
     await asyncio.to_thread(_touch, p)
-    if not p.account.mcp_enabled:
+    if p.account is not None and not p.account.mcp_enabled:
         audit.event("bearer.access", "denied", result="mcp_disabled", actor=p.audit_actor(),
                     token=p.audit_token(), ip=ip, ua=ua)
         await _json(send, 403, {"error": "mcp_disabled",

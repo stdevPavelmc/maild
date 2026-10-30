@@ -33,7 +33,7 @@ Rules:
 | P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | done | 2026-10-29 | 2026-10-30 | |
 | P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | done | 2026-10-30 | 2026-10-30 | |
 | P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | done | 2026-10-30 | 2026-10-30 | |
-| P3 | Admin panel (all groups), master tokens, external SMTP + test | — | | | |
+| P3 | Admin panel (all groups), master tokens, external SMTP + test | done | 2026-10-30 | 2026-10-30 | |
 | P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | — | | | |
 | P5 | REST mirror, OpenAPI, SKILL.md, docs | — | | | |
 | Final | All phases `verified` + goal review against `Idea.md` and the proposal | — | | | |
@@ -239,23 +239,41 @@ Log
 
 ## P3 — Admin panel
 
-Status: —
+Status: done (clean-stack verification pending, with P1–P2)
 
 Checklist
-- [ ] Admin login + ALTCHA + lockout, 72 h session, recovery link, CLI reset
-- [ ] Admin user group: email change (two codes), password change (code)
-- [ ] Domains group: dual list from catalogue, logging toggles, rotation + retention
-- [ ] User policy group
-- [ ] Master tokens: create (≤ max TTL, never forever), Active/Disabled/Revoked tabs, `act_as`, CIDR allowlist
-- [ ] Service email group: internal / external SMTP + Test button
-- [ ] Logs viewer
-- [ ] Tests: `pwa-test` admin flows, master token access + audit, external SMTP test against a fixture
-- [ ] Full `./test.sh` green
+- [x] Admin login + ALTCHA + lockout + mailed code, 72 h session, recovery link, CLI reset
+- [x] Admin user group: email change (two codes), password change (code)
+- [x] Domains group: dual list from catalogue, logging toggles, rotation + retention
+- [x] User policy group
+- [x] Master tokens: create (≤ max TTL, never forever), Active/Disabled/Revoked tabs, `act_as`, CIDR allowlist
+- [x] Service email group: internal / external SMTP + Test button
+- [x] Logs viewer
+- [x] Tests: `pwa-test` admin flows, master token access + audit, external SMTP test against a fixture — N1–N10 + N7b, 5 admin browser flows, pytest 22
+- [x] Full `./test.sh` green — 160 passed / 0 failed / 0 skipped, 7m43s
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-30 | action | Baseline inherited from P2's full pass (149/0/0, commit `7d0fa6b`). P3 → Initiated. Also in scope (deferred here earlier): the user email notifications (new token / token used from a new IP or client / master-token access), the admin switches `ALLOW_NO_CONFIRM`, `FORCE_CONFIRM`, `ALLOW_EXTERNAL`, and D7's "notify the user on master-token access" (default off). |
+| 2026-10-30 | decision | **Asked Pavel** — admin sign-in = password + ALTCHA **+ a 6-digit code mailed to the admin address at every login** (10 min, 5 attempts); the CLI reset stays the fallback. |
+| 2026-10-30 | decision | **Asked Pavel** — master tokens pass `act_as` as the HTTP header **`X-MailD-Act-As: user@domain`** (one master-token connection = one mailbox; tool schemas unchanged). |
+| 2026-10-30 | decision | **Asked Pavel** — external-SMTP fixture for the tests = **the stack's own `mta:587`** (STARTTLS + AUTH as the service mailbox); no new container. |
+| 2026-10-30 | decision | Settings store = the proposal's `setting` table, one validated row per group (`logging`, `user_policy`, `service_email`; `mcpcore/settings_store.py`). `policy.py` keeps the fixed limits as constants and resolves the 15 tunable ones through a module `__getattr__` from `user_policy`, so no P1/P2 call site changed and the defaults equal the P2 behaviour. Cache 2 s per worker (first 10 s: an admin change took up to 10 s to reach every worker — shortened; one primary-key query). Bounds: idle ≤ 30 d (D12), message size ≤ the mta's `MAX_MESSAGESIZE`. |
+| 2026-10-30 | decision | Audit switches: category → switch map (web sign-ins, token access, mail actions, token lifecycle, admin changes, errors, security); the access log follows the token-access switch; `force=True` for every master-token record (D7). Rotation/retention read from `logging`. |
+| 2026-10-30 | decision | Admin auth: `otp_challenge` (HMAC'd 6-digit codes, 10 min, 5 attempts; recovery tokens `mdmcp_rc_…`, 30 min). Password ≥ 12 chars; change/reset revoke the other admin sessions. Separate refresh cookie `mdmcp_admin_refresh` on Path=/webapi/admin. `MCP_ADMIN_SESSION_TTL` (72h) and `MCP_MASTER_TOKEN_MAX_TTL` (7d) added (both in the proposal's §9.5) to the compose allow-lists. |
+| 2026-10-30 | decision | Master tokens: `MasterPrincipal` acts on the `X-MailD-Act-As` mailbox only, with policy-default preferences (the owner's hidden folders, signature… do not apply: D7 makes the master token an admin tool that ignores the owner's account state), rate subject `master:<id>`. Wrapper statuses: 400 `act_as_required`, 403 `act_as_denied` (inactive mailbox / denied domain), 403 `ip_not_allowed`. Owner notice (admin opt-in) once per token+mailbox per day. |
+| 2026-10-30 | decision | Notifications (deferred from P2): `notify_new_token`, `notify_new_client` (first use of a token from a new IP/client pair, tracked in `notice_throttle`), `notify_master_access` — all default on; the master one only fires when the admin enables `master_notify_user` (D7 default off). |
+| 2026-10-30 | decision | Admin SPA = a second Vite entry (`mcp/ui/adminmcp/index.html` → `src/admin/*`), served at `/adminmcp` by its own view; the admin code lands only in the `admin-*.js` chunk (checked by N10). |
+| 2026-10-30 | decision | **Asked Pavel** — external SMTP with an unverifiable certificate: **opt-out toggle `verify_tls`** (default on). Off = still TLS, chain + hostname not checked; the UI shows a warning, the change is in the admin-settings audit, the Test transcript says "certificate NOT verified". Found because the dev fixture `mta:587` presents the self-signed `CN=maild.cu` cert (strict verification correctly refused it). |
+| 2026-10-30 | action | Smoke on dev: admin login (code mailed to `sysadmin@maild.cu`), master token: TTL 500 h refused, no act-as 400, act-as dylan (no MCP account) 200, act-as a denied-domain mailbox 403. |
+| 2026-10-30 | finding | Implementation bugs found by section N's first run (44/48): (1) `data: dict` in a django-ninja handler is not read as the JSON body → every settings PUT 422 (N4, N7's notice and N9 depended on it) → `Body(...)`; (2) the email change consumed the old-address code even when the new-address code was wrong → codes are now verified together and consumed only if both match. Also: the mcp image had been built before `makemigrations` wrote 0004 (500 "otp_challenge does not exist" on the first smoke) — rebuilt. |
+| 2026-10-30 | finding | Admin browser flow: "session survives a reload" failed because `signIn()` waited for the page heading, which the sign-in screens share, so the reload aborted `login/verify` in flight (trace: status −1) → it now waits for a panel-only element. Not a product bug. |
+| 2026-10-30 | action | Tests: `test.sh` section N (N1–N10 + N7b) run with K+M: **48/48**; snapshots restore the admin row, settings, domain policy and the service mailbox hash. `run.sh mcp`: **12/12** (5 admin flows + 7 user). pytest: **22/22** (conftest serves the settings defaults: units have no DB). |
+| 2026-10-30 | finding | Dev note for Pavel: the admin password currently in the dev DB is one I set with `mcp_admin_reset` during the smoke test (the tests restore whatever they found). Run `manage.py mcp_admin_reset` to get a password of your own. |
+| 2026-10-30 | action | Full `./test.sh`: **160 passed / 0 failed / 0 skipped, 7m43s** (149 + N1–N10 + N7b). §13 exit criterion (Playwright admin flows via `pwa-test`) met: 12/12. P3 → **done**. Nothing committed yet. |
+| 2026-10-30 | action | P3 committed on branch `mcp`. |
 
 ---
 

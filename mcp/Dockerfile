@@ -4,12 +4,14 @@ WORKDIR /ui
 COPY ui/package.json ui/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY ui/ ./
-# `npm run build` = i18n:check (EN/ES parity) + tsc + vite build. The output is split the way
-# Django serves it: index.html (no-cache view), assets/ (hashed, WhiteNoise, cached for ever)
-# and root/ (public files such as icon.svg, WhiteNoise root).
+# `npm run build` = i18n:check (EN/ES parity) + tsc + vite build (two entries: the user page and
+# the admin panel). The output is split the way Django serves it: index.html and
+# adminmcp/index.html (no-cache views), assets/ (hashed, WhiteNoise, cached for ever) and root/
+# (public files such as icon.svg, WhiteNoise root).
 RUN npm run build && \
-    mkdir -p /out/root && \
-    mv dist/index.html /out/ && mv dist/assets /out/ && cp -a dist/. /out/root/
+    mkdir -p /out/root /out/adminmcp && \
+    mv dist/index.html /out/ && mv dist/adminmcp/index.html /out/adminmcp/ && rmdir dist/adminmcp && \
+    mv dist/assets /out/ && cp -a dist/. /out/root/
 
 # --- stage 2: the server ---------------------------------------------------------------
 FROM python:3.14-slim-trixie
