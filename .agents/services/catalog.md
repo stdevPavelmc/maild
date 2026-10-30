@@ -526,7 +526,7 @@ more. See `.agents/services/provisioning.md`.
   Recovery link (30 min, neutral answer), password change (current + code), email change (codes to
   the old AND new address, checked together), CLI `manage.py mcp_admin_reset [--password …]`
   (revokes the admin sessions). Settings groups in the `setting` table (`mcpcore/settings_store.py`,
-  validated, cached 2 s per worker): `logging` (on/off, 7 category switches, day/week/month
+  validated, cached 2 s per worker; the panel's own reads bypass the cache): `logging` (on/off, 7 category switches, day/week/month
   rotation, retention), `user_policy` (token limits, idle ≤ 30 d, send limits, size ≤ the mta's
   `MAX_MESSAGESIZE`, `allow_external`, `force_confirm`, `allow_no_confirm`, magic-link/resend,
   `master_notify_user`), `service_email` (internal | external SMTP: host, port, none/STARTTLS/
@@ -542,6 +542,25 @@ more. See `.agents/services/provisioning.md`.
   defaults apply), is rate-limited as `master:<id>`, and is **always audited** (the logging
   switches cannot silence it: `security/master_token_use` + the tool calls). Owner notice only when
   the admin enables `master_notify_user` (once per token and mailbox per day).
+- **OAuth 2.1 (P4, D1)** for "Add custom connector" in Claude / ChatGPT: a 401 from
+  `/api/v1/mcp` carries `WWW-Authenticate: Bearer resource_metadata=…` →
+  `/.well-known/oauth-protected-resource[/api/v1/mcp]` (RFC 9728) →
+  `/.well-known/oauth-authorization-server` (RFC 8414; issuer = `MCP_PUBLIC_URL`). Endpoints
+  `/oauth/authorize|token|revoke|register`. Public clients only, PKCE **S256** required, `iss` in
+  every authorization response (RFC 9207), access tokens audience-bound to `MCP_RESOURCE_URL`
+  (RFC 8707). Clients: **CIMD** (the `client_id` is an https URL of a metadata document; fetch
+  https-only, every resolved address must be public — loopback/private/link-local/CGNAT/mapped
+  refused —, connects to the checked IP, 5 s, 64 KB, no redirects, cached 5 min–24 h) or
+  **DCR** (RFC 7591, `mdmcp_dcr_…`, 20 per source IP per hour, shown as "unverified"). Redirect
+  URIs: https, loopback http (any port at use, RFC 8252) or a private-use scheme; an unregistered
+  one gets an error page, never a redirect. `/consent#<request>` (SPA) signs the user in, shows
+  the client and where it returns, and lets the user narrow scopes and addresses. Codes
+  `mdmcp_oac_…` 2 min single use; access `mdmcp_oat_…` `MCP_OAUTH_ACCESS_TTL` (1 h); refresh
+  `mdmcp_ort_…` `MCP_OAUTH_REFRESH_TTL` (30 d, sliding), rotated on every use — presenting a
+  rotated one revokes the whole grant (`security/oauth.refresh_reuse`). Grants are listed in the
+  user's token list by client name ("app connection", revoke only); `/oauth/revoke` (RFC 7009)
+  takes the whole grant for a refresh token. Tables `oauth_client`, `oauth_request`,
+  `oauth_code`; `mcp_jobs` drops expired codes/requests and day-old expired access tokens.
 - **User notifications (P3)**, preferences `notify_new_token`, `notify_new_client` (first use of a
   token from a new IP/client pair), `notify_master_access`; mailed to the main address.
 - **Service mail** (magic links, notices, admin codes) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10026, bank

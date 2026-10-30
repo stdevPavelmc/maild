@@ -73,7 +73,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (160 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (167 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```
@@ -87,7 +87,7 @@ cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also 
 ./adminng/pwa-test/run.sh superadmin     # TOTP login + devices panel (never resets the enrollment)
 ./adminng/pwa-test/run.sh visual         # PNG screenshots (desktop/mobile, EN/ES) in ldata/e2e/screens
 ./adminng/pwa-test/run.sh a11y           # axe-core WCAG 2.1 A/AA reports in ldata/e2e/a11y
-./adminng/pwa-test/run.sh mcp            # MailD MCP user page + /adminmcp admin panel flows
+./adminng/pwa-test/run.sh mcp            # MailD MCP user page, OAuth consent + /adminmcp admin panel flows
 ```
 
 - `bootstrap-dev.sh` provisions: `ldata/` dirs, self-signed certs, and the test fixtures —

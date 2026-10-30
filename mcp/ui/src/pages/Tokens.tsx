@@ -165,7 +165,12 @@ export default function Tokens({ addresses, onError }: { addresses: string[]; on
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <p className="text-sm font-medium">
-                  {tok.name} <code className="text-xs text-slate-400">{tok.display}</code>
+                  {tok.name}{' '}
+                  {tok.kind === 'oauth_refresh' ? (
+                    <span className="text-xs text-slate-400">({t('tokens.oauthApp')})</span>
+                  ) : (
+                    <code className="text-xs text-slate-400">{tok.display}</code>
+                  )}
                 </p>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                   <StatusBadge status={tok.status} label={statusLabel(tok)} />
@@ -175,7 +180,7 @@ export default function Tokens({ addresses, onError }: { addresses: string[]; on
               </div>
               {tok.status !== 'revoked' && (
                 <div className="flex flex-wrap gap-2">
-                  {tok.status === 'active' ? (
+                  {tok.kind === 'oauth_refresh' ? null : tok.status === 'active' ? (
                     <Button variant="secondary" disabled={busy} onClick={() => act(tok, 'disable')}>
                       {t('tokens.disable')}
                     </Button>

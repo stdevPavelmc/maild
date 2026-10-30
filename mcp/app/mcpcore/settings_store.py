@@ -2,8 +2,9 @@
 
 Every group has defaults (some from the environment, e.g. the send limits), so a fresh install
 behaves exactly like P2 did. Reads are cached for 2 s per process (one primary-key query); a
-write clears the local cache and the other workers follow within 2 s. The admin UI's "Restore"
-is client-side (drop the local edits, reload these values); "Update" is `put()`.
+write clears the local cache and the other workers follow within 2 s, while the admin panel's own
+reads bypass the cache. The admin UI's "Restore" is client-side (drop the local edits, reload
+these values); "Update" is `put()`.
 """
 
 import time
@@ -133,10 +134,10 @@ def _validate(group: str, data: dict, current: dict) -> dict:
     raise KeyError(group)
 
 
-def get(group: str) -> dict:
+def get(group: str, fresh: bool = False) -> dict:
     hit = _cache.get(group)
     now = time.monotonic()
-    if hit and now - hit[0] < _TTL:
+    if hit and not fresh and now - hit[0] < _TTL:
         return hit[1]
     row = Setting.objects.filter(key=group).first()
     value = {**defaults(group), **(row.value if row else {})}
@@ -147,8 +148,9 @@ def get(group: str) -> dict:
 
 
 def public(group: str) -> dict:
-    """What the admin UI may see (never the SMTP password)."""
-    value = dict(get(group))
+    """What the admin UI may see (never the SMTP password). Read fresh: the panel must show its own
+    write right away, even when the reload lands on a worker whose cache is still warm."""
+    value = dict(get(group, fresh=True))
     if group == "service_email":
         value["password_set"] = bool(value.pop("password", ""))
         value["sender"] = dj.MCP_SERVICE_EMAIL

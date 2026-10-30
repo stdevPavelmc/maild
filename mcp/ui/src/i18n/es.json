@@ -61,7 +61,8 @@
     "invalid_setting": "Un valor está fuera de rango.",
     "unknown_domain": "Dominio desconocido.",
     "invalid_cidr": "No es una red válida (CIDR).",
-    "invalid_kind": "Registro desconocido."
+    "invalid_kind": "Registro desconocido.",
+    "invalid_request": "Esta solicitud de autorización caducó: empiece de nuevo desde la aplicación."
   },
   "confirm": {
     "title": "Confirmar una dirección",
@@ -172,7 +173,8 @@
     "foreverBody": "Quien tenga este token puede usar su buzón hasta que lo revoque. Aun así, todo token se desactiva tras 30 días sin uso, y solo usted puede reactivarlo desde esta página.",
     "foreverConfirm": "Crearlo de todos modos",
     "revokeTitle": "¿Revocar este token?",
-    "revokeBody": "\"{{name}}\" deja de funcionar al instante y no se puede volver a activar."
+    "revokeBody": "\"{{name}}\" deja de funcionar al instante y no se puede volver a activar.",
+    "oauthApp": "conexión de aplicación"
   },
   "prefs": {
     "title": "Preferencias",
@@ -346,5 +348,21 @@
         "errors": "Errores"
       }
     }
+  },
+  "consent": {
+    "title": "Conectar una aplicación a su buzón",
+    "wants": "quiere acceder a su correo como {{account}}.",
+    "identity": "Identidad de la aplicación",
+    "registration": {
+      "cimd": "metadatos de cliente publicados",
+      "dcr": "registrada aquí, sin verificar"
+    },
+    "returnsTo": "Vuelve a",
+    "mcpOff": "El acceso MCP está desactivado para esta cuenta: la aplicación será rechazada hasta que lo active.",
+    "addresses": "Direcciones que la aplicación puede usar",
+    "revokeHint": "Puede desconectar la aplicación cuando quiera desde la lista de tokens de acceso.",
+    "allow": "Permitir",
+    "deny": "Denegar",
+    "missing": "Esta página la abre una aplicación que pide acceso; empiece desde la aplicación."
   }
 }

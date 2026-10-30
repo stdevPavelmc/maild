@@ -313,6 +313,7 @@ MCP_TOUCHED=0
 MCP_K_TOUCHED=0
 MCP_M_TOUCHED=0
 MCP_N_TOUCHED=0
+MCP_O_TOUCHED=0
 MCP_LEGACY_USER="mcp-legacy-probe@${DOMAIN}"
 MCP_INACTIVE_USER="mcp-inactive-probe@${DOMAIN}"
 cleanup() {
@@ -338,6 +339,15 @@ cleanup() {
             dcx mda rm -rf "/home/vmail/${DOMAIN}/${MCP_LEGACY_USER%%@*}" "/home/vmail/${DOMAIN}/${MCP_INACTIVE_USER%%@*}" \
                 > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+        fi
+        # Phase O (OAuth): the scripted clients, their pending requests and codes, the grants of the fixtures.
+        if [ "$MCP_O_TOUCHED" = 1 ]; then
+            dcx db psql -U maild -d mcp -q -c "
+                DELETE FROM oauth_request WHERE client_id IN (SELECT client_id FROM oauth_client WHERE metadata->>'client_name' LIKE 'Scripted %' OR metadata->>'client_name' = 'o-rules');
+                DELETE FROM oauth_code WHERE client_id IN (SELECT client_id FROM oauth_client WHERE metadata->>'client_name' LIKE 'Scripted %' OR metadata->>'client_name' = 'o-rules');
+                DELETE FROM oauth_client WHERE metadata->>'client_name' LIKE 'Scripted %' OR metadata->>'client_name' = 'o-rules';
+                DELETE FROM oauth_code WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
+                DELETE FROM token WHERE kind IN ('oauth_access', 'oauth_refresh') AND account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');" > /dev/null 2>&1 || true
         fi
         # Phase N (MCP admin): restore the admin row, the settings and the domain policy as found, the
         # service mailbox hash, drop the master tokens and admin sessions/codes the phase made.
@@ -378,6 +388,7 @@ cleanup() {
             dcx db psql -U maild -d mcp -q -c "
                 DELETE FROM web_session WHERE kind='user' AND subject_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM confirm_handle WHERE token_id IN (SELECT t.id FROM token t JOIN account a ON a.id = t.account_id WHERE a.main_email LIKE '%@${DOMAIN}');
+                DELETE FROM oauth_code WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM token WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM account_address WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM account WHERE main_email LIKE '%@${DOMAIN}';
@@ -3162,6 +3173,116 @@ print(f.group(1) if f else "")' 2>/dev/null)"
         t_ok "N10 the logs viewer filters the audit trail; /adminmcp loads its own bundle and the user page ships no admin code"
     else
         t_fail "N10 logs/bundles (items=$N10_LOGS filtered=$N10_ONLY user-page-admin-refs=$N10_USER admin-bundle=$N10_ADM)"
+    fi
+fi
+
+# ================================= O. MailD MCP OAuth 2.1 (P4) ================
+# mcp/technical-proposal.md §8.2, D1 and the 2026-10-30 decisions in mcp/progress.md: discovery
+# (401 → RFC 9728 → RFC 8414), DCR and CIMD clients end to end through tests/oauth_flow.py (PKCE
+# S256, consent narrowing the scopes, `iss`, single-use codes, audience-bound access tokens, refresh
+# rotation + reuse detection, RFC 7009 revocation), the CIMD SSRF refusals, the redirect-URI rule
+# (error page, never a redirect to an unverified URI), PKCE/resource enforcement, a denied consent,
+# and the grants in the user's token list. The CIMD success path uses the dev-only
+# MCP_CIMD_DEV_ALLOW fixture (mcp:8099). Self-cleaning: the scripted clients and their codes go.
+section "O. MailD MCP OAuth 2.1 (discovery, DCR, CIMD, PKCE, refresh rotation, revocation)"
+
+O_REDIRECT="http://127.0.0.1:9/callback"
+o_flow() { dcx mcp python tests/oauth_flow.py "$1" "$K_A" "$K_PA" 2>/dev/null | tail -n1 | tr -d '\r'; }
+o_get() { python3 -c "import json,sys; d=json.loads(sys.argv[2]); print(eval(sys.argv[1], {}, {'d': d}))" "$1" "$2" 2>/dev/null; }
+o_loc() { # <query string> → "<status> <Location>" of GET /oauth/authorize
+    curl -s -o "$K_OUT" -D "$K_OUT.h" -w '%{http_code}' --max-time 30 "$MCP_HTTP/oauth/authorize?$1"
+    printf ' %s' "$(grep -i '^location:' "$K_OUT.h" | cut -d' ' -f2- | tr -d '\r')"
+}
+o_q() { python3 -c "import sys, urllib.parse as u; print(u.urlencode(dict(a.split('=',1) for a in sys.argv[1:])))" "$@"; }
+
+if [ "$HAVE_DC" != 1 ] || [ -z "$MCP_DB_PW" ] || [ -z "${K_PA:-}" ] ; then
+    t_skip "MailD MCP OAuth checks (need docker, MCP secrets and the $DOMAIN fixtures)"
+else
+    MCP_O_TOUCHED=1
+    dcx mcp python manage.py mcp_domains allow "$DOMAIN" > /dev/null 2>&1
+    O_RES="$(curl -s "$MCP_HTTP/.well-known/oauth-protected-resource/api/v1/mcp")"
+    O_AS="$(curl -s "$MCP_HTTP/.well-known/oauth-authorization-server")"
+    O_RESOURCE="$(o_get "d['resource']" "$O_RES")"
+
+    # O1 — discovery documents
+    if [ "$(o_get "d['authorization_servers'][0] == d['resource'].rsplit('/api/v1/mcp',1)[0]" "$O_RES")" = True ] &&
+       [ "$(o_get "d['code_challenge_methods_supported'] == ['S256'] and d['client_id_metadata_document_supported'] and d['authorization_response_iss_parameter_supported'] and d['token_endpoint_auth_methods_supported'] == ['none']" "$O_AS")" = True ] ; then
+        t_ok "O1 protected-resource (RFC 9728) and authorization-server (RFC 8414) metadata: S256 only, public clients, CIMD, iss"
+    else
+        t_fail "O1 metadata ($O_RES | $(printf '%s' "$O_AS" | head -c 200))"
+    fi
+
+    # O2/O3 — the two client registration paths, end to end
+    for O_MODE in dcr cimd ; do
+        O_J="$(o_flow "$O_MODE")"
+        O_CHECK="d['discovery_401'] == 401 and d['g1_authorize'] == 302 and d['g1_redirect_ok'] and d['g1_iss'] == d['resource'].rsplit('/api/v1/mcp',1)[0] and d['g1_token_status'] == 200 and d['g1_scope'] == 'mail.read' and d['g1_code_reuse'] == 'invalid_grant' and d['mcp_call'] == '$K_A' and d['refresh'] == 200 and d['refresh_widen'] == 'invalid_scope' and d['refresh_reuse'] == 'invalid_grant' and d['after_reuse_access'] == 401 and d['revoke'] == 200 and d['after_revoke_access'] == 401"
+        [ "$O_MODE" = dcr ] && O_CHECK="$O_CHECK and d['register'] == 201 and d['register_bad_redirect'] == 'invalid_redirect_uri'"
+        O_LABEL="O2 DCR"; [ "$O_MODE" = cimd ] && O_LABEL="O3 CIMD"
+        if [ "$(o_get "$O_CHECK" "$O_J")" = True ] ; then
+            t_ok "$O_LABEL client: authorize (PKCE) → consent (scopes narrowed) → code (iss, single use) → MCP call → refresh rotation; reuse kills the family; /oauth/revoke works"
+        else
+            t_fail "$O_LABEL OAuth flow ($(printf '%s' "$O_J" | head -c 600))"
+        fi
+    done
+
+    # O4 — CIMD fetch is SSRF-safe: plain http, loopback and private addresses are refused (error page)
+    O4=""
+    for O_CID in "http://example.com/client.json" "https://127.0.0.1/client.json" "https://10.20.30.40/client.json" "https://mda/client.json" ; do
+        O4="$O4 $(o_loc "$(o_q "client_id=$O_CID" "redirect_uri=$O_REDIRECT" response_type=code code_challenge=x code_challenge_method=S256)" | cut -d' ' -f1)"
+    done
+    if [ "$O4" = " 400 400 400 400" ] ; then
+        t_ok "O4 CIMD refuses http, loopback, private and internal-name client_id URLs (no fetch towards the stack)"
+    else
+        t_fail "O4 CIMD SSRF guard (statuses:$O4, want 400 ×4)"
+    fi
+
+    # O5 — redirect URI, PKCE and resource rules (a registered DCR client)
+    O_CLIENT="$(curl -s -X POST "$MCP_HTTP/oauth/register" -H 'Content-Type: application/json' \
+        --data "{\"client_name\":\"o-rules\",\"redirect_uris\":[\"$O_REDIRECT\"]}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["client_id"])' 2>/dev/null)"
+    O5_BADURI="$(o_loc "$(o_q "client_id=$O_CLIENT" "redirect_uri=https://evil.example/cb" response_type=code code_challenge=x code_challenge_method=S256)")"
+    O5_PORT="$(o_loc "$(o_q "client_id=$O_CLIENT" "redirect_uri=http://127.0.0.1:51234/callback" response_type=code code_challenge=x code_challenge_method=S256 "resource=$O_RESOURCE")")"
+    O5_NOPKCE="$(o_loc "$(o_q "client_id=$O_CLIENT" "redirect_uri=$O_REDIRECT" response_type=code state=s1)")"
+    O5_RES="$(o_loc "$(o_q "client_id=$O_CLIENT" "redirect_uri=$O_REDIRECT" response_type=code code_challenge=x code_challenge_method=S256 resource=https://other.example/mcp)")"
+    O5_JSON="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$MCP_HTTP/oauth/token" -H 'Content-Type: application/json' --data '{"grant_type":"authorization_code"}')"
+    if [[ "$O5_BADURI" == "400 " ]] && [[ "$O5_PORT" == "302 /consent#"* ]] &&
+       [[ "$O5_NOPKCE" == "302 $O_REDIRECT?error=invalid_request"*"state=s1"*"iss="* ]] &&
+       [[ "$O5_RES" == "302 $O_REDIRECT?error=invalid_target"* ]] && [ "$O5_JSON" = 400 ] ; then
+        t_ok "O5 an unregistered redirect URI gets an error page (never a redirect); loopback ports may differ; missing PKCE / foreign resource go back as errors with state + iss; the token endpoint wants a form"
+    else
+        t_fail "O5 rules (bad-uri='$O5_BADURI' loopback-port='$O5_PORT' no-pkce='$O5_NOPKCE' resource='$O5_RES' json=$O5_JSON)"
+    fi
+
+    # O6 — a denied consent goes back as access_denied; the grants show in the user's token list
+    O6_REQ="$(o_loc "$(o_q "client_id=$O_CLIENT" "redirect_uri=$O_REDIRECT" response_type=code code_challenge=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ code_challenge_method=S256 state=s2)" | sed -n 's/.*#//p')"
+    k_login "$K_A" "$K_PA"; O_UAT="$K_AT"
+    k_api POST /user/oauth/decision "{\"request_id\":\"$O6_REQ\",\"approve\":false}" "$O_UAT"; O6_DENY="$(k_json "d.get('redirect','')")"
+    # a live grant (the scripted flows revoke theirs): approve → exchange the code with the verifier
+    O6_V="o6-verifier-$(printf '%040d' 0)"
+    O6_C="$(python3 -c "import base64,hashlib,sys; print(base64.urlsafe_b64encode(hashlib.sha256(sys.argv[1].encode()).digest()).rstrip(b'=').decode())" "$O6_V")"
+    O6_REQ2="$(o_loc "$(o_q "client_id=$O_CLIENT" "redirect_uri=$O_REDIRECT" response_type=code "code_challenge=$O6_C" code_challenge_method=S256)" | sed -n 's/.*#//p')"
+    k_api POST /user/oauth/decision "{\"request_id\":\"$O6_REQ2\",\"approve\":true,\"scopes\":[\"mail.read\"],\"addresses\":[\"$K_A\"]}" "$O_UAT"
+    O6_CODE="$(k_json "d['redirect'].split('code=',1)[1].split('&',1)[0]")"
+    curl -s -o /dev/null --max-time 30 -X POST "$MCP_HTTP/oauth/token" --data-urlencode grant_type=authorization_code \
+        --data-urlencode "code=$O6_CODE" --data-urlencode "client_id=$O_CLIENT" --data-urlencode "redirect_uri=$O_REDIRECT" \
+        --data-urlencode "code_verifier=$O6_V"
+    k_api GET /user/tokens "" "$O_UAT"; O6_GRANT="$(k_json "[t['name'] for t in d['tokens'] if t['kind']=='oauth_refresh']")"
+    O6_GID="$(k_json "[t['id'] for t in d['tokens'] if t['kind']=='oauth_refresh' and t['name']=='o-rules'][0]")"
+    k_api POST "/user/tokens/$O6_GID/disable" "" "$O_UAT"; O6_DIS="$K_CODE"
+    k_api POST "/user/tokens/$O6_GID/revoke" "" "$O_UAT"; O6_REV="$K_CODE"
+    if [[ "$O6_DENY" == "$O_REDIRECT?error=access_denied"*"state=s2"* ]] && printf '%s' "$O6_GRANT" | grep -q "o-rules" &&
+       [ "$O6_DIS" = 400 ] && [ "$O6_REV" = 200 ] ; then
+        t_ok "O6 a denied consent returns access_denied; app connections appear in the user's token list by client name and can only be revoked"
+    else
+        t_fail "O6 deny/grant list (deny='$O6_DENY' grants=$O6_GRANT disable=$O6_DIS revoke=$O6_REV)"
+    fi
+
+    # O7 — audit: issuance, consent and the reuse detection are recorded
+    O7_LOG="$(dcx mcp sh -c "cat /var/log/maild-mcp/audit-$(date -u +%Y-%m-%d).log" 2>/dev/null)"
+    if printf '%s' "$O7_LOG" | grep -q '"event":"token.issued"' && printf '%s' "$O7_LOG" | grep -q '"event":"consent.granted"' &&
+       printf '%s' "$O7_LOG" | grep -q '"event":"oauth.refresh_reuse"' && printf '%s' "$O7_LOG" | grep -q '"event":"client.registered"' ; then
+        t_ok "O7 the audit log records client registration, consent, token issuance and refresh-token reuse"
+    else
+        t_fail "O7 OAuth audit events"
     fi
 fi
 

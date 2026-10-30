@@ -107,15 +107,24 @@ async function parse<T>(resp: Response): Promise<T> {
   return data as T
 }
 
-export async function refresh(): Promise<Account | null> {
-  const resp = await raw('POST', '/user/refresh', undefined, false)
-  if (!resp.ok) {
-    accessToken = ''
-    return null
-  }
-  const data = await resp.json()
-  accessToken = data.access_token
-  return data.account as Account
+let refreshing: Promise<Account | null> | null = null
+
+/** Single flight: the refresh cookie rotates on every use, so concurrent callers (the app shell
+ * and the consent page at mount, parallel 401 retries) must share one request. */
+export function refresh(): Promise<Account | null> {
+  refreshing ??= (async () => {
+    const resp = await raw('POST', '/user/refresh', undefined, false)
+    if (!resp.ok) {
+      accessToken = ''
+      return null
+    }
+    const data = await resp.json()
+    accessToken = data.access_token
+    return data.account as Account
+  })().finally(() => {
+    refreshing = null
+  })
+  return refreshing
 }
 
 export async function call<T>(method: string, path: string, body?: unknown): Promise<T> {

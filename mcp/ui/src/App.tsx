@@ -4,6 +4,7 @@ import { Route, Routes } from 'react-router-dom'
 import { logout, refresh, setSessionExpiredHandler, type Account as AccountT } from './lib/api'
 import Account from './pages/Account'
 import Confirm from './pages/Confirm'
+import Consent from './pages/Consent'
 import Login from './pages/Login'
 
 /** `/` = login or the account page; `/confirm#<token>` = magic-link landing (no session needed). */
@@ -43,6 +44,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/confirm" element={<Confirm />} />
+      <Route path="/consent" element={<Consent />} />
       <Route path="*" element={home} />
     </Routes>
   )

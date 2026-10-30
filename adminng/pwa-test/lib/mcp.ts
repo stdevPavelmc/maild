@@ -40,6 +40,7 @@ export function dropAccounts(domain: string): void {
   const ids = `(SELECT id FROM account WHERE main_email LIKE '%@${domain}')`
   mcpSql(
     `DELETE FROM web_session WHERE kind='user' AND subject_id IN ${ids}; ` +
+      `DELETE FROM oauth_code WHERE account_id IN ${ids}; ` +
       `DELETE FROM token WHERE account_id IN ${ids}; ` +
       `DELETE FROM account_address WHERE account_id IN ${ids}; ` +
       `DELETE FROM account WHERE main_email LIKE '%@${domain}'; ` +
@@ -128,4 +129,15 @@ export async function adminCode(address: string, before: number, seconds = 60): 
     await new Promise((r) => setTimeout(r, 2000))
   }
   throw new Error(`no admin code reached ${address} within ${seconds}s`)
+}
+
+// ------------------------------------------------------------- OAuth (P4) ---
+/** Drop the OAuth clients a flow registered, with their pending requests and codes. */
+export function dropOAuthClients(name: string): void {
+  const ids = `(SELECT client_id FROM oauth_client WHERE metadata->>'client_name' = '${name}')`
+  mcpSql(
+    `DELETE FROM oauth_request WHERE client_id IN ${ids}; DELETE FROM oauth_code WHERE client_id IN ${ids}; ` +
+      `DELETE FROM token WHERE kind IN ('oauth_access', 'oauth_refresh') AND client_id IN ${ids}; ` +
+      `DELETE FROM oauth_client WHERE metadata->>'client_name' = '${name}';`,
+  )
 }

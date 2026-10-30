@@ -193,3 +193,62 @@ def test_admin_codes_and_password_rules():
     with pytest.raises(Exception):
         adminauth.check_password_rules("short")
     adminauth.check_password_rules("a" * 12)
+
+
+# ------------------------------------------------------------------- OAuth (P4) ---
+def test_pkce_s256_only_and_verifier_length():
+    import base64
+    import hashlib
+
+    from oauth import grants
+
+    verifier = "v" * 43
+    challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+    assert grants.pkce_ok(verifier, challenge)
+    assert not grants.pkce_ok(verifier, verifier)          # plain is not accepted
+    assert not grants.pkce_ok("v" * 42, challenge)         # too short (RFC 7636: 43..128)
+    assert not grants.pkce_ok("", challenge)
+
+
+def test_cimd_ssrf_public_address_rule():
+    from oauth.clients import is_public
+
+    assert is_public("93.184.215.14") and is_public("2606:4700::1111")
+    for ip in ("127.0.0.1", "10.1.2.3", "172.16.0.1", "192.168.1.1", "169.254.169.254", "100.64.0.1",
+               "0.0.0.0", "224.0.0.1", "::1", "fe80::1", "fc00::1", "::ffff:10.0.0.1", "::ffff:127.0.0.1"):
+        assert not is_public(ip), ip
+
+
+def test_redirect_uri_rules_and_metadata():
+    from oauth import clients
+    from oauth.errors import OAuthError
+
+    for ok in ("https://app.example/cb", "http://127.0.0.1:33418/callback", "http://localhost/cb",
+               "com.example.app:/oauth"):
+        clients._check_redirect_uri(ok)
+    for bad in ("http://app.example/cb", "https://app.example/cb#frag", "myapp:/cb", "javascript:alert(1)"):
+        with pytest.raises(OAuthError):
+            clients._check_redirect_uri(bad)
+    meta = clients._validate_metadata({"client_id": "https://c.example/m.json", "client_name": "C",
+                                       "redirect_uris": ["https://c.example/cb"]}, "https://c.example/m.json")
+    assert meta["token_endpoint_auth_method"] == "none" and meta["response_types"] == ["code"]
+    with pytest.raises(OAuthError):           # the document must name itself
+        clients._validate_metadata({"client_id": "https://other.example/m.json", "redirect_uris": ["https://c.example/cb"]},
+                                   "https://c.example/m.json")
+    with pytest.raises(OAuthError):           # confidential clients are not supported
+        clients._validate_metadata({"redirect_uris": ["https://c.example/cb"], "token_endpoint_auth_method": "client_secret_basic"}, None)
+    with pytest.raises(OAuthError):
+        clients._validate_metadata({"redirect_uris": ["https://c.example/cb"], "grant_types": ["client_credentials"]}, None)
+
+
+def test_redirect_match_exact_or_loopback_port():
+    from mcpcore.models import OAuthClient
+    from oauth.clients import redirect_matches
+
+    c = OAuthClient(client_id="x", metadata={"redirect_uris": ["https://c.example/cb", "http://127.0.0.1:9/callback"]})
+    assert redirect_matches(c, "https://c.example/cb")
+    assert redirect_matches(c, "http://127.0.0.1:51234/callback")    # RFC 8252 §7.3: any loopback port
+    assert not redirect_matches(c, "https://c.example/cb2")
+    assert not redirect_matches(c, "https://c.example:8443/cb")
+    assert not redirect_matches(c, "http://127.0.0.1:9/other")
+    assert not redirect_matches(c, "http://localhost:9/callback")    # host must match too

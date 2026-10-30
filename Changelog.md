@@ -18,7 +18,19 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## Unreleased — MailD MCP (P0, P1, P1b, P2, P3 — `mcp/progress.md`)
+## Unreleased — MailD MCP (P0, P1, P1b, P2, P3, P4 — `mcp/progress.md`)
+- Added (P4): OAuth 2.1 for the MCP, so Claude and ChatGPT can connect with "Add custom
+  connector" and a sign-in instead of a pasted token: discovery (RFC 9728 / RFC 8414),
+  PKCE S256, client ID metadata documents (fetched with SSRF protections) and dynamic client
+  registration, a consent page where the user narrows scopes and addresses, 1-hour access tokens
+  bound to the MCP endpoint, rotating 30-day refresh tokens (a reused one revokes the whole
+  connection) and RFC 7009 revocation. Connected apps appear in the user's token list. New
+  optional variables `MCP_OAUTH_ACCESS_TTL`, `MCP_OAUTH_REFRESH_TTL`.
+- Fixed (MCP user page and admin panel): two refreshes at once (the app shell and the consent
+  page at load, or parallel retries after the access token expired) raced on the rotating refresh
+  cookie and could sign the user out; the refresh is now a single shared request. The admin
+  settings could show the previous value right after Update when the reload reached the other
+  worker; the panel now reads them uncached.
 - Added: new `mcp` service (image `maild-mcp`, hostname `mcp`) — P0 skeleton: Django + uvicorn,
   `/healthz`, first-boot admin seed and the service mailbox `MCP_SERVICE_EMAIL` (default
   `mcp@<DEFAULT_DOMAIN>`, created when missing, never modified; generated passwords printed once

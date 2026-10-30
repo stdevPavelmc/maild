@@ -99,6 +99,16 @@ def change_status(account: Account, token_id: int, action: str, ip: str) -> Toke
         tok = account.tokens.select_for_update().filter(id=token_id).first()
         if tok is None:
             raise AccountError("not_found", "No such token.", 404)
+        if tok.kind == Token.OAUTH_REFRESH:
+            # an OAuth grant: only revocation, and it takes the whole family (access + refresh)
+            if action != "revoke":
+                raise AccountError("invalid_action", "An app connection can only be revoked; the app can reconnect.")
+            Token.objects.filter(family_id=tok.family_id).exclude(status=Token.REVOKED).update(
+                status=Token.REVOKED, disabled_reason="user")
+            tok.refresh_from_db()
+            audit.event("token.lifecycle", "oauth.grant_revoked", actor={"type": "user", "account": account.id},
+                        token={"public_id": tok.public_id, "kind": tok.kind, "client": tok.client_id}, ip=ip)
+            return tok
         if tok.status == Token.REVOKED:
             raise AccountError("revoked", "A revoked token cannot change any more.", 409)
         if action == "revoke":
@@ -149,7 +159,10 @@ def check_bearer(raw: str) -> BearerResult:
     if not raw:
         return BearerResult(None, "missing")
     tok = Token.objects.select_related("account", "admin").filter(hash=token_hash(raw)).first()
-    if tok is None or tok.kind not in (Token.PAT, Token.MASTER):
+    if tok is None or tok.kind not in (Token.PAT, Token.MASTER, Token.OAUTH_ACCESS):
+        return BearerResult(None, "invalid")
+    # OAuth access tokens are audience-bound (RFC 8707): only for this MCP endpoint
+    if tok.kind == Token.OAUTH_ACCESS and tok.resource != settings.MCP_RESOURCE_URL:
         return BearerResult(None, "invalid")
     if tok.status == Token.REVOKED:
         return BearerResult(None, "revoked")

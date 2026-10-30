@@ -24,7 +24,7 @@ KINDS = ("access", "audit", "errors")
 _SWITCH = {"web.login": "web_login", "web.logout": "web_login", "bearer.access": "bearer_access",
            "mail.read": "mail_actions", "mail.modify": "mail_actions", "mail.trash": "mail_actions",
            "mail.send": "mail_actions", "token.lifecycle": "token_lifecycle", "admin.settings": "admin_changes",
-           "admin.login": "web_login", "error": "errors", "security": "security"}
+           "admin.login": "web_login", "oauth": "token_lifecycle", "error": "errors", "security": "security"}
 
 
 def _config() -> dict:

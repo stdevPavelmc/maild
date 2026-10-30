@@ -23,4 +23,4 @@ def _settings_defaults(monkeypatch):
     """Units run without a database: the admin settings resolve to their defaults."""
     from mcpcore import settings_store
 
-    monkeypatch.setattr(settings_store, "get", lambda group: settings_store.defaults(group))
+    monkeypatch.setattr(settings_store, "get", lambda group, fresh=False: settings_store.defaults(group))

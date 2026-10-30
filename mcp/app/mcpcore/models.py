@@ -1,6 +1,7 @@
 """MailD MCP data model (proposal §10). Tables arrive with the phase that uses them, each with
 its own migration: P0 admin_user; P1 domain_policy, account, account_address, token,
-web_session, login_failure, altcha_used, notice_throttle; P2 confirm_handle, send_counter."""
+web_session, login_failure, altcha_used, notice_throttle; P2 confirm_handle, send_counter;
+P3 setting, otp_challenge; P4 oauth_client, oauth_request, oauth_code."""
 
 from django.db import models
 
@@ -94,6 +95,8 @@ class Token(models.Model):
     last_used_client = models.CharField(max_length=255, blank=True, default="")
     # D12: re-enabling (from the web page only) restarts the idle clock
     reenabled_at = models.DateTimeField(null=True, blank=True)
+    # OAuth (P4): the RFC 8707 resource the token is bound to (its audience)
+    resource = models.CharField(max_length=512, blank=True, default="")
 
     class Meta:
         db_table = "token"
@@ -208,3 +211,56 @@ class OtpChallenge(models.Model):
 
     class Meta:
         db_table = "otp_challenge"
+
+
+class OAuthClient(models.Model):
+    """OAuth 2.1 public clients (proposal §8.2, D1): CIMD (client_id = the URL of its metadata
+    document, fetched and cached) or DCR (/oauth/register, client_id generated here)."""
+
+    CIMD, DCR = "cimd", "dcr"
+    client_id = models.CharField(max_length=512, primary_key=True)
+    kind = models.CharField(max_length=8)
+    metadata = models.JSONField(default=dict)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)     # CIMD cache lifetime
+    registration_ip = models.CharField(max_length=64, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "oauth_client"
+
+
+class OAuthRequest(models.Model):
+    """A validated /oauth/authorize request waiting for the user's consent (10 min)."""
+
+    id = models.CharField(max_length=32, primary_key=True)
+    client = models.ForeignKey(OAuthClient, on_delete=models.CASCADE)
+    redirect_uri = models.CharField(max_length=2048)
+    state = models.CharField(max_length=1024, blank=True, default="")
+    code_challenge = models.CharField(max_length=128)
+    scopes = models.JSONField(default=list)
+    resource = models.CharField(max_length=512)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "oauth_request"
+
+
+class OAuthCode(models.Model):
+    """Authorization codes: HMAC stored, single use, 2 minutes, bound to client, redirect URI,
+    PKCE challenge and resource (proposal §10)."""
+
+    hash = models.CharField(max_length=64, primary_key=True)
+    client = models.ForeignKey(OAuthClient, on_delete=models.CASCADE)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    scopes = models.JSONField(default=list)
+    addresses = models.JSONField(null=True, blank=True)
+    redirect_uri = models.CharField(max_length=2048)
+    resource = models.CharField(max_length=512)
+    code_challenge = models.CharField(max_length=128)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "oauth_code"

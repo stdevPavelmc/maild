@@ -254,7 +254,81 @@ def confirm(request, data: MagicIn):
 # ------------------------------------------------------------------ tokens ---
 @api.get("/user/tokens", auth=user_auth)
 def list_tokens(request):
-    return {"tokens": [tokens.serialize(t) for t in request.account.tokens.order_by("-created_at")]}
+    """PATs, plus one row per OAuth grant (its current refresh token, named after the client)."""
+    from mcpcore.models import Token
+
+    rows = request.account.tokens.filter(kind=Token.PAT) | request.account.tokens.filter(
+        kind=Token.OAUTH_REFRESH, status=Token.ACTIVE)
+    return {"tokens": [tokens.serialize(t) for t in rows.order_by("-created_at")]}
+
+
+# ---------------------------------------------------------- OAuth consent ---
+class OAuthReqIn(Schema):
+    request_id: str
+
+
+def _oauth_request(request_id: str):
+    from django.utils import timezone
+
+    from mcpcore.models import OAuthRequest
+
+    req = OAuthRequest.objects.select_related("client").filter(id=request_id).first()
+    if req is None or req.expires_at <= timezone.now():
+        raise AccountError("invalid_request", "This authorization request expired: start again from your app.", 404)
+    return req
+
+
+@api.post("/user/oauth/request", auth=user_auth)
+def oauth_request(request, data: OAuthReqIn):
+    """What the consent screen shows (proposal §8.2): client name, client_id host, redirect host,
+    the requested scopes and the user's addresses to pick from."""
+    from urllib.parse import urlsplit
+
+    from oauth import clients
+
+    req = _oauth_request(data.request_id)
+    account = request.account
+    return {
+        "client_name": clients.display_name(req.client), "client_id": req.client.client_id,
+        "client_host": urlsplit(req.client.client_id).hostname or "", "registration": req.client.kind,
+        "redirect_host": urlsplit(req.redirect_uri).hostname or urlsplit(req.redirect_uri).scheme,
+        "scopes": req.scopes, "mcp_enabled": account.mcp_enabled,
+        "addresses": [a.email for a in account.addresses.filter(status=AccountAddress.ACTIVE).order_by("-is_main", "email")],
+    }
+
+
+class OAuthDecisionIn(Schema):
+    request_id: str
+    approve: bool
+    scopes: list[str] | None = None
+    addresses: list[str] | None = None
+
+
+@api.post("/user/oauth/decision", auth=user_auth)
+def oauth_decision(request, data: OAuthDecisionIn):
+    from oauth import grants
+    from oauth.views import redirect_with
+
+    req = _oauth_request(data.request_id)
+    account = request.account
+    req.delete()   # single use, whatever the answer
+    if not data.approve:
+        audit.event("oauth", "consent.denied", actor={"type": "user", "account": account.id},
+                    target={"client": req.client.client_id}, ip=_ip(request))
+        return {"redirect": redirect_with(req.redirect_uri, {"error": "access_denied", "state": req.state})}
+    scopes = [s for s in (data.scopes or req.scopes) if s in req.scopes]   # the user may only narrow
+    if not scopes:
+        raise AccountError("invalid_scopes", "Keep at least one permission, or deny.")
+    owned = set(account.addresses.filter(status=AccountAddress.ACTIVE).values_list("email", flat=True))
+    addresses = None
+    if data.addresses is not None:
+        addresses = sorted({a.lower() for a in data.addresses} & owned)
+        if not addresses:
+            raise AccountError("invalid_addresses", "Choose at least one of your addresses.")
+    code = grants.new_code(req.client, account, scopes, addresses, req.redirect_uri, req.resource, req.code_challenge)
+    audit.event("oauth", "consent.granted", actor={"type": "user", "account": account.id},
+                target={"client": req.client.client_id}, ip=_ip(request), detail={"scopes": scopes})
+    return {"redirect": redirect_with(req.redirect_uri, {"code": code, "state": req.state})}
 
 
 class TokenIn(Schema):

@@ -61,7 +61,8 @@
     "invalid_setting": "A value is out of range.",
     "unknown_domain": "Unknown domain.",
     "invalid_cidr": "That is not a valid network (CIDR).",
-    "invalid_kind": "Unknown log."
+    "invalid_kind": "Unknown log.",
+    "invalid_request": "This authorization request expired: start again from your app."
   },
   "confirm": {
     "title": "Confirm an address",
@@ -172,7 +173,8 @@
     "foreverBody": "Anyone holding this token can use your mailbox until you revoke it. Even so, every token is disabled after 30 days without use, and only you can re-enable it from this page.",
     "foreverConfirm": "Create it anyway",
     "revokeTitle": "Revoke this token?",
-    "revokeBody": "\"{{name}}\" stops working at once and cannot be enabled again."
+    "revokeBody": "\"{{name}}\" stops working at once and cannot be enabled again.",
+    "oauthApp": "app connection"
   },
   "prefs": {
     "title": "Preferences",
@@ -346,5 +348,21 @@
         "errors": "Errors"
       }
     }
+  },
+  "consent": {
+    "title": "Connect an app to your mailbox",
+    "wants": "wants to access your mail as {{account}}.",
+    "identity": "App identity",
+    "registration": {
+      "cimd": "published client metadata",
+      "dcr": "registered here, unverified"
+    },
+    "returnsTo": "Returns to",
+    "mcpOff": "MCP access is switched off for this account: the app will be refused until you switch it on.",
+    "addresses": "Addresses the app may use",
+    "revokeHint": "You can disconnect the app at any time from the Access tokens list.",
+    "allow": "Allow",
+    "deny": "Deny",
+    "missing": "This page is opened by an app asking for access; start from the app."
   }
 }

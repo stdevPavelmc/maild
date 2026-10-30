@@ -123,6 +123,13 @@ PROVISION_WAIT_TIMEOUT = int(env("PROVISION_WAIT_TIMEOUT", "180"))
 MCP_SMTP_HOST = env("MCP_SMTP_HOST", "amavis")
 MCP_SMTP_PORT = int(env("MCP_SMTP_PORT", "10026"))
 
+# OAuth 2.1 (P4). MCP_CIMD_DEV_ALLOW: DEV ONLY — comma-separated URL prefixes whose client
+# metadata documents may be fetched over plain http from private addresses (the dev compose sets
+# it for the test fixture; no production compose file passes it, and mcp has no env_file).
+MCP_CIMD_DEV_ALLOW = [p.strip() for p in env("MCP_CIMD_DEV_ALLOW").split(",") if p.strip()]
+MCP_OAUTH_ACCESS_TTL = env_duration("MCP_OAUTH_ACCESS_TTL", "1h")
+MCP_OAUTH_REFRESH_TTL = env_duration("MCP_OAUTH_REFRESH_TTL", "30d")
+
 # web sessions (proposal §7.1): short access JWT + rotating refresh cookie
 MCP_ACCESS_TTL = env_duration("MCP_ACCESS_TTL", "15m")
 MCP_USER_SESSION_TTL = env_duration("MCP_USER_SESSION_TTL", "24h")

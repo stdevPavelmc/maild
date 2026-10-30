@@ -34,7 +34,7 @@ Rules:
 | P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | done | 2026-10-30 | 2026-10-30 | |
 | P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | done | 2026-10-30 | 2026-10-30 | |
 | P3 | Admin panel (all groups), master tokens, external SMTP + test | done | 2026-10-30 | 2026-10-30 | |
-| P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | — | | | |
+| P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | done | 2026-10-30 | 2026-10-30 | connector test in Claude/ChatGPT pending (needs a public host) |
 | P5 | REST mirror, OpenAPI, SKILL.md, docs | — | | | |
 | Final | All phases `verified` + goal review against `Idea.md` and the proposal | — | | | |
 
@@ -279,21 +279,34 @@ Log
 
 ## P4 — OAuth 2.1
 
-Status: —
+Status: done (one item pending: the hosted-connector check)
 
 Checklist
-- [ ] Protected resource metadata, AS metadata, `401` + `resource_metadata`
-- [ ] Authorize (PKCE S256), token (form-urlencoded), refresh rotation + reuse detection, revoke
-- [ ] CIMD (SSRF-safe fetch) + DCR
-- [ ] Consent UI (login + scopes + address selection), loopback redirect matching, `iss` in response
-- [ ] OAuth grants listed with PATs; 30-day idle on refresh families
-- [ ] Tests: full flow with a scripted client (CIMD and DCR), MCP Inspector; manual connector test in Claude and ChatGPT against a public test host (requires a reachable host — note result)
-- [ ] Full `./test.sh` green
+- [x] Protected resource metadata, AS metadata, `401` + `resource_metadata`
+- [x] Authorize (PKCE S256), token (form-urlencoded), refresh rotation + reuse detection, revoke
+- [x] CIMD (SSRF-safe fetch) + DCR
+- [x] Consent UI (login + scopes + address selection), loopback redirect matching, `iss` in response
+- [x] OAuth grants listed with PATs; 30-day idle on refresh families (sliding expiry: every rotation re-arms 30 d)
+- [x] Tests: full flow with a scripted client (CIMD and DCR) through the official SDK client — O1–O7, 2 `run.sh mcp` consent flows, 4 pytest units
+- [ ] **Pending** (Pavel's decision): manual connector test in Claude and ChatGPT against a public test host — needs a reachable HTTPS host. MCP Inspector not run: the scripted client covers the same discovery → authorize → token → call path with the official SDK
+- [x] Full `./test.sh` green — 167 passed / 0 failed / 0 skipped
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-30 | action | Baseline inherited from P3's full pass (160/0/0, commit `24714e5`). P4 → Initiated. |
+| 2026-10-30 | decision | **Asked Pavel** — no public host now: the Claude / ChatGPT connector check stays **pending** until he deploys to a public HTTPS host; everything else is verified locally (scripted OAuth client with CIMD and DCR, browser consent flow). |
+| 2026-10-30 | decision | **Asked Pavel** — CIMD success path tested end to end through a **dev-only allowlist `MCP_CIMD_DEV_ALLOW`** (URL prefixes exempt from the https + public-address checks), set only in `docker-compose-dev.yml`. The production compose files do not pass it — and the mcp container has no `env_file`, so an operator cannot switch it on through `.env` either. The fixture document is served during the test by a throwaway `python -m http.server` inside the mcp container (no test route in the product). |
+| 2026-10-30 | decision | OAuth shape (proposal §8.2, D1, D12): public clients only, PKCE S256 only, `iss` on every authorization response (RFC 9207), access tokens audience-bound to `MCP_RESOURCE_URL` (RFC 8707: a token minted for another resource is refused by the bearer check). Codes 2 min single use (marked used before the other checks, so a failed exchange still burns it); access 1 h (`MCP_OAUTH_ACCESS_TTL`), refresh 30 d sliding (`MCP_OAUTH_REFRESH_TTL`) — both new optional variables in the four compose allow-lists and `env.sample`. Grants reuse the `token` table (`oauth_access` / `oauth_refresh` rows sharing `family_id`, new column `resource`); new tables `oauth_client`, `oauth_request`, `oauth_code` (migration 0005). |
+| 2026-10-30 | decision | Error handling at `/oauth/authorize`: until the client and its redirect URI are verified, errors are an HTML page (never a redirect to an unverified URI); afterwards they go back to the client with `state` + `iss`. Redirect matching is exact, except loopback http where the port may differ (RFC 8252 §7.3). Redirect URIs allowed at registration: https, loopback http, private-use schemes with a dot. |
+| 2026-10-30 | decision | CIMD fetch: https only (plus the dev allow-list), every address the host resolves to must be public (loopback, private, link-local, multicast, reserved, unspecified, CGNAT 100.64/10 and IPv4-mapped forms refused), the connection goes to the checked IP with TLS SNI/verification on the hostname (no DNS-rebinding window), 5 s, 64 KB, no redirects, cache from `Cache-Control` clamped to 5 min–24 h. DCR: 20 registrations per source IP per hour, client ids `mdmcp_dcr_…`, shown on the consent page as "registered here, unverified". |
+| 2026-10-30 | decision | Consent: `/oauth/authorize` stores the request (10 min) and sends the browser to the SPA `/consent#<id>` (fragment: the id never reaches a log); the user signs in there if needed and may only narrow the scopes and pick active addresses they own. A request is single use (allow or deny deletes it). Grants appear in the user's token list as "app connection" (one row per grant, Revoke only — disabling would just make the app re-authorize); revoking takes the whole family. |
+| 2026-10-30 | finding | Bugs found by the scripted client: (1) the CIMD fetch wrapped TLS twice → one wrap on the socket connected to the checked IP; (2) the refresh rotation's `SELECT … FOR UPDATE` joined the nullable `account` FK (Postgres refuses `FOR UPDATE` on the nullable side of an outer join → 500) → `select_for_update(of=("self",))`; (3) **reuse detection revoked the family inside the rotation transaction and then raised, so the revocation rolled back** — the old family's access token kept working (scripted `after_reuse_access` = 200) → reuse is detected and the family revoked before the transaction; now 401. |
+| 2026-10-30 | finding | Bugs found by the browser consent flow: (4) **the user page called `refresh()` twice at load on `/consent`** (the app shell and the consent page): the refresh cookie rotates, so one call lost and the page showed the sign-in form to a signed-in user (and a lost race can void the session) → `refresh()` is single-flight in `lib/api.ts`, and the same in the admin client (parallel 401 retries had the same race). (5) The P3 admin "settings persist after reload" flow failed once: the reload landed on the other uvicorn worker, whose 2 s settings cache still held the old value → the admin panel's reads now bypass the cache (`settings_store.get(fresh=True)`); the hot policy path keeps it. |
+| 2026-10-30 | action | Tests: `test.sh` section O (O1–O7: metadata, DCR and CIMD end to end through `mcp/tests/oauth_flow.py` with the official SDK client, CIMD SSRF refusals, redirect/PKCE/resource rules, deny, grant list, audit) run alone: **7/7**; cleanup removes the scripted clients and the fixtures' grants. `run.sh mcp`: **14/14** (new `tests/mcp/oauth.spec.ts`: sign in on the consent page → narrow scopes → allow → loopback redirect with code/state/iss → code exchange → the app connection is revoked from the list; deny → `access_denied`, and the request cannot be replayed). pytest **26/26** (+ PKCE, public-address rule, redirect-URI/metadata rules, redirect matching), scratch `/tmp/maild-mcp-p4`. |
+| 2026-10-30 | finding | First full `./test.sh`: 166/1 — O6 had passed alone only because grants left by earlier manual runs were still active; the scripted flows revoke both of their own grants, so the full run listed none. O6 now creates its own live grant (approve → code exchange with a verifier) and revokes it; checked from an empty grant state. Test bug, not a product bug. |
+| 2026-10-30 | action | Full `./test.sh`: **167 passed / 0 failed / 0 skipped** (160 + O1–O7); no OAuth clients or grants left behind. P4 → **done**, with the Claude / ChatGPT hosted-connector check **pending** (needs a public HTTPS host). Nothing committed yet. |
 
 ---
 

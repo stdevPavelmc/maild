@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 160 checks
+./test.sh                 # 167 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -145,6 +145,13 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   `verify_tls` opt-out passes). It snapshots the admin row, the settings, the domain policy and the
   service mailbox hash and restores them on exit. Admin browser flows run in the same
   `./adminng/pwa-test/run.sh mcp` mode.
+- Section O covers P4 OAuth 2.1: the metadata documents, a DCR and a CIMD client end to end
+  through `mcp/tests/oauth_flow.py` (run inside the mcp container; the CIMD document is served
+  from `mcp:8099`, admitted only by the dev compose's `MCP_CIMD_DEV_ALLOW`), the CIMD SSRF
+  refusals (http, loopback, private, internal names), redirect-URI / PKCE / resource rules, a
+  denied consent, the grants in the user's token list (revoke only) and the audit events. It
+  deletes the scripted clients and the fixtures' grants on exit. The consent page has its browser
+  flows in `./adminng/pwa-test/run.sh mcp` (`tests/mcp/oauth.spec.ts`).
 - Section L covers the amavis listeners (D13): 10024 admits only the mta and 10026 only
   cron/mcp (cron and api probes, the `DENIED ACCESS` log line), a DKIM-signed delivery through
   10026, and the peer-IP watchdog (cron is stopped, a placeholder container takes a free

@@ -59,15 +59,23 @@ async function parse<T>(resp: Response): Promise<T> {
   return data as T
 }
 
-export async function adminRefresh(): Promise<AdminMe | null> {
-  const resp = await raw('POST', '/refresh', undefined, false)
-  if (!resp.ok) {
-    accessToken = ''
-    return null
-  }
-  const data = await resp.json()
-  accessToken = data.access_token
-  return data.admin as AdminMe
+let refreshing: Promise<AdminMe | null> | null = null
+
+/** Single flight: the refresh cookie rotates, so parallel 401 retries share one request. */
+export function adminRefresh(): Promise<AdminMe | null> {
+  refreshing ??= (async () => {
+    const resp = await raw('POST', '/refresh', undefined, false)
+    if (!resp.ok) {
+      accessToken = ''
+      return null
+    }
+    const data = await resp.json()
+    accessToken = data.access_token
+    return data.admin as AdminMe
+  })().finally(() => {
+    refreshing = null
+  })
+  return refreshing
 }
 
 export async function adminCall<T>(method: string, path: string, body?: unknown): Promise<T> {

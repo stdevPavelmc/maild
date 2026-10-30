@@ -33,12 +33,25 @@ def run_once() -> dict | None:
             "altcha_purged": AltchaUsed.objects.filter(expires_at__lt=now).delete()[0],
             "sessions_purged": WebSession.objects.filter(expires_at__lt=now).delete()[0],
             "log_files_pruned": audit.prune(),
+            # OAuth (P4): spent codes / stale requests, and access tokens dead for a day
+            "oauth_cleanup": _oauth_cleanup(now),
         }
         log.info("hourly jobs: %s", done)
         return done
     finally:
         with conn.cursor() as cur:
             cur.execute("SELECT pg_advisory_unlock(%s)", [JOBS_LOCK_ID])
+
+
+def _oauth_cleanup(now) -> int:
+    import datetime as dt
+
+    from mcpcore.models import OAuthCode, OAuthRequest, Token
+
+    n = OAuthCode.objects.filter(expires_at__lt=now).delete()[0]
+    n += OAuthRequest.objects.filter(expires_at__lt=now).delete()[0]
+    n += Token.objects.filter(kind=Token.OAUTH_ACCESS, expires_at__lt=now - dt.timedelta(days=1)).delete()[0]
+    return n
 
 
 def _hourly():
