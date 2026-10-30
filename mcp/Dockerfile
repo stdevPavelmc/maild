@@ -1,8 +1,20 @@
+# --- stage 1: the user SPA (React + Vite, same stack as the AdminNG PWA) ------------------
+FROM node:26-alpine AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+# `npm run build` = i18n:check (EN/ES parity) + tsc + vite build. The output is split the way
+# Django serves it: index.html (no-cache view), assets/ (hashed, WhiteNoise, cached for ever)
+# and root/ (public files such as icon.svg, WhiteNoise root).
+RUN npm run build && \
+    mkdir -p /out/root && \
+    mv dist/index.html /out/ && mv dist/assets /out/ && cp -a dist/. /out/root/
+
+# --- stage 2: the server ---------------------------------------------------------------
 FROM python:3.14-slim-trixie
 
 # MailD MCP: MCP server + REST mirror + web UI over the mailboxes (mcp/technical-proposal.md).
-# P0 skeleton: Django + uvicorn, /healthz, admin seed and the service mailbox. The SPA build
-# stage (node:26-alpine) arrives with the web UI in P1.
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -12,8 +24,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # --- MailD default configuration (new env schema) --------------------------------
 # Only what this image consumes; the operator env file overrides any of them. Secrets are
 # NEVER baked: MCP_SECRET_KEY, MCP_DB_PASSWORD and MCP_DOVECOT_MASTER_PASSWORD come from the
-# operator env file (dev: env.dev, prod: .env — see env.sample). MCP_HOSTNAME, MCP_ADMIN_EMAIL
-# and MCP_SERVICE_EMAIL default from DEFAULT_DOMAIN at runtime (maild_mcp/settings.py).
+# operator env file (dev: env.dev, prod: .env — see env.sample). MCP_HOSTNAME, MCP_PUBLIC_URL,
+# MCP_ADMIN_EMAIL and MCP_SERVICE_EMAIL default from DEFAULT_DOMAIN at runtime
+# (maild_mcp/settings.py); MCP_TRUSTED_PROXIES defaults to empty (the TCP peer is the client).
+# MCP_SMTP_PORT is 10024 until P1b adds amavis's 10026 listener (D13).
 # Full variable matrix: .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \
     POSTGRES_PORT=5432 \
@@ -27,6 +41,10 @@ ENV POSTGRES_HOST=db \
     MCP_IMAP_PORT=143 \
     MCP_IMAP_CA_FILE=/certs/mail.crt \
     MCP_DOVECOT_MASTER_USER=mcp \
+    MCP_SMTP_HOST=amavis \
+    MCP_SMTP_PORT=10024 \
+    MCP_ACCESS_TTL=15m \
+    MCP_USER_SESSION_TTL=24h \
     MCP_LOG_DIR=/var/log/maild-mcp \
     MCP_WORKERS=2
 
@@ -36,6 +54,9 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./
+COPY --from=ui /out/ ./ui-dist/
+# test helpers driven by test.sh (ALTCHA solver, SDK client) — same precedent as adminng/api/tests
+COPY tests/ ./tests/
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 
 # non-root (uid 10001), read-only rootfs friendly: nothing under /app is written at runtime,
@@ -63,4 +84,4 @@ LABEL org.opencontainers.image.title="MailD MCP" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-29"
+      org.opencontainers.image.created="2026-10-30"

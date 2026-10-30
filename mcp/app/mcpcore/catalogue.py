@@ -46,3 +46,10 @@ def ensure_service_mailbox(address: str, dovecot_hash: str, name: str) -> bool:
     if not conn.get_autocommit():
         conn.commit()
     return created
+
+
+def domains() -> list[tuple[str, bool]]:
+    """Every catalogue domain with its active flag (alias domains are a separate table)."""
+    with _cursor() as cur:
+        cur.execute("SELECT domain, active FROM domain ORDER BY domain")
+        return [(row[0], bool(row[1])) for row in cur.fetchall()]

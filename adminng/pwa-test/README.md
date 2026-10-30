@@ -18,6 +18,7 @@ except Docker and a stack brought up by `./bootstrap-dev.sh`.
 ./adminng/pwa-test/run.sh flows         # one spec (flows | installable | superadmin)
 ./adminng/pwa-test/run.sh visual        # PNGs in ldata/e2e/screens
 ./adminng/pwa-test/run.sh a11y          # axe JSON in ldata/e2e/a11y
+./adminng/pwa-test/run.sh mcp           # MailD MCP user page (tests/mcp, tunnel localhost:8085 → mcp:8080)
 ./adminng/pwa-test/run.sh lighthouse
 ./adminng/pwa-test/run.sh shell         # bash inside the image
 ./adminng/pwa-test/run.sh flows --debug # any Playwright flag passes through

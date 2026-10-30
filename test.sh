@@ -310,6 +310,7 @@ QUOTA_TOUCHED=0
 RES_SEEDED=0
 IMAPSIEVE_TOUCHED=0
 MCP_TOUCHED=0
+MCP_K_TOUCHED=0
 MCP_LEGACY_USER="mcp-legacy-probe@${DOMAIN}"
 MCP_INACTIVE_USER="mcp-inactive-probe@${DOMAIN}"
 cleanup() {
@@ -335,6 +336,26 @@ cleanup() {
             dcx mda rm -rf "/home/vmail/${DOMAIN}/${MCP_LEGACY_USER%%@*}" "/home/vmail/${DOMAIN}/${MCP_INACTIVE_USER%%@*}" \
                 > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+        fi
+        # Phase K (MCP user side): fixture accounts with their tokens and addresses (children first:
+        # the ORM's CASCADE is not a database ON DELETE), their sessions and
+        # lockouts, the example.net policy as found, the service mails the phase caused.
+        if [ "$MCP_K_TOUCHED" = 1 ]; then
+            dcx db psql -U maild -d mcp -q -c "
+                DELETE FROM web_session WHERE kind='user' AND subject_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
+                DELETE FROM token WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
+                DELETE FROM account_address WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
+                DELETE FROM account WHERE main_email LIKE '%@${DOMAIN}';
+                DELETE FROM login_failure WHERE key LIKE '%@${DOMAIN}';
+                DELETE FROM notice_throttle WHERE kind='claim_conflict' AND key LIKE '%@${DOMAIN}';" > /dev/null 2>&1 || true
+            case "${K_POLICY_BEFORE:-}" in
+                t) dcx db psql -U maild -d mcp -q -c "UPDATE domain_policy SET allowed=true WHERE domain='$DOMAIN'" > /dev/null 2>&1 || true ;;
+                f) dcx db psql -U maild -d mcp -q -c "UPDATE domain_policy SET allowed=false WHERE domain='$DOMAIN'" > /dev/null 2>&1 || true ;;
+                *) dcx db psql -U maild -d mcp -q -c "DELETE FROM domain_policy WHERE domain='$DOMAIN'" > /dev/null 2>&1 || true ;;
+            esac
+            for k_box in "alice@$DOMAIN" "bob@$DOMAIN" "dylan@$DOMAIN" "$DEPLOY_ADMIN" ; do
+                dcx mda doveadm expunge -u "$k_box" mailbox INBOX header From "MailD MCP" > /dev/null 2>&1 || true
+            done
         fi
         # Phase I (AdminNG): test devices (sessions cascade) and the fixture domain.
         dcx api adminng.py --reset-ratelimit 'nobody@adminng-lockout.test' > /dev/null 2>&1 || true
@@ -2316,6 +2337,299 @@ else
         *'"status": "ok"'*' 200') t_ok "J11 mcp /healthz answers 200 (db, catalogue and IMAP reachable)" ;;
         *) t_fail "J11 mcp /healthz (got: $MCP_HZ)" ;;
     esac
+fi
+
+# ================================= K. MailD MCP (P1: user side + read access) ==
+# mcp/technical-proposal.md §7.1/§7.3/§8 and the 2026-10-29 decisions in mcp/progress.md: the
+# domain allow-list CLI, web login (ALTCHA, lockout, IMAP check, rotating refresh cookie),
+# secondary addresses (magic link, D11 conflicts + postmaster notice, owner wins, disabled
+# refuses login), PATs (scopes, address subset, D12 idle rule, revoke) and the MCP read tools
+# through the official SDK client (search never sets \Seen, get_email does). Self-cleaning: the
+# fixture accounts are deleted from the mcp DB, the example.net policy and the \Seen flag are
+# restored and the service mails are expunged by cleanup().
+section "K. MailD MCP user side (web login, addresses, tokens, MCP read tools)"
+
+K_A="alice@$DOMAIN"; K_B="bob@$DOMAIN"; K_C="charlie@$DOMAIN"; K_D="dylan@$DOMAIN"
+K_PA="${CRED[${K_A,,}]:-}"; K_PB="${CRED[${K_B,,}]:-}"; K_PC="${CRED[${K_C,,}]:-}"; K_PD="${CRED[${K_D,,}]:-}"
+K_JAR="$TMPRUN/k.cookies"; K_OUT="$TMPRUN/k.out"
+
+k_altcha() { dcx mcp python tests/altcha_solve.py 2>/dev/null | tr -d '\r\n'; }
+k_json() { python3 -c "import json,sys; d=json.load(open('$K_OUT')); print(eval(sys.argv[1], {}, {'d': d}))" "$1" 2>/dev/null; }
+k_api() { # <method> <path> [json] [access] [jar] → K_CODE, body in $K_OUT
+    local args=(-s -o "$K_OUT" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' --max-time 60)
+    [ -n "${3:-}" ] && args+=(--data "$3")
+    [ -n "${4:-}" ] && args+=(-H "Authorization: Bearer $4")
+    [ -n "${5:-}" ] && args+=(-b "$5" -c "$5")
+    K_CODE="$(curl "${args[@]}" "$MCP_HTTP/webapi$2")"
+}
+k_login() { # <email> <password> [jar] → K_CODE, K_AT
+    k_api POST /user/login "{\"email\":\"$1\",\"password\":\"$2\",\"altcha\":\"$(k_altcha)\"}" "" "${3:-}"
+    K_AT="$(k_json "d.get('access_token','')")"
+}
+k_call() { # <token> <tool> <json args> → K_RES (json from tests/mcp_call.py)
+    K_RES="$(dcx mcp python tests/mcp_call.py "$1" call "$2" "$3" 2>/dev/null | tail -n1)"
+}
+k_res() { python3 -c "import json,sys; d=json.loads(sys.argv[2]); print(eval(sys.argv[1], {}, {'d': d}))" "$1" "$K_RES" 2>/dev/null; }
+k_rpc() { # <token> <tool> → HTTP code of a raw tools/call (headers in $K_OUT.h)
+    curl -s -o "$K_OUT" -D "$K_OUT.h" -w '%{http_code}' --max-time 30 -X POST "$MCP_HTTP/api/v1/mcp" \
+        -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
+        -H 'MCP-Protocol-Version: 2025-11-25' ${1:+-H "Authorization: Bearer $1"} \
+        --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"$2\",\"arguments\":{}}}"
+}
+k_seen() { dcx mda doveadm search -u "$1" mailbox INBOX seen 2>/dev/null | wc -l | tr -d ' '; }
+
+if [ "$HAVE_DC" != 1 ] || [ -z "$MCP_DB_PW" ] || [ -z "$K_PA" ] || [ -z "$K_PB" ] || [ -z "$K_PC" ] || [ -z "$K_PD" ] ; then
+    t_skip "MailD MCP user-side checks (need docker, MCP secrets in $ENV_FILE and the $DOMAIN fixtures in test.creds)"
+else
+    MCP_K_TOUCHED=1
+    K_POLICY_BEFORE="$(dcx db psql -U maild -d mcp -tAc "SELECT allowed FROM domain_policy WHERE domain='$DOMAIN'" 2>/dev/null | tr -d '\r ')"
+    dcx db psql -U maild -d mcp -q -c "DELETE FROM domain_policy WHERE domain='$DOMAIN'" > /dev/null 2>&1
+
+    # K1 — D6: a catalogue domain without a policy row is denied
+    k_login "$K_A" "$K_PA"
+    if [ "$K_CODE" = 403 ] && [ "$(k_json "d['error']")" = domain_not_allowed ] ; then
+        t_ok "K1 a domain is MCP-denied until the admin allows it (login → 403 domain_not_allowed)"
+    else
+        t_fail "K1 denied-domain login (got $K_CODE $(head -c 200 "$K_OUT"))"
+    fi
+
+    # K2 — the allow-list CLI (decision 2026-10-29) flips it
+    if dcx mcp python manage.py mcp_domains allow "$DOMAIN" > /dev/null 2>&1 &&
+       dcx mcp python manage.py mcp_domains list 2>/dev/null | grep -Eq "^$DOMAIN +ALLOWED" ; then
+        t_ok "K2 'manage.py mcp_domains allow $DOMAIN' allows the domain (and 'list' shows it)"
+    else
+        t_fail "K2 mcp_domains allow/list"
+    fi
+
+    # K3 — ALTCHA is mandatory and single-use
+    K_ALT="$(k_altcha)"
+    k_api POST /user/login "{\"email\":\"$K_A\",\"password\":\"$K_PA\",\"altcha\":\"bm9wZQ==\"}"; K3_BAD="$K_CODE"
+    k_api POST /user/login "{\"email\":\"$K_A\",\"password\":\"$K_PA\",\"altcha\":\"$K_ALT\"}"; K3_FIRST="$K_CODE"
+    k_api POST /user/login "{\"email\":\"$K_A\",\"password\":\"$K_PA\",\"altcha\":\"$K_ALT\"}"; K3_REPLAY="$K_CODE"
+    if [ "$K3_BAD" = 400 ] && [ "$K3_FIRST" = 200 ] && [ "$K3_REPLAY" = 400 ] ; then
+        t_ok "K3 login needs a solved ALTCHA, and a solution is accepted only once"
+    else
+        t_fail "K3 ALTCHA (bad=$K3_BAD first=$K3_FIRST replay=$K3_REPLAY)"
+    fi
+
+    # K4 — 5 wrong passwords per username+IP lock the login for 15 min
+    for _ in 1 2 3 4 5 ; do k_login "$K_D" "wrong-$RANDOM" ; done
+    k_login "$K_D" "$K_PD"
+    if [ "$K_CODE" = 429 ] && [ "$(k_json "d['error']")" = locked ] ; then
+        t_ok "K4 five failed logins lock the username+IP (even the right password → 429)"
+    else
+        t_fail "K4 lockout (got $K_CODE)"
+    fi
+    dcx db psql -U maild -d mcp -q -c "DELETE FROM login_failure WHERE key='$K_D'" > /dev/null 2>&1
+
+    # K5 — login: IMAP check, short access JWT, refresh cookie HttpOnly+Secure+SameSite=Strict+Path=/webapi
+    rm -f "$K_JAR"
+    K5_HDR="$(curl -s -D - -o "$K_OUT" -X POST "$MCP_HTTP/webapi/user/login" -H 'Content-Type: application/json' \
+               -c "$K_JAR" --data "{\"email\":\"$K_A\",\"password\":\"$K_PA\",\"altcha\":\"$(k_altcha)\"}" | tr -d '\r')"
+    K_AT="$(k_json "d.get('access_token','')")"
+    K5_COOKIE="$(printf '%s\n' "$K5_HDR" | grep -i '^set-cookie: mdmcp_refresh=')"
+    if [ -n "$K_AT" ] && [ "$(k_json "d['account']['main_email']")" = "$K_A" ] &&
+       printf '%s' "$K5_COOKIE" | grep -qi 'httponly' && printf '%s' "$K5_COOKIE" | grep -qi 'secure' &&
+       printf '%s' "$K5_COOKIE" | grep -qi 'samesite=strict' && printf '%s' "$K5_COOKIE" | grep -qi 'path=/webapi' ; then
+        t_ok "K5 IMAP-verified login opens a session (access JWT + HttpOnly/Secure/SameSite=Strict refresh cookie)"
+    else
+        t_fail "K5 login/session (cookie: ${K5_COOKIE:-none})"
+    fi
+
+    # K6 — the refresh cookie rotates; replaying the superseded one revokes the session
+    cp "$K_JAR" "$K_JAR.old"
+    k_api POST /user/refresh "" "" "$K_JAR"; K6_A="$K_CODE"; K_AT2="$(k_json "d.get('access_token','')")"
+    k_api POST /user/refresh "" "" "$K_JAR.old"; K6_REPLAY="$K_CODE"
+    k_api GET /user/me "" "$K_AT2"; K6_AFTER="$K_CODE"
+    if [ "$K6_A" = 200 ] && [ "$K6_REPLAY" = 401 ] && [ "$K6_AFTER" = 401 ] ; then
+        t_ok "K6 refresh rotates the cookie; replaying the old one revokes the whole session"
+    else
+        t_fail "K6 refresh rotation (refresh=$K6_A replay=$K6_REPLAY me-after=$K6_AFTER)"
+    fi
+    k_login "$K_A" "$K_PA" "$K_JAR"; K_ATA="$K_AT"
+
+    # K7 — no session, no API
+    k_api GET /user/me; K7_NONE="$K_CODE"; k_api GET /user/me "" "$K_ATA"; K7_OK="$K_CODE"
+    if [ "$K7_NONE" = 401 ] && [ "$K7_OK" = 200 ] ; then
+        t_ok "K7 /webapi/user/* answers 401 without a session and 200 with it"
+    else
+        t_fail "K7 web API auth (none=$K7_NONE ok=$K7_OK)"
+    fi
+
+    # K8 — PAT: shown once, stored hashed
+    k_api POST /user/tokens '{"name":"k-read","scopes":["mail.read"]}' "$K_ATA"
+    K_PAT="$(k_json "d.get('token','')")"; K_PAT_ID="$(k_json "d.get('id','')")"
+    K8_DB="$(dcx db psql -U maild -d mcp -tAc "SELECT count(*) FROM token WHERE hash = '$K_PAT' OR display = '$K_PAT' OR name = '$K_PAT'" 2>/dev/null | tr -d '\r ')"
+    k_api GET /user/tokens "" "$K_ATA"
+    if [ "${K_PAT:0:10}" = mdmcp_pat_ ] && [ "$K8_DB" = 0 ] && ! grep -q "$K_PAT" "$K_OUT" ; then
+        t_ok "K8 a PAT (mdmcp_pat_…) is shown once and never stored or listed in clear"
+    else
+        t_fail "K8 PAT creation (prefix='${K_PAT:0:10}' clear-in-db=$K8_DB)"
+    fi
+
+    # K9 — the official SDK client sees the eight read tools (P1 exit criterion, scripted half)
+    K9_TOOLS="$(dcx mcp python tests/mcp_call.py "$K_PAT" list 2>/dev/null | tr -d '\r' | paste -sd, -)"
+    if [ "$K9_TOOLS" = "list_accounts,list_folders,check_new_mail,search_emails,get_email,get_thread,get_attachment,get_quota" ] ; then
+        t_ok "K9 the MCP SDK client lists the eight read tools over Streamable HTTP with the PAT"
+    else
+        t_fail "K9 tools/list (got: $K9_TOOLS)"
+    fi
+
+    # K10 — 401 with the RFC 9728 pointer when the bearer is missing or wrong
+    K10_NONE="$(k_rpc "" list_accounts)"; K10_WWW="$(grep -i '^www-authenticate:' "$K_OUT.h" | tr -d '\r')"
+    K10_BAD="$(k_rpc mdmcp_pat_wrong list_accounts)"
+    if [ "$K10_NONE" = 401 ] && [ "$K10_BAD" = 401 ] && printf '%s' "$K10_WWW" | grep -q 'resource_metadata=".*/.well-known/oauth-protected-resource/api/v1/mcp"' ; then
+        t_ok "K10 the MCP endpoint answers 401 + WWW-Authenticate resource_metadata without a valid bearer"
+    else
+        t_fail "K10 401 (none=$K10_NONE bad=$K10_BAD header='$K10_WWW')"
+    fi
+
+    # K11 — search returns summaries and never sets \Seen
+    K11_SEEN0="$(k_seen "$K_A")"
+    k_call "$K_PAT" search_emails "{\"account\":\"$K_A\",\"limit\":5}"
+    K11_N="$(k_res "len(d['structured']['messages'])")"; K_MID="$(k_res "d['structured']['messages'][0]['id']")"
+    K11_SEEN1="$(k_seen "$K_A")"
+    if [ "${K11_N:-0}" -ge 1 ] && [ "$K11_SEEN0" = "$K11_SEEN1" ] ; then
+        t_ok "K11 search_emails returns $K11_N summaries and leaves \\Seen untouched ($K11_SEEN0 seen before and after)"
+    else
+        t_fail "K11 search (n=$K11_N seen $K11_SEEN0 → $K11_SEEN1; $(printf '%s' "$K_RES" | head -c 200))"
+    fi
+
+    # K12 — get_email(mark_read=false) peeks; the default marks the message read
+    K_MUID="${K_MID#*.}"
+    dcx mda doveadm flags remove -u "$K_A" '\Seen' mailbox INBOX uid "$K_MUID" > /dev/null 2>&1
+    k_call "$K_PAT" get_email "{\"account\":\"$K_A\",\"folder\":\"INBOX\",\"id\":\"$K_MID\",\"mark_read\":false}"
+    K12_PEEK="$(k_res "d['structured']['unread']")"; K12_MARK="$(k_res "'UNTRUSTED EMAIL CONTENT' in d['structured']['body']")"
+    K12_S1="$(dcx mda doveadm search -u "$K_A" mailbox INBOX uid "$K_MUID" seen 2>/dev/null | wc -l | tr -d ' ')"
+    k_call "$K_PAT" get_email "{\"account\":\"$K_A\",\"folder\":\"INBOX\",\"id\":\"$K_MID\"}"
+    K12_S2="$(dcx mda doveadm search -u "$K_A" mailbox INBOX uid "$K_MUID" seen 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "$K12_PEEK" = True ] && [ "$K12_S1" = 0 ] && [ "$K12_S2" = 1 ] && [ "$K12_MARK" = True ] ; then
+        t_ok "K12 get_email marks the message read by default, mark_read=false peeks; the body is wrapped as untrusted"
+    else
+        t_fail "K12 get_email (peek unread=$K12_PEEK seen after peek=$K12_S1 after read=$K12_S2 marker=$K12_MARK)"
+    fi
+    dcx mda doveadm flags remove -u "$K_A" '\Seen' mailbox INBOX uid "$K_MUID" > /dev/null 2>&1
+
+    # K13 — scopes: a token without mail.read gets 403 insufficient_scope on a read tool
+    k_api POST /user/tokens '{"name":"k-modify","scopes":["mail.modify"]}' "$K_ATA"; K_PATM="$(k_json "d.get('token','')")"
+    K13="$(k_rpc "$K_PATM" search_emails)"; K13_WWW="$(grep -i '^www-authenticate:' "$K_OUT.h" | tr -d '\r')"
+    if [ "$K13" = 403 ] && printf '%s' "$K13_WWW" | grep -q 'error="insufficient_scope"' && printf '%s' "$K13_WWW" | grep -q 'scope="mail.read"' ; then
+        t_ok "K13 a tool outside the token's scopes answers 403 insufficient_scope (scope=\"mail.read\")"
+    else
+        t_fail "K13 scope check (got $K13, '$K13_WWW')"
+    fi
+
+    # K14 — the account's MCP switch cuts every token immediately
+    k_api PUT /user/mcp '{"enabled":false}' "$K_ATA"; K14_OFF="$(k_rpc "$K_PAT" list_accounts)"
+    k_api PUT /user/mcp '{"enabled":true}' "$K_ATA"; K14_ON="$(k_rpc "$K_PAT" list_accounts)"
+    if [ "$K14_OFF" = 403 ] && [ "$K14_ON" = 200 ] ; then
+        t_ok "K14 MCP switch off → every token gets 403 mcp_disabled; back on → 200"
+    else
+        t_fail "K14 MCP switch (off=$K14_OFF on=$K14_ON)"
+    fi
+
+    # K15 — secondary address: magic link to THAT inbox, confirm → active
+    k_api POST /user/addresses "{\"email\":\"$K_B\"}" "$K_ATA"; K15_ADD="$K_CODE"; K_BID="$(k_json "d.get('id','')")"
+    K15_STATUS="$(k_json "d.get('status','')")"
+    K_TOKEN_B=""
+    if wait_msg "$K_B" INBOX "Confirm $K_B for MailD MCP" 60 ; then
+        K15_UID="$(msg_newest_uid "$K_B" INBOX "Confirm $K_B for MailD MCP")"
+        # decode the MIME body (the link line is quoted-printable with soft breaks, like any >78-char line)
+        K_TOKEN_B="$(msg_text "$K_B" INBOX "$K15_UID" | sed '1{/^text:/d}' | python3 -c 'import email,email.policy,re,sys
+m = email.message_from_bytes(sys.stdin.buffer.read(), policy=email.policy.default)
+body = (m.get_body(("plain",)) or m).get_content()
+f = re.search(r"confirm#(mdmcp_ml_[A-Za-z0-9]+)", body)
+print(f.group(1) if f else "")' 2>/dev/null)"
+    fi
+    k_api POST /confirm "{\"token\":\"$K_TOKEN_B\"}"; K15_CONF="$K_CODE"
+    k_api POST /confirm "{\"token\":\"$K_TOKEN_B\"}"; K15_AGAIN="$K_CODE"
+    if [ "$K15_ADD" = 200 ] && [ "$K15_STATUS" = pending ] && [ -n "$K_TOKEN_B" ] && [ "$K15_CONF" = 200 ] && [ "$K15_AGAIN" = 404 ] ; then
+        t_ok "K15 adding $K_B mails a magic link to $K_B (DKIM path via amavis); it confirms once"
+    else
+        t_fail "K15 secondary address (add=$K15_ADD status=$K15_STATUS link=${K_TOKEN_B:+yes} confirm=$K15_CONF again=$K15_AGAIN)"
+    fi
+
+    # K16 — logging in with an active secondary lands on the owner account
+    k_login "$K_B" "$K_PB"
+    if [ "$K_CODE" = 200 ] && [ "$(k_json "d['account']['main_email']")" = "$K_A" ] ; then
+        t_ok "K16 $K_B (active secondary) logs in and lands on $K_A's account"
+    else
+        t_fail "K16 secondary login (got $K_CODE, account $(k_json "d.get('account',{}).get('main_email')"))"
+    fi
+
+    # K17 — D11: another account claiming it → "Already in use" + ONE postmaster notice per day
+    k_login "$K_C" "$K_PC"; K_ATC="$K_AT"
+    K17_N0="$(subj_count "$DEPLOY_ADMIN" INBOX "address claim conflict for $K_B")"
+    k_api POST /user/addresses "{\"email\":\"$K_B\"}" "$K_ATC"; K17_1="$K_CODE"; K17_MSG="$(k_json "d.get('message')")"
+    k_api POST /user/addresses "{\"email\":\"$K_B\"}" "$K_ATC"; K17_2="$K_CODE"
+    wait_subj_count_gt "$DEPLOY_ADMIN" INBOX "address claim conflict for $K_B" "${K17_N0:-0}" 60
+    sleep 5
+    K17_N1="$(subj_count "$DEPLOY_ADMIN" INBOX "address claim conflict for $K_B")"
+    if [ "$K17_1" = 409 ] && [ "$K17_2" = 409 ] && [ "$K17_MSG" = "Already in use." ] && [ "$((K17_N1 - ${K17_N0:-0}))" = 1 ] ; then
+        t_ok "K17 claiming an address held by another account → 409 'Already in use.', one postmaster notice for two attempts"
+    else
+        t_fail "K17 claim conflict (codes $K17_1/$K17_2 msg='$K17_MSG' notices ${K17_N0:-0}→$K17_N1)"
+    fi
+
+    # K18 — token address subset + a disabled secondary: unusable by tokens, and its login is refused
+    k_api POST /user/tokens "{\"name\":\"k-subset\",\"scopes\":[\"mail.read\"],\"addresses\":[\"$K_A\"]}" "$K_ATA"; K_PATS="$(k_json "d.get('token','')")"
+    k_call "$K_PATS" list_folders "{\"account\":\"$K_B\"}"; K18_SUB="$(k_res "d['is_error']")"
+    k_api POST "/user/addresses/$K_BID/status" "{\"enabled\":false,\"confirm\":\"$K_B\"}" "$K_ATA"; K18_DIS="$K_CODE"
+    k_call "$K_PAT" list_accounts '{}'; K18_REASON="$(k_res "[a['reason'] for a in d['structured']['accounts'] if a['address']=='$K_B'][0]")"
+    k_login "$K_B" "$K_PB"; K18_LOGIN="$K_CODE"; K18_ERR="$(k_json "d.get('error')")"
+    if [ "$K18_SUB" = True ] && [ "$K18_DIS" = 200 ] && [ "$K18_REASON" = disabled ] && [ "$K18_LOGIN" = 403 ] && [ "$K18_ERR" = address_disabled_elsewhere ] ; then
+        t_ok "K18 a token's address subset is enforced; a disabled secondary is unusable and its own login is refused"
+    else
+        t_fail "K18 subset/disabled (subset-error=$K18_SUB disable=$K18_DIS reason=$K18_REASON login=$K18_LOGIN $K18_ERR)"
+    fi
+
+    # K19 — resend backoff (2^n from 1 min) and "owner wins" over a pending claim
+    k_api POST /user/addresses "{\"email\":\"$K_D\"}" "$K_ATA"; K_DID="$(k_json "d.get('id','')")"
+    k_api POST "/user/addresses/$K_DID/resend" "" "$K_ATA"; K19_RESEND="$K_CODE"
+    K19_N0="$(subj_count "$K_A" INBOX "$K_D claimed by its owner")"
+    k_login "$K_D" "$K_PD"; K19_LOGIN="$K_CODE"; K19_MAIN="$(k_json "d['account']['main_email']")"
+    k_api GET /user/me "" "$K_ATA"; K19_GONE="$(k_json "'$K_D' not in [a['email'] for a in d['addresses']]")"
+    wait_subj_count_gt "$K_A" INBOX "$K_D claimed by its owner" "${K19_N0:-0}" 60; K19_NOTE=$?
+    if [ "$K19_RESEND" = 429 ] && [ "$K19_LOGIN" = 200 ] && [ "$K19_MAIN" = "$K_D" ] && [ "$K19_GONE" = True ] && [ "$K19_NOTE" = 0 ] ; then
+        t_ok "K19 an early resend is refused (429); the owner logging in cancels the pending claim and A is notified"
+    else
+        t_fail "K19 resend/owner-wins (resend=$K19_RESEND login=$K19_LOGIN main=$K19_MAIN gone=$K19_GONE notice=$K19_NOTE)"
+    fi
+
+    # K20 — D12: 30 idle days disable a PAT (401 token_idle + hourly job); re-enable from the page works
+    dcx db psql -U maild -d mcp -q -c "UPDATE token SET created_at = now() - interval '31 days', last_used_at = now() - interval '31 days', reenabled_at = NULL WHERE id = $K_PAT_ID" > /dev/null 2>&1
+    K20_IDLE="$(k_rpc "$K_PAT" list_accounts)"; K20_REASON="$(python3 -c "import json; print(json.load(open('$K_OUT')).get('reason'))" 2>/dev/null)"
+    K20_STATE="$(dcx db psql -U maild -d mcp -tAc "SELECT status || '/' || disabled_reason FROM token WHERE id = $K_PAT_ID" 2>/dev/null | tr -d '\r ')"
+    K20_JOB="$(dcx mcp python manage.py mcp_jobs --once 2>/dev/null | tr -d '\r')"
+    k_api POST "/user/tokens/$K_PAT_ID/enable" "" "$K_ATA"; K20_EN="$K_CODE"
+    K20_BACK="$(k_rpc "$K_PAT" list_accounts)"
+    if [ "$K20_IDLE" = 401 ] && [ "$K20_REASON" = token_idle ] && [ "$K20_STATE" = disabled/idle ] &&
+       printf '%s' "$K20_JOB" | grep -q tokens_idle_disabled && [ "$K20_EN" = 200 ] && [ "$K20_BACK" = 200 ] ; then
+        t_ok "K20 a PAT idle for 30 days is disabled (401 token_idle); re-enabling it from the web page restores access"
+    else
+        t_fail "K20 idle rule (call=$K20_IDLE/$K20_REASON state=$K20_STATE job='$K20_JOB' enable=$K20_EN after=$K20_BACK)"
+    fi
+
+    # K21 — revoke is final
+    k_api POST "/user/tokens/$K_PAT_ID/revoke" "" "$K_ATA"; K21_REV="$K_CODE"
+    K21_CALL="$(k_rpc "$K_PAT" list_accounts)"
+    k_api POST "/user/tokens/$K_PAT_ID/enable" "" "$K_ATA"; K21_EN="$K_CODE"
+    if [ "$K21_REV" = 200 ] && [ "$K21_CALL" = 401 ] && [ "$K21_EN" = 409 ] ; then
+        t_ok "K21 a revoked token is refused (401) and cannot be re-enabled"
+    else
+        t_fail "K21 revoke (revoke=$K21_REV call=$K21_CALL re-enable=$K21_EN)"
+    fi
+
+    # K22 — audit trail: date-named JSON lines, the events are there, no secret ever is
+    K22_DAY="$(date -u +%Y-%m-%d)"
+    K22_LOG="$(dcx mcp sh -c "cat /var/log/maild-mcp/audit-$K22_DAY.log /var/log/maild-mcp/access-$K22_DAY.log" 2>/dev/null)"
+    if printf '%s' "$K22_LOG" | grep -q '"category":"web.login"' && printf '%s' "$K22_LOG" | grep -q '"event":"search_emails"' &&
+       printf '%s' "$K22_LOG" | grep -q '"event":"address_claim_conflict"' && printf '%s' "$K22_LOG" | grep -q '"event":"token.idle_disabled"' &&
+       ! printf '%s' "$K22_LOG" | grep -qF -e "$K_PA" -e "$K_PAT" -e "$K_PATM" -e "${K_TOKEN_B:-no-token}" ; then
+        t_ok "K22 the audit/access logs (audit-$K22_DAY.log) record logins, tool calls and security events, and no password or token"
+    else
+        t_fail "K22 audit log content"
+    fi
 fi
 
 section "summary"

@@ -12,7 +12,7 @@ cd /app
 if [ "${1:-}" = "uvicorn" ] ; then
     python manage.py mcp_boot
     exec uvicorn asgi:application --host 0.0.0.0 --port 8080 \
-        --workers "${MCP_WORKERS:-2}" --lifespan off --no-server-header --log-level info
+        --workers "${MCP_WORKERS:-2}" --lifespan on --no-server-header --log-level info
 fi
 
 exec "$@"

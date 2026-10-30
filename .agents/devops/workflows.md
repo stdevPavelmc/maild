@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 105 checks
+./test.sh                 # 127 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -122,7 +122,14 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   inactive mailbox, never rehashing a legacy `$1$` row with the master password — with a control
   proving the own-login rehash still works, and the `auth_user=<mcp>` login trail), the
   `maild_mcp` role grants, the service mailbox (created once, untouched on restart) and
-  `/healthz`; G4c checks the MCP backup archive. It creates two throwaway mailboxes
+  `/healthz`; G4c checks the MCP backup archive. Section K covers the P1 user side: the
+  domain allow-list CLI, web login (ALTCHA, lockout, refresh rotation + reuse revocation),
+  secondary addresses (magic link through amavis, D11 conflicts + postmaster notice, owner wins,
+  disabled secondary refused), PATs (scopes → 403 `insufficient_scope`, switch → 403, subset,
+  idle → 401 `token_idle`, revoke) and the read tools through the official SDK client (search
+  never sets `\Seen`, `get_email` does), plus the audit logs; it deletes the `example.net` MCP
+  accounts and restores the domain policy on exit. Browser flows for the MCP user page:
+  `./adminng/pwa-test/run.sh mcp`. It creates two throwaway mailboxes
   (`mcp-*-probe@example.net`) and removes them on exit; it skips when `env.dev` carries no
   MCP secrets.
 - The F-12 outbound throttle is covered end to end: the `submission`/`smtps` policy wiring

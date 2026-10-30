@@ -1,6 +1,13 @@
-# MailD MCP — exact pins (proposal §3.2: pin at implementation time). P0 needs only these;
-# the MCP SDK, django-ninja, imapclient… are added by the phases that use them.
+# MailD MCP — exact pins (proposal §3.2: pin at implementation time; checked 2026-10-29).
 Django==6.1.2
 uvicorn[standard]==0.54.0
 psycopg[binary]==3.3.6
 argon2-cffi==25.1.0
+mcp==2.3.0
+django-ninja==1.7.3
+imapclient==4.1.0
+altcha==2.3.0
+PyJWT==2.15.1
+html2text==2025.4.15
+nh3==0.3.7
+whitenoise==6.12.0

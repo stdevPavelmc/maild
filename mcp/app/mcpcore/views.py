@@ -39,3 +39,24 @@ def healthz(request):
         {"status": "ok" if healthy else "fail", "checks": checks},
         status=200 if healthy else 503,
     )
+
+
+_CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "worker-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
+
+
+def spa(request):
+    """index.html of the user SPA, never cached (the hashed assets under /assets/ are)."""
+    from django.http import HttpResponse, HttpResponseNotAllowed
+
+    if request.method not in ("GET", "HEAD"):
+        return HttpResponseNotAllowed(["GET", "HEAD"])
+    try:
+        html = settings.SPA_INDEX.read_bytes()
+    except OSError:
+        html = b"<!doctype html><title>MailD MCP</title><p>The web UI is not built into this image.</p>"
+    resp = HttpResponse(html, content_type="text/html; charset=utf-8")
+    resp["Cache-Control"] = "no-cache"
+    resp["Content-Security-Policy"] = _CSP
+    resp["Referrer-Policy"] = "no-referrer"
+    return resp

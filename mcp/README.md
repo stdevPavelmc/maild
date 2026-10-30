@@ -6,23 +6,29 @@ on behalf of a mailbox owner, through MCP (Streamable HTTP), a REST mirror and a
 - Design and decisions: [`technical-proposal.md`](technical-proposal.md)
 - Delivery status and log: [`progress.md`](progress.md)
 
-## Current state: P0 (foundations)
+## Current state: P0 done, P1 in progress (see progress.md)
 
-- Django 6.1 + uvicorn, non-root (uid 10001), read-only rootfs.
+- Django 6.1 + uvicorn + MCP SDK 2.3, non-root (uid 10001), read-only rootfs.
 - `GET /healthz` → 200 when the `mcp` database, the catalogue and the mda IMAP greeting answer.
-- Boot (`manage.py mcp_boot`): waits for the `maild_provision` sentinel, migrates, seeds the
-  `/adminmcp` admin on first boot, ensures the service mailbox.
-- Mailbox access goes through a Dovecot master user over IMAP STARTTLS (`mda:143`); the
-  container never mounts the mail storage.
+- User page (`/`, React SPA in `ui/`, EN/ES): sign in with the mailbox password (ALTCHA),
+  MCP switch, secondary addresses (magic link), access tokens.
+- MCP endpoint `POST /api/v1/mcp` (Streamable HTTP, stateless), `Authorization: Bearer
+  mdmcp_pat_…`: `list_accounts`, `list_folders`, `check_new_mail`, `search_emails`,
+  `get_email`, `get_thread`, `get_attachment`, `get_quota`.
+- Mailbox access goes through a Dovecot master user over IMAP STARTTLS (`mda:143`, certificate
+  pinned); the container never mounts the mail storage.
 - Database access only as the restricted `maild_mcp` role (`db/ensure_roles.sh`); the
   container never receives `POSTGRES_PASSWORD` (no `env_file:`, explicit allow-list).
+- Domains start denied: `manage.py mcp_domains allow <domain>` (admin panel in P3).
 
 ## Variables
 
 Mandatory: `DEFAULT_DOMAIN`, `MCP_SECRET_KEY`, `MCP_DB_PASSWORD`, `MCP_DOVECOT_MASTER_PASSWORD`.
 Optional (image defaults in `Dockerfile`, documented in `env.sample`): `MCP_HOSTNAME`,
 `MCP_ADMIN_USER/PASSWORD/EMAIL` (first boot only), `MCP_SERVICE_EMAIL/PASSWORD`,
-`MCP_DOVECOT_MASTER_USER`, `MCP_DB`, `MCP_DB_USER`, `MCP_IMAP_*`, `MCP_WORKERS`, `MCP_DEBUG`.
+`MCP_DOVECOT_MASTER_USER`, `MCP_DB`, `MCP_DB_USER`, `MCP_IMAP_*`, `MCP_PUBLIC_URL`,
+`MCP_TRUSTED_PROXIES`, `MCP_SMTP_HOST/PORT`, `MCP_ACCESS_TTL`, `MCP_USER_SESSION_TTL`,
+`MCP_WORKERS`, `MCP_DEBUG`.
 
 ## Operations
 
@@ -30,4 +36,12 @@ Optional (image defaults in `Dockerfile`, documented in `env.sample`): `MCP_HOST
 docker compose --env-file env.dev -f docker-compose-dev.yml logs mcp        # boot log (generated passwords)
 curl -s http://localhost:8085/healthz                                       # dev port
 docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py showmigrations
+docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py mcp_domains list
+docker compose --env-file env.dev -f docker-compose-dev.yml exec mcp python manage.py mcp_jobs --once
+```
+
+Connect an MCP client (Claude Code example, dev stack):
+
+```bash
+claude mcp add --transport http maild-dev http://localhost:8085/api/v1/mcp --header "Authorization: Bearer mdmcp_pat_…"
 ```

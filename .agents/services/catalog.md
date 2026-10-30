@@ -441,12 +441,47 @@ more. See `.agents/services/provisioning.md`.
 
 ## mcp — MailD MCP server
 
-- Image `pavelmc/maild-mcp:develop` from `mcp/Dockerfile` (`python:3.14-slim-trixie`, uid 10001,
-  read-only rootfs + `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`). Design and decisions:
+- Image `pavelmc/maild-mcp:develop` from `mcp/Dockerfile`: stage 1 `node:26-alpine` builds the
+  user SPA (`mcp/ui`, React 18 + Vite 5 + Tailwind 3 + i18next, pinned to the AdminNG versions;
+  `npm run build` runs the EN/ES `i18n:check`), stage 2 `python:3.14-slim-trixie`, uid 10001,
+  read-only rootfs + `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`. Design and decisions:
   `mcp/technical-proposal.md`; delivery status: `mcp/progress.md`.
-- **P0 skeleton** (2026-10-29): Django 6.1 + uvicorn (`asgi.py` root app → Django), `/healthz`
-  (200 when the `mcp` DB, the catalogue and the mda IMAP greeting answer, else 503; the image
-  `HEALTHCHECK` polls it). MCP endpoint, REST mirror and web UI arrive in P1+.
+- Routing (`mcp/app/asgi.py`, uvicorn `--lifespan on`): `/api/v1/mcp` → bearer wrapper → MCP SDK
+  2.3 (`MCPServer`, stateless Streamable HTTP, JSON responses, Host/Origin allow-list); everything
+  else → Django (`/healthz`, `/webapi/*` django-ninja, the SPA at `/` + `/confirm`, hashed assets
+  under `/assets/` via WhiteNoise, cached immutable; `index.html` no-cache with a strict CSP).
+  The lifespan also runs the jobs loop: IMAP pool sweep every 30 s, hourly jobs under a pg
+  advisory lock (idle-PAT disable, expired pending addresses, ALTCHA/session cleanup, log
+  retention); `manage.py mcp_jobs --once` runs them on demand.
+- **MCP auth** (wrapper, proposal §8.2): 401 + `WWW-Authenticate: Bearer resource_metadata=…` for a
+  missing/invalid/expired/idle token, 403 `mcp_disabled` when the account switch is off, 403
+  `insufficient_scope` (+ `scope=`) when a `tools/call` names a tool outside the token's scopes
+  (the JSON-RPC body is read, bounded at 4 MB, and replayed). Tools re-check the address chain
+  per call (active in the account, inside the token's subset, mailbox active, domain allowed).
+- **Read tools (P1)**: `list_accounts`, `list_folders`, `check_new_mail` (watermark handle),
+  `search_emails` (filter `sender`, not `from`: the SDK cannot map a `from` keyword; cursor
+  handle), `get_email` (marks `\Seen` unless `mark_read=false`; body wrapped in untrusted
+  markers, HTML → text, 100 000 chars cap), `get_thread`, `get_attachment` (embedded resource,
+  5 MB cap), `get_quota` (an unlimited mailbox reports no QUOTAROOT → `unlimited`). Handles are
+  HMAC-signed and bound to the token. Reads use EXAMINE + `BODY.PEEK`.
+- **IMAP**: STARTTLS to `mda:143` with the leaf certificate **pinned** to the first cert of
+  `MCP_IMAP_CA_FILE` (no hostname/chain check: the cert is never issued for `mda`); master-user
+  pool ≤ 3 connections per mailbox, idle close 60 s. Web logins use the user's own credentials.
+- **Web API / user page**: ALTCHA v1 (single use), lockout 5 failures per email+IP → 15 min,
+  login = IMAP check; 15-min access JWT in memory + `mdmcp_refresh` cookie (HttpOnly, Secure,
+  SameSite=Strict, Path=/webapi) rotating, reuse of the superseded one revokes the session,
+  24 h absolute. Secondary addresses: magic link (24 h, `MCP_PUBLIC_URL/confirm#token`, confirmed
+  by an explicit POST), resend backoff 2^n min, D11 conflicts ("Already in use" + one postmaster
+  notice per claimer/address/day), owner wins over a pending claim, a disabled secondary's own
+  login is refused. PATs `mdmcp_pat_…` (HMAC-stored, scopes, optional address subset, 30 d /
+  n days / forever, idle 30 d → disabled, re-enable only from the page).
+- **Service mail** (magic links, notices) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10024 until
+  P1b) as `MCP_SERVICE_EMAIL`, EN/ES, `Auto-Submitted: auto-generated`.
+- **Logs**: JSON Lines `audit-/access-/errors-YYYY-MM-DD.log` in `MCP_LOG_DIR` (O_APPEND, 90 files
+  kept); never passwords, tokens, codes, bodies or subjects.
+- Domain allow-list (D6): `manage.py mcp_domains list|allow|deny <domain>` (audited) until the
+  P3 panel; new catalogue domains start denied; the policy is read on every call, only the
+  catalogue state is cached 30 s.
 - Boot (`docker-entrypoint.sh` → `manage.py mcp_boot`): wait for the `maild_provision` sentinel
   (bounded by `PROVISION_WAIT_TIMEOUT`) → `migrate` under a pg advisory lock → seed the admin on
   first boot only (`MCP_ADMIN_USER/PASSWORD/EMAIL`; password generated and printed OTP-style when
@@ -467,7 +502,10 @@ more. See `.agents/services/provisioning.md`.
   the mail storage.
 - Ports: dev publishes `8085:8080`; production has no published port, Traefik labels route
   `${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}` to 8080 (TLS at the operator's ingress).
-- `test.sh` J7–J11 (role grants, service mailbox, healthz) and G4c (backup archive).
+- `test.sh` J7–J11 (role grants, service mailbox, healthz), G4c (backup archive) and K1–K22
+  (user side + read tools through the SDK client, `tests/mcp_call.py`); browser flows:
+  `./adminng/pwa-test/run.sh mcp`; unit tests: `mcp/tests/test_units.py` (pytest, run in a
+  throwaway container — command in `mcp/tests/conftest.py`).
 
 ## dozzle — log viewer (dev only)
 
@@ -488,3 +526,8 @@ more. See `.agents/services/provisioning.md`.
   `adminng.py --approve-device <id>` inside the `api` container. Absent from all
   production compose files; the operator's stack never sees it.
 - `run.sh` maps the invoking uid/gid so the artifacts stay host-owned.
+- Mode `mcp` reuses the same image for the MailD MCP user page: the tunnel switches to
+  `localhost:8085 → mcp:8080` (health `/healthz`) and only `tests/mcp/*.spec.ts` runs (the
+  default gate ignores them). Fixtures via `docker exec` (`lib/mcp.ts`): the `mcp_domains` CLI,
+  psql cleanup of the `example.net` MCP accounts, the magic link read with doveadm. The real
+  ALTCHA widget solves in Chromium, so the CSP is exercised too.

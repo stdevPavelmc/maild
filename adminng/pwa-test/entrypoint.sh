@@ -11,6 +11,7 @@
 #   a11y          axe-core scan of every screen
 #   visual        PNG screenshots, desktop + mobile, EN + ES
 #   lighthouse    only the Lighthouse budget
+#   mcp           the MailD MCP user page flows (tests/mcp/*.spec.ts), tunnelled to mcp:8080
 #   shell         interactive shell inside the harness image
 #   <command...>  anything else is exec'd verbatim (e.g. npx playwright test --list)
 set -euo pipefail
@@ -24,6 +25,7 @@ export E2E_ARTIFACTS="${E2E_ARTIFACTS:-/artifacts}"
 export E2E_UPSTREAM_HOST="${E2E_UPSTREAM_HOST:-adminng}"
 export E2E_UPSTREAM_PORT="${E2E_UPSTREAM_PORT:-80}"
 export E2E_PROXY_PORT="${E2E_PROXY_PORT:-8083}"
+export E2E_HEALTH_PATH="${E2E_HEALTH_PATH:-/api/v1/health}"
 mkdir -p "$E2E_ARTIFACTS"
 
 log() { printf 'pwa-test: %s\n' "$*"; }
@@ -42,9 +44,9 @@ cleanup() {
 trap cleanup EXIT
 
 wait_for_stack() {
-    log "waiting for the adminng frontend on http://${E2E_UPSTREAM_HOST}:${E2E_UPSTREAM_PORT}"
+    log "waiting for http://${E2E_UPSTREAM_HOST}:${E2E_UPSTREAM_PORT}${E2E_HEALTH_PATH}"
     for _ in $(seq 1 60); do
-        if node -e "fetch('http://${E2E_UPSTREAM_HOST}:${E2E_UPSTREAM_PORT}/api/v1/health',{signal:AbortSignal.timeout(3000)}).then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
+        if node -e "fetch('http://${E2E_UPSTREAM_HOST}:${E2E_UPSTREAM_PORT}${E2E_HEALTH_PATH}',{signal:AbortSignal.timeout(3000)}).then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"; then
             return 0
         fi
         sleep 2
@@ -89,6 +91,14 @@ case "$mode" in
         # ENOENT … .trace` at teardown even when every assertion passed, so
         # tracing is off here (callers can still override with `--trace=…`).
         PWA_TEST_ALL=1 npx playwright test "tests/${mode}.spec.ts" --trace=off "$@"
+        ;;
+    mcp)
+        # same tunnel trick, other upstream: http://localhost:8085 → mcp:8080 (the dev port)
+        export E2E_UPSTREAM_HOST=mcp E2E_UPSTREAM_PORT=8080 E2E_PROXY_PORT=8085 E2E_HEALTH_PATH=/healthz
+        export ADMINNG_URL=http://localhost:8085 PWA_TEST_MCP=1
+        wait_for_stack
+        start_tunnel
+        npx playwright test tests/mcp "$@"
         ;;
     lighthouse)
         wait_for_stack

@@ -25,7 +25,11 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   fullyParallel: false,
-  testIgnore: INCLUDE_TOOLING_SPECS ? [] : ['**/visual.spec.ts', '**/a11y.spec.ts'],
+  // tests/mcp/ belongs to the MailD MCP user page (entrypoint mode `mcp`), never to the AdminNG gate
+  testIgnore: [
+    ...(INCLUDE_TOOLING_SPECS ? [] : ['**/visual.spec.ts', '**/a11y.spec.ts']),
+    ...(process.env.PWA_TEST_MCP === '1' ? [] : ['**/mcp/**']),
+  ],
   outputDir: `${ARTIFACTS}/results`,
   reporter: [
     ['list'],

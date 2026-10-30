@@ -1,0 +1,164 @@
+{
+  "app": {
+    "title": "MailD MCP"
+  },
+  "common": {
+    "close": "Close",
+    "cancel": "Cancel",
+    "ok": "OK",
+    "loading": "Loading…",
+    "typeToConfirm": "Type {{value}} to confirm"
+  },
+  "login": {
+    "subtitle": "Connect your mailbox to AI assistants",
+    "email": "Email address",
+    "password": "Password",
+    "passwordHint": "Your usual mail password: it is checked against the mail server and never stored.",
+    "signIn": "Sign in",
+    "signingIn": "Signing in…"
+  },
+  "errors": {
+    "network": "The server could not be reached. Check your connection and try again.",
+    "invalid_credentials": "Invalid email or password.",
+    "domain_not_allowed": "MailD MCP is not enabled for this domain.",
+    "mail_unavailable": "The mail server is not reachable right now, try again later.",
+    "address_disabled_elsewhere": "This address is disabled in another MailD MCP account.",
+    "captcha_failed": "The anti-robot check failed, try again.",
+    "locked": "Too many failed attempts. Try again in 15 minutes.",
+    "invalid_address": "That is not a valid email address.",
+    "not_a_mailbox": "That address is not an active mailbox on this server.",
+    "too_many_addresses": "This account already has the maximum number of addresses.",
+    "already_yours": "That address is already in your account.",
+    "already_in_use": "Already in use.",
+    "mail_failed": "The confirmation mail could not be sent, try again later.",
+    "resend_too_soon": "Wait {{seconds}} s before resending.",
+    "not_pending": "This address is already confirmed.",
+    "invalid_link": "This confirmation link is not valid or has expired.",
+    "not_confirmed": "Confirm the address first.",
+    "confirmation_mismatch": "Type the address exactly to confirm.",
+    "invalid_name": "Give the token a name (up to 100 characters).",
+    "invalid_scopes": "Choose at least one permission.",
+    "forever_not_allowed": "Tokens without expiry are not allowed on this server.",
+    "invalid_lifetime": "Choose a valid lifetime.",
+    "invalid_addresses": "Choose confirmed addresses of this account.",
+    "too_many_tokens": "This account already has the maximum number of tokens.",
+    "revoked": "A revoked token cannot change any more.",
+    "expired": "This token has expired; create a new one.",
+    "session_expired": "Your session expired. Please sign in again.",
+    "not_found": "Not found.",
+    "main_address": "The main address cannot be changed here.",
+    "invalid_lang": "Unsupported language.",
+    "invalid_action": "Unknown action."
+  },
+  "confirm": {
+    "title": "Confirm an address",
+    "body": "Confirm that this mailbox may be used by the MailD MCP account that asked for it.",
+    "button": "Confirm address",
+    "done": "{{address}} is now confirmed in the account of {{account}}.",
+    "back": "Go to MailD MCP"
+  },
+  "account": {
+    "signedInAs": "Signed in as {{email}}",
+    "mainIs": "main address {{email}}",
+    "language": "Language",
+    "logout": "Sign out",
+    "mcpTitle": "MCP access",
+    "mcpBody": "Master switch for this account: when it is off, every token below is refused immediately.",
+    "mcpOn": "Enabled",
+    "mcpOff": "Disabled",
+    "endpoint": "MCP endpoint"
+  },
+  "addresses": {
+    "title": "Addresses",
+    "main": "main address",
+    "status": {
+      "pending": "Pending",
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "expires": "link valid until {{date}}",
+    "resend": "Resend link",
+    "resendIn": "Resend in {{seconds}} s",
+    "disable": "Disable",
+    "enable": "Enable",
+    "remove": "Remove",
+    "add": "Add another address",
+    "addHint": "A confirmation link is mailed to that address: only someone who can read its inbox can add it.",
+    "addButton": "Add",
+    "checkInbox": "Check the inbox of {{address}} for the confirmation link.",
+    "removed": "{{address}} was removed.",
+    "enabledDone": "{{address}} is enabled again.",
+    "disabledDone": "{{address}} is disabled.",
+    "confirm": {
+      "disable": {
+        "title": "Disable this address?",
+        "body": "Tokens will stop using {{address}}. A notice is sent to {{main}}."
+      },
+      "enable": {
+        "title": "Enable this address?",
+        "body": "Tokens may use {{address}} again. A notice is sent to {{main}}."
+      },
+      "remove": {
+        "title": "Remove this address?",
+        "body": "{{address}} leaves this account; adding it again needs a new confirmation. A notice is sent to {{main}}."
+      }
+    }
+  },
+  "tokens": {
+    "title": "Access tokens",
+    "name": "Token name",
+    "lifetime": "Lifetime",
+    "lifetimes": {
+      "default": "30 days (default)",
+      "7d": "7 days",
+      "90d": "90 days",
+      "365d": "1 year",
+      "forever": "Never expires"
+    },
+    "scopes": "Permissions",
+    "scope": {
+      "mail": {
+        "read": "mail.read",
+        "modify": "mail.modify",
+        "trash": "mail.trash",
+        "send": "mail.send"
+      }
+    },
+    "scopeHint": {
+      "mail": {
+        "read": "search and read mail",
+        "modify": "flags, folders, drafts",
+        "trash": "move to Junk or Trash",
+        "send": "send, reply and forward"
+      }
+    },
+    "limitAddresses": "Only some addresses",
+    "create": "Create token",
+    "showOnce": "Copy the token now: it is shown only once.",
+    "copy": "Copy",
+    "copied": "Copied",
+    "dismiss": "Done",
+    "none": "No tokens yet.",
+    "allAddresses": "all addresses",
+    "status": {
+      "active": "Active",
+      "disabled": "Disabled",
+      "revoked": "Revoked",
+      "idle": "Disabled — idle 30 days"
+    },
+    "disable": "Disable",
+    "enable": "Enable",
+    "reenable": "Re-enable",
+    "revoke": "Revoke",
+    "created": "Created",
+    "expires": "Expires",
+    "never": "never",
+    "lastUsed": "Last used",
+    "neverUsed": "never used",
+    "foreverTitle": "A token that never expires",
+    "foreverBody": "Anyone holding this token can use your mailbox until you revoke it. Even so, every token is disabled after 30 days without use, and only you can re-enable it from this page.",
+    "foreverConfirm": "Create it anyway",
+    "revokeTitle": "Revoke this token?",
+    "revokeBody": "\"{{name}}\" stops working at once and cannot be enabled again."
+  }
+}

@@ -1,0 +1,164 @@
+{
+  "app": {
+    "title": "MailD MCP"
+  },
+  "common": {
+    "close": "Cerrar",
+    "cancel": "Cancelar",
+    "ok": "OK",
+    "loading": "Cargando…",
+    "typeToConfirm": "Escriba {{value}} para confirmar"
+  },
+  "login": {
+    "subtitle": "Conecte su buzón a asistentes de IA",
+    "email": "Dirección de correo",
+    "password": "Contraseña",
+    "passwordHint": "Su contraseña de correo habitual: se comprueba contra el servidor de correo y nunca se guarda.",
+    "signIn": "Entrar",
+    "signingIn": "Entrando…"
+  },
+  "errors": {
+    "network": "No se pudo contactar con el servidor. Compruebe su conexión e inténtelo de nuevo.",
+    "invalid_credentials": "Correo o contraseña incorrectos.",
+    "domain_not_allowed": "MailD MCP no está habilitado para este dominio.",
+    "mail_unavailable": "El servidor de correo no responde ahora mismo, inténtelo más tarde.",
+    "address_disabled_elsewhere": "Esta dirección está desactivada en otra cuenta de MailD MCP.",
+    "captcha_failed": "La comprobación anti-robot falló, inténtelo de nuevo.",
+    "locked": "Demasiados intentos fallidos. Inténtelo de nuevo en 15 minutos.",
+    "invalid_address": "Esa no es una dirección de correo válida.",
+    "not_a_mailbox": "Esa dirección no es un buzón activo de este servidor.",
+    "too_many_addresses": "Esta cuenta ya tiene el máximo de direcciones.",
+    "already_yours": "Esa dirección ya está en su cuenta.",
+    "already_in_use": "Ya está en uso.",
+    "mail_failed": "No se pudo enviar el correo de confirmación, inténtelo más tarde.",
+    "resend_too_soon": "Espere {{seconds}} s antes de reenviar.",
+    "not_pending": "Esta dirección ya está confirmada.",
+    "invalid_link": "Este enlace de confirmación no es válido o ha caducado.",
+    "not_confirmed": "Confirme primero la dirección.",
+    "confirmation_mismatch": "Escriba la dirección exactamente para confirmar.",
+    "invalid_name": "Dé un nombre al token (hasta 100 caracteres).",
+    "invalid_scopes": "Elija al menos un permiso.",
+    "forever_not_allowed": "En este servidor no se permiten tokens sin caducidad.",
+    "invalid_lifetime": "Elija una duración válida.",
+    "invalid_addresses": "Elija direcciones confirmadas de esta cuenta.",
+    "too_many_tokens": "Esta cuenta ya tiene el máximo de tokens.",
+    "revoked": "Un token revocado ya no puede cambiar.",
+    "expired": "Este token ha caducado; cree uno nuevo.",
+    "session_expired": "Su sesión caducó. Vuelva a entrar.",
+    "not_found": "No encontrado.",
+    "main_address": "La dirección principal no se puede cambiar aquí.",
+    "invalid_lang": "Idioma no soportado.",
+    "invalid_action": "Acción desconocida."
+  },
+  "confirm": {
+    "title": "Confirmar una dirección",
+    "body": "Confirme que este buzón puede usarlo la cuenta de MailD MCP que lo solicitó.",
+    "button": "Confirmar dirección",
+    "done": "{{address}} queda confirmada en la cuenta de {{account}}.",
+    "back": "Ir a MailD MCP"
+  },
+  "account": {
+    "signedInAs": "Sesión iniciada como {{email}}",
+    "mainIs": "dirección principal {{email}}",
+    "language": "Idioma",
+    "logout": "Salir",
+    "mcpTitle": "Acceso MCP",
+    "mcpBody": "Interruptor general de la cuenta: cuando está apagado, todos los tokens de abajo se rechazan al instante.",
+    "mcpOn": "Activado",
+    "mcpOff": "Desactivado",
+    "endpoint": "Punto de acceso MCP"
+  },
+  "addresses": {
+    "title": "Direcciones",
+    "main": "dirección principal",
+    "status": {
+      "pending": "Pendiente",
+      "active": "Activa",
+      "disabled": "Desactivada"
+    },
+    "expires": "enlace válido hasta {{date}}",
+    "resend": "Reenviar enlace",
+    "resendIn": "Reenviar en {{seconds}} s",
+    "disable": "Desactivar",
+    "enable": "Activar",
+    "remove": "Eliminar",
+    "add": "Añadir otra dirección",
+    "addHint": "Se envía un enlace de confirmación a esa dirección: solo quien puede leer su buzón puede añadirla.",
+    "addButton": "Añadir",
+    "checkInbox": "Busque el enlace de confirmación en el buzón de {{address}}.",
+    "removed": "{{address}} se eliminó.",
+    "enabledDone": "{{address}} vuelve a estar activa.",
+    "disabledDone": "{{address}} está desactivada.",
+    "confirm": {
+      "disable": {
+        "title": "¿Desactivar esta dirección?",
+        "body": "Los tokens dejarán de usar {{address}}. Se envía un aviso a {{main}}."
+      },
+      "enable": {
+        "title": "¿Activar esta dirección?",
+        "body": "Los tokens podrán volver a usar {{address}}. Se envía un aviso a {{main}}."
+      },
+      "remove": {
+        "title": "¿Eliminar esta dirección?",
+        "body": "{{address}} sale de esta cuenta; volver a añadirla requiere una nueva confirmación. Se envía un aviso a {{main}}."
+      }
+    }
+  },
+  "tokens": {
+    "title": "Tokens de acceso",
+    "name": "Nombre del token",
+    "lifetime": "Duración",
+    "lifetimes": {
+      "default": "30 días (predeterminado)",
+      "7d": "7 días",
+      "90d": "90 días",
+      "365d": "1 año",
+      "forever": "No caduca"
+    },
+    "scopes": "Permisos",
+    "scope": {
+      "mail": {
+        "read": "mail.read",
+        "modify": "mail.modify",
+        "trash": "mail.trash",
+        "send": "mail.send"
+      }
+    },
+    "scopeHint": {
+      "mail": {
+        "read": "buscar y leer correo",
+        "modify": "marcas, carpetas, borradores",
+        "trash": "mover a Spam o Papelera",
+        "send": "enviar, responder y reenviar"
+      }
+    },
+    "limitAddresses": "Solo algunas direcciones",
+    "create": "Crear token",
+    "showOnce": "Copie el token ahora: solo se muestra una vez.",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "dismiss": "Hecho",
+    "none": "Todavía no hay tokens.",
+    "allAddresses": "todas las direcciones",
+    "status": {
+      "active": "Activo",
+      "disabled": "Desactivado",
+      "revoked": "Revocado",
+      "idle": "Desactivado — 30 días sin uso"
+    },
+    "disable": "Desactivar",
+    "enable": "Activar",
+    "reenable": "Reactivar",
+    "revoke": "Revocar",
+    "created": "Creado",
+    "expires": "Caduca",
+    "never": "nunca",
+    "lastUsed": "Último uso",
+    "neverUsed": "sin usar",
+    "foreverTitle": "Un token que no caduca",
+    "foreverBody": "Quien tenga este token puede usar su buzón hasta que lo revoque. Aun así, todo token se desactiva tras 30 días sin uso, y solo usted puede reactivarlo desde esta página.",
+    "foreverConfirm": "Crearlo de todos modos",
+    "revokeTitle": "¿Revocar este token?",
+    "revokeBody": "\"{{name}}\" deja de funcionar al instante y no se puede volver a activar."
+  }
+}

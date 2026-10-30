@@ -35,6 +35,11 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   (owner of the new `mcp` database, column-level read-only catalogue grants, never
   `mailbox.password`).
 - Added: `backup_db.sh` writes a third archive, `maild_mcp_*.sql.gz`.
+- Added (P1, in progress): MCP user page (React, EN/ES) with mailbox-password login + ALTCHA,
+  secondary addresses confirmed by magic link, personal access tokens (30-day idle rule); the
+  MCP endpoint `/api/v1/mcp` with eight read tools; audit/access/error logs; the domain
+  allow-list CLI `manage.py mcp_domains`. New optional variables: `MCP_PUBLIC_URL`,
+  `MCP_TRUSTED_PROXIES`, `MCP_SMTP_HOST`, `MCP_SMTP_PORT`, `MCP_ACCESS_TTL`, `MCP_USER_SESSION_TTL`.
 - Security: `rehash-password.sh` skips master-user logins — without it the first MCP access to
   a mailbox still on a legacy `$1$` hash would have replaced that user's password with the
   master password.

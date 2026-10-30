@@ -30,7 +30,7 @@ Rules:
 | Phase | Scope (proposal §13) | Status | Started | Done | Verified |
 |-------|----------------------|--------|---------|------|----------|
 | P0 | mda master user + rehash fix; `MCP_DB` + `ensure_roles.sh` + migration 003; compose chain; empty `mcp` container with `/healthz` + service mailbox | verified | 2026-10-29 | 2026-10-29 | 2026-10-29 |
-| P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | — | | | |
+| P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | done | 2026-10-29 | 2026-10-30 | |
 | P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | — | | | |
 | P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | — | | | |
 | P3 | Admin panel (all groups), master tokens, external SMTP + test | — | | | |
@@ -94,26 +94,76 @@ Log
 
 ## P1 — User side + read access
 
-Status: —
+Status: done (clean-stack verification pending)
 
 Checklist
-- [ ] User login via IMAP LOGIN (STARTTLS) + ALTCHA + lockout; domain allow-list (catalogue, deny by default)
-- [ ] Accounts, main address, MCP master switch
-- [ ] Secondary addresses: magic link (24 h), resend backoff 2^n from 1 min, disable/remove + notices, global uniqueness + "Already in use" + postmaster notice (throttled), owner-wins on pending
-- [ ] PATs: create/list/enable/disable/revoke, forever warning, 30-day idle disable + re-enable from UI only
-- [ ] Web session (short JWT + rotating refresh cookie, 24 h)
-- [ ] MCP endpoint `/api/v1/mcp` (SDK v2, stateless), per-request authorization chain (§8.2), scopes
-- [ ] Read tools: `list_accounts`, `list_folders`, `check_new_mail`, `search_emails`, `get_email` (mark read default), `get_thread`, `get_attachment`, `get_quota`
-- [ ] IMAP pool per mailbox (≤ 3), cert verification against `mail.crt`
-- [ ] Audit/access/error logs (date-named files, JSON lines)
-- [ ] User SPA (React, EN/ES, mobile), `i18n:check`
-- [ ] Tests: `test.sh` (login, token auth 401/403, read tools on fixtures, search does not set `\Seen`, `get_email` sets it, idle-disable), pytest, `pwa-test` user flows
-- [ ] Full `./test.sh` green
+- [x] User login via IMAP LOGIN (STARTTLS) + ALTCHA + lockout; domain allow-list (catalogue, deny by default)
+- [x] Accounts, main address, MCP master switch
+- [x] Secondary addresses: magic link (24 h), resend backoff 2^n from 1 min, disable/remove + notices, global uniqueness + "Already in use" + postmaster notice (throttled), owner-wins on pending
+- [x] PATs: create/list/enable/disable/revoke, forever warning, 30-day idle disable + re-enable from UI only
+- [x] Web session (short JWT + rotating refresh cookie, 24 h)
+- [x] MCP endpoint `/api/v1/mcp` (SDK v2, stateless), per-request authorization chain (§8.2), scopes
+- [x] Read tools: `list_accounts`, `list_folders`, `check_new_mail`, `search_emails`, `get_email` (mark read default), `get_thread`, `get_attachment`, `get_quota`
+- [x] IMAP pool per mailbox (≤ 3), cert verification against `mail.crt` (leaf pin)
+- [x] Audit/access/error logs (date-named files, JSON lines)
+- [x] User SPA (React, EN/ES, mobile), `i18n:check`
+- [x] Tests: `test.sh` (login, token auth 401/403, read tools on fixtures, search does not set `\Seen`, `get_email` sets it, idle-disable), pytest, `pwa-test` user flows — K1–K22, 14 pytest units, 6 `run.sh mcp` flows
+- [x] Full `./test.sh` green — 127 passed / 0 failed / 0 skipped, 4m56s
+- [x] Manual check by Pavel: Claude Code reads a fixture mailbox (exit criterion, manual half)
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-29 | action | Baseline inherited from P0's verification run (clean stack, 105 passed / 0 failed / 0 skipped). P1 → Initiated. |
+| 2026-10-29 | decision | **Asked Pavel** — service mail before P1b exists: submit to **`amavis:10024`** now (`MCP_SMTP_PORT` tunable); P1b switches the default to `10026`. |
+| 2026-10-29 | decision | **Asked Pavel** — domain allow-list before the P3 panel: **CLI** `manage.py mcp_domains list\|allow\|deny <domain>`, audited, kept afterwards as the fallback beside the UI. |
+| 2026-10-29 | decision | **Asked Pavel** — exit criterion check: **scripted** SDK-client test in `test.sh` (PAT against `http://mcp:8080/api/v1/mcp`) **plus a manual** MCP Inspector / Claude Code check by Pavel with commands I provide; his Claude Code config is not touched. |
+| 2026-10-29 | decision | Library pins checked today: `mcp` 2.3.0, django-ninja 1.7.3, imapclient 4.1.0, altcha 2.3.0, PyJWT 2.15.1, html2text 2025.4.15, nh3 0.3.7, cryptography 50.0.2, pytest 9.2.0, pytest-django 4.14.0. SPA reuses the AdminNG PWA stack (React 18, Vite 5, Tailwind 3, i18next, react-router 6). |
+| 2026-10-29 | decision | **Asked Pavel** — absolute links: new variable **`MCP_PUBLIC_URL`** (default `https://<MCP_HOSTNAME>`, env.dev `http://localhost:8085`); never derived from request headers. |
+| 2026-10-29 | decision | **Asked Pavel** — a secondary that is **disabled** in account A and logs in with its own password: **login refused** ("disabled in another account") until A re-enables or removes it. (Active secondary → lands on A; pending → owner wins, as in §7.3.) |
+| 2026-10-29 | decision | **Asked Pavel** — MCP master switch default for a new account: **on**. |
+| 2026-10-29 | decision | mda TLS: the mcp **pins** the leaf certificate (byte-identical to the first cert in `MCP_IMAP_CA_FILE`) instead of chain + hostname checks: the dev cert is self-signed `CN=maild.cu` without SAN/extensions, and in production `/certs/mail.crt` is issued for the public mail host, never `mda` (proposal §5.3 allows "or pins it"). |
+| 2026-10-29 | decision | ALTCHA protocol **v1** (SHA-256 PoW, `create/verify/solve_challenge_v1`): every widget version accepts it; solutions single-use via the `altcha_used` table. |
+| 2026-10-29 | decision | Duration variables use the proposal's notation (`15m`, `24h`, `7d`): `MCP_ACCESS_TTL` (15m), `MCP_USER_SESSION_TTL` (24h). User-policy defaults live in `mcpcore/policy.py` until the P3 settings table. |
+| 2026-10-29 | decision | Every address of an account (the main one too, `is_main`) is an `account_address` row, so one unique column enforces D11. Refresh-token reuse detection via `web_session.prev_refresh_hash` (reuse of the last superseded token revokes the session). Tokens get `reenabled_at` so re-enabling restarts the D12 idle clock without faking `last_used_at`. |
+| 2026-10-29 | decision | MCP auth is done by a bearer wrapper in `asgi.py` (not the SDK's `token_verifier`): it can answer 403 `mcp_disabled` and 403 `insufficient_scope` (reads the JSON-RPC body for `tools/call`) as §8.2 requires; the SDK only gives 401. 401 carries `WWW-Authenticate: Bearer resource_metadata=…`. Principal reaches the tools via `request.state`. Lifespan is now **on** (the SDK session manager + the hourly jobs loop). |
+| 2026-10-29 | decision | SDK v2 calls tools with the alias as keyword, so `from` cannot be a parameter: the search filter is named **`sender`** (deviation from §8.3 `from?`; P2's `send_email` will use the same name). |
+| 2026-10-29 | finding | Dovecot returns "No quota" without a QUOTAROOT line for an unlimited mailbox (quota 0); imapclient's `get_quota_root` crashes on it → treated as unlimited. |
+| 2026-10-29 | decision | Dev `MCP_PUBLIC_URL` default (`http://localhost:8085`) is set in `docker-compose-dev.yml`, not in `env.dev`: editing env.dev recreates every service and re-triggers the stale-peer-IP problem found in P0. New passthrough keys in all four compose files: `MCP_PUBLIC_URL`, `MCP_TRUSTED_PROXIES`, `MCP_SMTP_HOST`, `MCP_SMTP_PORT`, `MCP_ACCESS_TTL`, `MCP_USER_SESSION_TTL` (gitlab still in sync). |
+| 2026-10-30 | finding | Domain allow-list cache bug (found by K3–K5): caching the whole verdict for 30 s per worker kept a domain denied after `mcp_domains allow`. Now only the catalogue state is cached; the policy row is read on every call. |
+| 2026-10-30 | finding | test.sh cleanup: raw `DELETE FROM account` failed on FKs (Django's CASCADE is ORM-side, not `ON DELETE`); children (token, account_address) are deleted first now. |
+| 2026-10-30 | action | Section K (K1–K22) added to `test.sh`; iterated with a scratch runner (suite preamble + section K). Last run: **19 passed / 3 failed** (K15, K16, K18 — all from one test bug, see below). Full suite not run for P1 yet. |
+| 2026-10-30 | action | **Session paused by Pavel.** Nothing committed for P1. |
+| 2026-10-30 | action | Resumed (host rebooted; stack came back healthy on its restart policies). K15 link decoding fixed (`policy=email.policy.default` + `get_content()`), dev leftovers cleaned. Section K alone: **22 passed / 0 failed**. |
+| 2026-10-30 | decision | SPA in `mcp/ui`, pinned to the **AdminNG lockfile versions** (React 18.3.1, Vite 5.4.21, Tailwind 3.4.19, i18next 23, react-router 6.30, TS 5.6.3) as D4/§7.1 ask, not today's majors (React 19, Vite 8, Tailwind 4). ALTCHA widget **2.3.0** (last 2.x, speaks the v1 protocol the server uses). `scripts/check-i18n.mjs` copied from AdminNG; `npm run build` = i18n:check + tsc + vite. Node stage `node:26-alpine` in `mcp/Dockerfile`; output split into `ui-dist/{index.html,assets/,root/}`; WhiteNoise marks Vite-hashed files immutable. Builds and lockfile generation run in containers (no host `node_modules`). |
+| 2026-10-30 | decision | The magic link is a fragment (`/confirm#token`, never in logs or Referer) and confirming needs an explicit button press (a mail scanner pre-fetching the link confirms nothing); the page drops the token from the address bar. |
+| 2026-10-30 | action | Browser pane check: the page renders, the widget loads under the CSP. I did not complete the ALTCHA there myself (assistants do not solve CAPTCHAs interactively); the Playwright flows exercise it instead. |
+| 2026-10-30 | decision | `pwa-test` reused for the MCP page (proposal: web UI checks through that harness): new entrypoint mode **`mcp`** (tunnel `localhost:8085 → mcp:8080`, health path configurable via `E2E_HEALTH_PATH`), specs in `tests/mcp/`, ignored by the AdminNG gate (`PWA_TEST_MCP`). Fixture helpers in `lib/mcp.ts` (docker exec, like the AdminNG device CLI). `./adminng/pwa-test/run.sh mcp`: **6 passed** (login with the real widget + reload, switch, token once/masked/revoke, forever warning, magic link → confirm → disable with type-to-confirm, ES + 375 px without horizontal scroll). |
+| 2026-10-30 | finding | Pre-existing, **not touched**: AdminNG's own `run.sh flows` fails at `flows.spec.ts:115` — `getByLabel('Domain', {exact:true})` now matches two selects on the logs screen (`#domain-scope` and the logs filter), a Playwright strict-mode violation. Neither the spec nor the AdminNG UI changed in this work; needs its own fix. |
+| 2026-10-30 | action | pytest units `mcp/tests/test_units.py` (handles bind/tamper/expiry, token hashing, resend backoff, IMAP criteria + binary OR tree, message ids/UIDVALIDITY, idle anchor, durations), run in a throwaway mcp-image container with `/tmp/maild-mcp-p1` as the pip target: **14 passed**. |
+| 2026-10-30 | action | Docs: `env.sample` (6 new optional vars), image ENV defaults (`MCP_SMTP_*`, TTLs), `.agents/services/{catalog,configuration}.md`, `.agents/devops/workflows.md`, `AGENTS.md`, `adminng/pwa-test/README.md`, `mcp/README.md` (incl. the `claude mcp add` command), `Changelog.md`. |
+| 2026-10-30 | action | Full `./test.sh` on the running dev stack: **127 passed / 0 failed / 0 skipped, 4m56s** (105 + K1–K22). P1 → **done**. Open: Pavel's manual MCP client check, then the clean-stack verification. Nothing committed. Scratch `/tmp/maild-mcp-p1/` kept until P1 is verified. |
+| 2026-10-30 | finding | Pavel's first Claude Code attempt listed the 8 tools but every prompt failed with `ECONNREFUSED` + "claude.ai connectors are disabled". Cause on his workstation, not in MailD: `~/.bashrc` exported `ANTHROPIC_BASE_URL=http://127.0.0.1:8080` + `ANTHROPIC_AUTH_TOKEN` from an old local-model setup (nothing listens there), so the CLI's *model* requests were refused. The mcp access/audit logs showed every MCP request answered 200 and no tool call. |
+| 2026-10-30 | action | **Manual exit-criterion check passed (Pavel)**: Claude Code CLI with a PAT checks the inbox and reads mails through `maild-dev` (`http://localhost:8085/api/v1/mcp`). P1 exit criterion met. |
+| 2026-10-30 | decision | P1 clean-stack verification **deferred**: wiping `ldata/` now would delete the PAT Pavel's Claude Code uses. To be run at a convenient point (it does not block P1b, whose baseline is P1's full pass). |
+| 2026-10-30 | action | P1 committed on branch `mcp`. |
+
+### Pause notes (P1, 2026-10-30 — resolved the same day)
+
+Done (code in the tree, uncommitted):
+- Backend: `mcpcore/{policy,crypto,audit,domains,imap,mailer,webauth,accounts,tokens,authz,mail,jobs}.py`, models + migration `0002_p1_accounts_tokens`, CLIs `mcp_domains` and `mcp_jobs`, `webapi/api.py` (login/refresh/logout/me/switch/prefs/addresses/confirm/tokens), `mcpserver/server.py` (8 read tools), root router `asgi.py`, `mcp/tests/{altcha_solve,mcp_call}.py` (copied into the image), settings + requirements pinned.
+- Verified by hand on the dev stack: login with ALTCHA, PAT, all read tools through the SDK client, `\Seen` semantics, cursor/watermark/thread, 401/403 statuses, SPA fallback route.
+- `test.sh` section K + its cleanup.
+
+Next steps:
+1. **Fix K15's link decoding in `test.sh`** (not applied — the edit was rejected when the session stopped): in the python one-liner that extracts the magic link, parse with `policy=email.policy.default` and use `get_content()` (the plain `Message` has no `get_body`). This should also turn K16/K18 green (they depend on bob being confirmed).
+2. Clean the dev mcp DB leftovers from the manual repro before re-running: alice's account with a pending `bob@example.net` and the magic-link mail in bob's INBOX (`DELETE FROM web_session; DELETE FROM token; DELETE FROM account_address; DELETE FROM account;` in db `mcp`, and `doveadm expunge -u bob@example.net mailbox INBOX header From "MailD MCP"`). `example.net` is currently **allowed** in `domain_policy` (dev).
+3. User SPA (React 18 + Vite + Tailwind + i18next EN/ES, `i18n:check`): login (ALTCHA widget), account (switch, addresses with confirm dialogs, resend countdown), tokens (create with forever warning, list, enable/disable/revoke), `/confirm` page; node:26-alpine build stage in `mcp/Dockerfile` → `/app/ui-dist` (WhiteNoise already wired, CSP in `views.spa`).
+4. `pwa-test` user flows; pytest (unit: handles, idle rule, criteria builder) run in a container with `/tmp/maild-mcp-p1` mounted.
+5. Docs (`env.sample`: `MCP_PUBLIC_URL`, `MCP_TRUSTED_PROXIES`, `MCP_SMTP_*`, TTLs; `.agents/`, mcp README, Changelog), full `./test.sh`, then the manual MCP Inspector / Claude Code check by Pavel.
+- Deferred from §7.3 to P2: the Preferences section (send confirmation etc.) except language; read rate limiting.
+- Scratch dir `/tmp/maild-mcp-p1/` (scratch runner) stays until P1 ends.
 
 ---
 
