@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 167 checks
+./test.sh                 # 175 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -152,6 +152,13 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   denied consent, the grants in the user's token list (revoke only) and the audit events. It
   deletes the scripted clients and the fixtures' grants on exit. The consent page has its browser
   flows in `./adminng/pwa-test/run.sh mcp` (`tests/mcp/oauth.spec.ts`).
+- Section P covers the P5 REST mirror: the OpenAPI document (one operation per MCP tool, scopes,
+  resolvable refs), SKILL.md, parity (the same calls through the SDK client and through REST
+  return the same results on the fixtures), `get_attachment` as raw bytes, writes and the two-step
+  confirmation over REST, the error statuses, the token rules (OAuth refused, master token with
+  `X-MailD-Act-As`) and the audit records. It removes its `maild-p5-*` mail, the `p5-*` master
+  token and its OAuth client on exit. The user page's connection card has a browser flow in
+  `./adminng/pwa-test/run.sh mcp`.
 - Section L covers the amavis listeners (D13): 10024 admits only the mta and 10026 only
   cron/mcp (cron and api probes, the `DENIED ACCESS` log line), a DKIM-signed delivery through
   10026, and the peer-IP watchdog (cron is stopped, a placeholder container takes a free

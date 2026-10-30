@@ -465,7 +465,9 @@ more. See `.agents/services/provisioning.md`.
   read-only rootfs + `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`. Design and decisions:
   `mcp/technical-proposal.md`; delivery status: `mcp/progress.md`.
 - Routing (`mcp/app/asgi.py`, uvicorn `--lifespan on`): `/api/v1/mcp` → bearer wrapper → MCP SDK
-  2.3 (`MCPServer`, stateless Streamable HTTP, JSON responses, Host/Origin allow-list); everything
+  2.3 (`MCPServer`, stateless Streamable HTTP, JSON responses, Host/Origin allow-list);
+  `/api/v1/mail/<tool>` → the same bearer checks → the REST mirror (`mcp/app/restapi`);
+  `/api/v1/openapi.json` and `/api/v1/skill.md` → generated public documents; everything
   else → Django (`/healthz`, `/webapi/*` django-ninja, the SPA at `/` + `/confirm`, hashed assets
   under `/assets/` via WhiteNoise, cached immutable; `index.html` no-cache with a strict CSP).
   The lifespan also runs the jobs loop: IMAP pool sweep every 30 s, hourly jobs under a pg
@@ -561,6 +563,26 @@ more. See `.agents/services/provisioning.md`.
   user's token list by client name ("app connection", revoke only); `/oauth/revoke` (RFC 7009)
   takes the whole grant for a refresh token. Tables `oauth_client`, `oauth_request`,
   `oauth_code`; `mcp_jobs` drops expired codes/requests and day-old expired access tokens.
+- **REST mirror (P5)** `POST /api/v1/mail/<tool>`, JSON body = the MCP tool's arguments, 200 =
+  its structured result (`get_attachment`: the file itself, with Content-Type and an RFC 6266
+  filename). It calls the tools through the SDK's tool manager (`server.call_tool`, the Principal
+  handed over in a context variable), so validation, authorization, two-step confirmations and
+  audit are the MCP ones. Tokens: PATs and master tokens (`X-MailD-Act-As`) only; an OAuth access
+  token gets 401 `wrong_audience` (it is bound to `/api/v1/mcp`, RFC 8707). Errors are JSON
+  `{error, message[, retryable][, details]}`: 401 (`WWW-Authenticate: Bearer realm="MailD MCP
+  REST"`, no OAuth discovery), 403 `insufficient_scope` / `forbidden` / `mcp_disabled`, 404
+  `unknown_tool`, 405 non-POST, 400 `invalid_json` / `mail_error` / `confirmation_invalid` /
+  `invalid_handle`, 422 `invalid_arguments` (`details` per field), 429 `rate_limited`, 413, 503
+  `mail_unavailable` / `send_unavailable`. Tool failures carry their HTTP status in
+  `CodedToolError` (MCP clients still only see the message). `/api/v1/openapi.json` (OpenAPI 3.1,
+  one operation per tool, the tools' own JSON Schemas with `$defs` hoisted into
+  `components.schemas`, scope per operation) and `/api/v1/skill.md` (Agent Skills frontmatter
+  `name: maild-mail`, usage rules, the tool list) are generated from the tool list at first use.
+  Audit: `bearer.access/rest` with the tool, then the tool's own record.
+- **Connection help (P5)** on the user page: copy-ready settings built from the page origin for
+  Claude and ChatGPT (connector URL, OAuth), Claude Code (`claude mcp add --transport http`, OAuth
+  or PAT header), Gemini CLI (`httpUrl` + header), `mcp-remote` (stdio bridge) and REST + links to
+  the OpenAPI and SKILL.md documents.
 - **User notifications (P3)**, preferences `notify_new_token`, `notify_new_client` (first use of a
   token from a new IP/client pair), `notify_master_access`; mailed to the main address.
 - **Service mail** (magic links, notices, admin codes) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10026, bank

@@ -41,6 +41,7 @@ export function dropAccounts(domain: string): void {
   mcpSql(
     `DELETE FROM web_session WHERE kind='user' AND subject_id IN ${ids}; ` +
       `DELETE FROM oauth_code WHERE account_id IN ${ids}; ` +
+      `DELETE FROM confirm_handle WHERE token_id IN (SELECT id FROM token WHERE account_id IN ${ids}); ` +
       `DELETE FROM token WHERE account_id IN ${ids}; ` +
       `DELETE FROM account_address WHERE account_id IN ${ids}; ` +
       `DELETE FROM account WHERE main_email LIKE '%@${domain}'; ` +

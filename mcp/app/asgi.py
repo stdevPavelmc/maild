@@ -1,7 +1,9 @@
 """MailD MCP — root ASGI application (served by uvicorn), proposal §3.1.
 
 - `/api/v1/mcp` → bearer wrapper → MCP SDK app (stateless Streamable HTTP)
-- everything else → Django (SPA, /webapi, /healthz)
+- `/api/v1/mail/<tool>` → the same bearer wrapper → the REST mirror (restapi, P5; no OAuth tokens)
+- `/api/v1/openapi.json`, `/api/v1/skill.md` → generated public documents
+- everything else → Django (SPA, /webapi, /healthz, OAuth)
 - lifespan → the SDK app's session manager + the hourly jobs loop
 - every HTTP request → one access-log line (audit.access)
 
@@ -31,6 +33,7 @@ django_app = get_asgi_application()
 from django.conf import settings  # noqa: E402
 from django.db import connections  # noqa: E402
 
+import restapi  # noqa: E402
 from mcpcore import audit, authz, jobs, notices, tokens  # noqa: E402
 from mcpserver.server import http_app  # noqa: E402
 
@@ -123,30 +126,43 @@ def _act_as_check(p: "authz.MasterPrincipal") -> str:
         connections.close_all()
 
 
-async def mcp_endpoint(scope, receive, send):
-    ip = client_ip(scope)
-    ua = _header(scope, b"user-agent")[:255]
+def _rest_unauthorized(error: str = "") -> list:
+    value = 'Bearer realm="MailD MCP REST"' + (f', error="{error}"' if error else "")
+    return [(b"www-authenticate", value.encode())]
+
+
+async def authenticate(scope, send, ip: str, ua: str, rest: bool = False):
+    """The bearer checks shared by the MCP endpoint and the REST mirror → a Principal, or None after
+    answering the request. The REST mirror refuses OAuth access tokens (bound to the MCP resource)."""
     auth = _header(scope, b"authorization")
     raw = auth[7:].strip() if auth[:7].lower() == "bearer " else ""
+    challenge = _rest_unauthorized if rest else _www_authenticate
     result = await asyncio.to_thread(_bearer_lookup, raw)
     if result.token is None:
         if raw:
             audit.event("bearer.access", "denied", result=result.reason, ip=ip, ua=ua, level="warning")
         await _json(send, 401, {"error": "invalid_token" if raw else "unauthorized", "reason": result.reason},
-                    _www_authenticate("invalid_token" if raw else ""))
-        return
+                    challenge("invalid_token" if raw else ""))
+        return None
     tok = result.token
+    if rest and tok.kind == tok.OAUTH_ACCESS:
+        audit.event("bearer.access", "denied", result="wrong_audience", token={"public_id": tok.public_id,
+                    "kind": tok.kind}, ip=ip, ua=ua, level="warning")
+        await _json(send, 401, {"error": "invalid_token", "reason": "wrong_audience",
+                                "error_description": "OAuth tokens are for /api/v1/mcp; the REST API takes a "
+                                                     "personal access token"}, challenge("invalid_token"))
+        return None
     if tok.kind == tok.MASTER:
         if not tokens.ip_allowed(tok, ip):
             audit.event("security", "master_token_use", result="ip_not_allowed", token={"public_id": tok.public_id,
                         "kind": tok.kind}, ip=ip, ua=ua, level="warning")
             await _json(send, 403, {"error": "ip_not_allowed", "error_description": "source address not in the token's allowlist"})
-            return
+            return None
         act_as = _header(scope, b"x-maild-act-as").strip().lower()
         if not act_as:
             await _json(send, 400, {"error": "act_as_required",
                                     "error_description": "master tokens need the X-MailD-Act-As: <mailbox> header"})
-            return
+            return None
         p = authz.MasterPrincipal(token=tok, account=None, ip=ip, client=ua,
                                   request_id=scope["state"]["request_id"], act_as=act_as)
         reason = await asyncio.to_thread(_act_as_check, p)
@@ -154,7 +170,7 @@ async def mcp_endpoint(scope, receive, send):
             audit.event("security", "master_token_use", result=reason, actor=p.audit_actor(), token=p.audit_token(),
                         ip=ip, ua=ua, level="warning")
             await _json(send, 403, {"error": "act_as_denied", "error_description": f"{act_as}: {reason}"})
-            return
+            return None
         audit.event("security", "master_token_use", actor=p.audit_actor(), token=p.audit_token(), ip=ip, ua=ua,
                     request_id=p.request_id)
     else:
@@ -165,24 +181,45 @@ async def mcp_endpoint(scope, receive, send):
                     token=p.audit_token(), ip=ip, ua=ua)
         await _json(send, 403, {"error": "mcp_disabled",
                                 "error_description": "MCP access is switched off for this account"})
-        return
+        return None
+    return p
 
-    # buffer the body (bounded) to read the JSON-RPC method, then replay it downstream
+
+async def read_body(receive, send) -> bytes | None:
+    """The whole request body (bounded), or None after a disconnect / a 413 answer."""
     body = b""
     more = True
     while more:
         message = await receive()
         if message["type"] == "http.disconnect":
-            return
+            return None
         body += message.get("body", b"")
         more = message.get("more_body", False)
         if len(body) > MAX_BODY:
             await _json(send, 413, {"error": "request_too_large"})
-            return
+            return None
+    return body
+
+
+def _scope_denied(p, ip: str, ua: str, needed: str):
+    audit.event("security", "scope_denied", result="denied", actor=p.audit_actor(), token=p.audit_token(),
+                ip=ip, ua=ua, detail={"needed": needed}, level="warning")
+
+
+async def mcp_endpoint(scope, receive, send):
+    ip = client_ip(scope)
+    ua = _header(scope, b"user-agent")[:255]
+    p = await authenticate(scope, send, ip, ua)
+    if p is None:
+        return
+
+    # buffer the body (bounded) to read the JSON-RPC method, then replay it downstream
+    body = await read_body(receive, send)
+    if body is None:
+        return
     missing = [s for s in _scope_needed(body) if s not in p.scopes]
     if missing:
-        audit.event("security", "scope_denied", result="denied", actor=p.audit_actor(), token=p.audit_token(),
-                    ip=ip, ua=ua, detail={"needed": missing[0]}, level="warning")
+        _scope_denied(p, ip, ua, missing[0])
         await _json(send, 403, {"error": "insufficient_scope", "scope": missing[0]},
                     _www_authenticate("insufficient_scope", missing[0]))
         return
@@ -200,6 +237,41 @@ async def mcp_endpoint(scope, receive, send):
 
     scope["state"]["principal"] = p
     await mcp_app(scope, replay, send)
+
+
+async def rest_endpoint(scope, receive, send):
+    """POST /api/v1/mail/<tool>: the same checks as the MCP endpoint, then the tool itself."""
+    tool = scope["path"][len(restapi.PREFIX) + 1:]
+    if scope.get("method") != "POST":
+        await _json(send, 405, {"error": "method_not_allowed", "error_description": "use POST"}, [(b"allow", b"POST")])
+        return
+    ip = client_ip(scope)
+    ua = _header(scope, b"user-agent")[:255]
+    p = await authenticate(scope, send, ip, ua, rest=True)
+    if p is None:
+        return
+    if tool not in authz.TOOL_SCOPES:
+        await _json(send, 404, {"error": "unknown_tool", "error_description": "see /api/v1/openapi.json"})
+        return
+    body = await read_body(receive, send)
+    if body is None:
+        return
+    try:
+        args = json.loads(body or b"{}")
+    except ValueError:
+        args = None
+    if not isinstance(args, dict):
+        await _json(send, 400, {"error": "invalid_json", "error_description": "the body must be a JSON object"})
+        return
+    needed = authz.TOOL_SCOPES[tool]
+    if needed not in p.scopes:
+        _scope_denied(p, ip, ua, needed)
+        await _json(send, 403, {"error": "insufficient_scope", "scope": needed},
+                    _rest_unauthorized("insufficient_scope"))
+        return
+    audit.event("bearer.access", "rest", actor=p.audit_actor(), token=p.audit_token(), ip=ip, ua=ua,
+                request_id=p.request_id, detail={"tool": tool})
+    await restapi.call(send, tool, args, p)
 
 
 async def lifespan(scope, receive, send):
@@ -257,6 +329,10 @@ async def application(scope, receive, send):
     try:
         if path == MCP_PATH or path.startswith(MCP_PATH + "/"):
             await mcp_endpoint(scope, receive, logged_send)
+        elif path.startswith(restapi.PREFIX + "/"):
+            await rest_endpoint(scope, receive, logged_send)
+        elif scope.get("method") in ("GET", "HEAD") and await restapi.public_document(path, logged_send):
+            pass
         else:
             await django_app(scope, receive, logged_send)
     finally:

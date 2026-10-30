@@ -18,7 +18,12 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## Unreleased — MailD MCP (P0, P1, P1b, P2, P3, P4 — `mcp/progress.md`)
+## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Added (P5): a REST mirror of the 21 MCP tools — `POST /api/v1/mail/<tool>` with the tool's
+  arguments as JSON, the same results, checks and audit as over MCP — for scripts and
+  skill-based agents, with personal access or master tokens. Generated `/api/v1/openapi.json`
+  (OpenAPI 3.1) and `/api/v1/skill.md`. The MCP user page gains a "Connect an assistant" card with
+  copy-ready settings for Claude, ChatGPT, Claude Code, Gemini CLI, mcp-remote and REST.
 - Added (P4): OAuth 2.1 for the MCP, so Claude and ChatGPT can connect with "Add custom
   connector" and a sign-in instead of a pasted token: discovery (RFC 9728 / RFC 8414),
   PKCE S256, client ID metadata documents (fetched with SSRF protections) and dynamic client

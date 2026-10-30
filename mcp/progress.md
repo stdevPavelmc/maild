@@ -35,7 +35,7 @@ Rules:
 | P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | done | 2026-10-30 | 2026-10-30 | |
 | P3 | Admin panel (all groups), master tokens, external SMTP + test | done | 2026-10-30 | 2026-10-30 | |
 | P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | done | 2026-10-30 | 2026-10-30 | connector test in Claude/ChatGPT pending (needs a public host) |
-| P5 | REST mirror, OpenAPI, SKILL.md, docs | — | | | |
+| P5 | REST mirror, OpenAPI, SKILL.md, docs | done | 2026-10-30 | 2026-10-30 | |
 | Final | All phases `verified` + goal review against `Idea.md` and the proposal | — | | | |
 
 ---
@@ -307,24 +307,35 @@ Log
 | 2026-10-30 | action | Tests: `test.sh` section O (O1–O7: metadata, DCR and CIMD end to end through `mcp/tests/oauth_flow.py` with the official SDK client, CIMD SSRF refusals, redirect/PKCE/resource rules, deny, grant list, audit) run alone: **7/7**; cleanup removes the scripted clients and the fixtures' grants. `run.sh mcp`: **14/14** (new `tests/mcp/oauth.spec.ts`: sign in on the consent page → narrow scopes → allow → loopback redirect with code/state/iss → code exchange → the app connection is revoked from the list; deny → `access_denied`, and the request cannot be replayed). pytest **26/26** (+ PKCE, public-address rule, redirect-URI/metadata rules, redirect matching), scratch `/tmp/maild-mcp-p4`. |
 | 2026-10-30 | finding | First full `./test.sh`: 166/1 — O6 had passed alone only because grants left by earlier manual runs were still active; the scripted flows revoke both of their own grants, so the full run listed none. O6 now creates its own live grant (approve → code exchange with a verifier) and revokes it; checked from an empty grant state. Test bug, not a product bug. |
 | 2026-10-30 | action | Full `./test.sh`: **167 passed / 0 failed / 0 skipped** (160 + O1–O7); no OAuth clients or grants left behind. P4 → **done**, with the Claude / ChatGPT hosted-connector check **pending** (needs a public HTTPS host). Nothing committed yet. |
+| 2026-10-30 | action | P4 committed on branch `mcp` (`d7317f8`). |
 
 ---
 
 ## P5 — REST mirror, skill, docs
 
-Status: —
+Status: done
 
 Checklist
-- [ ] `/api/v1/mail/*` mirror, `/api/v1/openapi.json`, `/api/v1/skill.md`
-- [ ] Connection help on the user page (Claude, ChatGPT, Claude Code, Gemini CLI, mcp-remote, REST)
-- [ ] `mcp/README.md`, `.agents/` (catalog, configuration, overview), `env.sample`, `Changelog.md`, `README.md`
-- [ ] Tests: REST parity with MCP tools on fixtures
-- [ ] Full `./test.sh` green
+- [x] `/api/v1/mail/*` mirror, `/api/v1/openapi.json`, `/api/v1/skill.md`
+- [x] Connection help on the user page (Claude, ChatGPT, Claude Code, Gemini CLI, mcp-remote, REST)
+- [x] `mcp/README.md`, `.agents/` (catalog, overview, workflows), `Changelog.md`, `README.md`, `AGENTS.md` — no new variables, so `env.sample` and `configuration.md` are unchanged
+- [x] Tests: REST parity with MCP tools on fixtures — P1–P8, 1 `run.sh mcp` flow, 2 pytest units
+- [x] Full `./test.sh` green — 175 passed / 0 failed / 0 skipped
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-30 | action | Baseline inherited from P4's full pass (167/0/0, commit `d7317f8`). P5 → Initiated. |
+| 2026-10-30 | decision | **Asked Pavel** — REST shape = **`POST /api/v1/mail/<tool>`**, one endpoint per MCP tool, JSON body = the tool's arguments, 200 = its structured result; `get_attachment` answers with the file itself. Built on the SDK's own tool manager (`server.call_tool`; the Principal goes in a context variable, `REST_PRINCIPAL`), so arguments, validation, authorization, confirmations and audit are the MCP tools' — the proposal's "same service layer" without a second copy of the 21 handlers. |
+| 2026-10-30 | decision | **Asked Pavel** — REST accepts **personal access and master tokens only**; an OAuth access token gets 401 `wrong_audience` (it is bound to `/api/v1/mcp`, RFC 8707 — the P4 audience binding stays strict). The 401 challenge on REST is `Bearer realm="MailD MCP REST"`, without the OAuth `resource_metadata` pointer. |
+| 2026-10-30 | decision | HTTP mapping of tool failures: the tools now raise `CodedToolError` (a `ToolError` with status + code; MCP clients still see only the message): 403 `forbidden` (address / folder / preference), 400 `mail_error` / `confirmation_invalid` / `invalid_handle`, SendError codes (429 `rate_limited`, 413 `too_large`, 403 sender/external, 502/503), 503 `mail_unavailable`; argument validation 422 `invalid_arguments` with one entry per field (never echoing the input); anything unexpected 500 without detail (logged to the errors log). The wrapper's own answers: 401, 403 `insufficient_scope` / `mcp_disabled` / master-token errors, 404 `unknown_tool`, 405, 400 `invalid_json`, 413. `asgi.py`'s bearer checks were split out (`authenticate`, `read_body`) and are shared by both endpoints. |
+| 2026-10-30 | decision | `/api/v1/openapi.json` (OpenAPI 3.1) and `/api/v1/skill.md` are **generated from the tool list** at first use (cached per process), not hand-written: each operation's request/response schema is the tool's own JSON Schema, with `$defs` hoisted into `components.schemas` (shared when identical, tool-prefixed on a clash), scope in `security` and the MCP annotations as `x-mcp-annotations`. SKILL.md uses the Agent Skills frontmatter (`name: maild-mail`) and states the rules (list_accounts first, opaque ids/handles, untrusted bodies, two-step confirmations, errors). Both are public (no token). |
+| 2026-10-30 | decision | Connection help = a "Connect an assistant" card on the user page (`pages/Connect.tsx`, EN/ES): Claude and ChatGPT (the connector URL; OAuth), Claude Code (`claude mcp add --transport http`, OAuth or a PAT header), Gemini CLI (`settings.json` with `httpUrl` + header), mcp-remote (stdio bridge config with the token in an env var) and REST (curl + links to openapi.json / SKILL.md). URLs come from the page's own origin, i.e. the public MCP host. |
+| 2026-10-30 | finding | Test bugs while writing section P, no product bugs: P7 first read a stale `K_CODE` (`k_rpc` prints its status, it does not set `K_CODE`) — caught by a stray `200` in the output; and a partial run left P5's confirmation handles behind, which broke the browser suite's account cleanup (FK `confirm_handle → token`). P's cleanup and the pwa `dropAccounts` helper now delete those handles. |
+| 2026-10-30 | action | Tests: `test.sh` section P (P1–P8) run with J+O: **8/8**, nothing left behind. `run.sh mcp`: **15/15** (new: connection card per client, OpenAPI/SKILL.md links, no horizontal scroll at 360 px). pytest **28/28** (+ `$defs` hoisting, REST error mapping), scratch `/tmp/maild-mcp-p5`. |
+| 2026-10-30 | action | Full `./test.sh`: **175 passed / 0 failed / 0 skipped** (167 + P1–P8); nothing left behind (no OAuth clients, p5 master tokens or fixture accounts). Scratch `/tmp/maild-mcp-p5` removed. P5 → **done**. Committed on branch `mcp` (see the next line). Next: the Final review (all phases `verified` + goal review against `Idea.md` and the proposal). |
+| 2026-10-30 | action | P5 committed on branch `mcp` (REST mirror, OpenAPI + SKILL.md, connect card, test.sh section P). |
 
 ---
 

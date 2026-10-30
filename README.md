@@ -31,8 +31,8 @@ TL;DR:
    log in to AdminNG as `MAIL_ADMIN_USER@DEFAULT_DOMAIN`, approve the browser server-side and
    enroll TOTP, then create your users.
 
-The webmail (`webmail.<DEFAULT_DOMAIN>`) and AdminNG (`adminng.<DEFAULT_DOMAIN>`) UIs are
-**not** published directly on production: front them with a reverse proxy / ingress
+The webmail (`webmail.<DEFAULT_DOMAIN>`), AdminNG (`adminng.<DEFAULT_DOMAIN>`) and MailD MCP
+(`mcp.<DEFAULT_DOMAIN>`) UIs are **not** published directly on production: front them with a reverse proxy / ingress
 controller that terminates TLS (Traefik, Nginx, …) on the external `maild` network. The
 stack ships **no** TLS for the web UIs.
 
@@ -51,6 +51,7 @@ To create a really dynamic setup we split the mail server in services:
 - [**AdminNG**](./adminng/) The administration UI: PWA frontend (`adminng`) + FastAPI (`api`) over the catalogue
 - [**MUA**](./mua/) This is the mail user agent, aka: Webmail provided by [Snappy Mail](https://snappymail.eu/)
 - [**Cron**](./cron/) This has to deal with scheduled tasks, backups, cleanups, statistics, etc.
+- [**MCP**](./mcp/) MailD MCP: lets AI assistants (Claude, ChatGPT, Gemini CLI, Claude Code, …) read, organise and send the user's mail — MCP endpoint with OAuth, a REST mirror with OpenAPI and a SKILL.md, a user page and an admin panel (`mcp.<DEFAULT_DOMAIN>`)
 
 Follow the links for each service to get details for each docker image.
 

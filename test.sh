@@ -314,6 +314,7 @@ MCP_K_TOUCHED=0
 MCP_M_TOUCHED=0
 MCP_N_TOUCHED=0
 MCP_O_TOUCHED=0
+MCP_P_TOUCHED=0
 MCP_LEGACY_USER="mcp-legacy-probe@${DOMAIN}"
 MCP_INACTIVE_USER="mcp-inactive-probe@${DOMAIN}"
 cleanup() {
@@ -339,6 +340,19 @@ cleanup() {
             dcx mda rm -rf "/home/vmail/${DOMAIN}/${MCP_LEGACY_USER%%@*}" "/home/vmail/${DOMAIN}/${MCP_INACTIVE_USER%%@*}" \
                 > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+        fi
+        # Phase P (REST mirror): the maild-p5-* messages, the p5-* master token, the p-rest client.
+        if [ "$MCP_P_TOUCHED" = 1 ]; then
+            for p_f in INBOX Trash ; do
+                dcx mda doveadm expunge -u "alice@$DOMAIN" mailbox "$p_f" subject "maild-p5-" > /dev/null 2>&1 || true
+            done
+            dcx db psql -U maild -d mcp -q -c "
+                DELETE FROM confirm_handle WHERE token_id IN (SELECT id FROM token WHERE (kind = 'master' AND name LIKE 'p5-%') OR name IN ('p-all', 'p-read'));
+                DELETE FROM token WHERE kind = 'master' AND name LIKE 'p5-%';
+                DELETE FROM oauth_code WHERE client_id IN (SELECT client_id FROM oauth_client WHERE metadata->>'client_name' = 'p-rest');
+                DELETE FROM oauth_request WHERE client_id IN (SELECT client_id FROM oauth_client WHERE metadata->>'client_name' = 'p-rest');
+                DELETE FROM token WHERE client_id IN (SELECT client_id FROM oauth_client WHERE metadata->>'client_name' = 'p-rest');
+                DELETE FROM oauth_client WHERE metadata->>'client_name' = 'p-rest';" > /dev/null 2>&1 || true
         fi
         # Phase O (OAuth): the scripted clients, their pending requests and codes, the grants of the fixtures.
         if [ "$MCP_O_TOUCHED" = 1 ]; then
@@ -3283,6 +3297,184 @@ else
         t_ok "O7 the audit log records client registration, consent, token issuance and refresh-token reuse"
     else
         t_fail "O7 OAuth audit events"
+    fi
+fi
+
+# ================================= P. MailD MCP REST mirror (P5) ==============
+# mcp/technical-proposal.md §4 and the 2026-10-30 P5 decisions in mcp/progress.md: POST
+# /api/v1/mail/<tool> runs the MCP tools themselves (same arguments, validation, authorization and
+# audit), personal access and master tokens only (OAuth tokens are bound to /api/v1/mcp), plus the
+# generated /api/v1/openapi.json and /api/v1/skill.md. Parity = the same call through the SDK client
+# and through REST returns the same structured result on the fixtures. Test mail is injected from
+# cron through amavis:10026. Self-cleaning: the maild-p5-* messages, the p5-* master token.
+section "P. MailD MCP REST mirror (/api/v1/mail, OpenAPI, SKILL.md, parity with the MCP tools)"
+
+P_TAG="maild-p5-$(chrono | cut -c1-10)"
+P_OUT="$TMPRUN/p.out"
+p_rest() { # <token> <tool> <json> [extra curl args…] → P_CODE, body in $P_OUT
+    local tok="$1" tool="$2" data="$3"; shift 3
+    P_CODE="$(curl -s -o "$P_OUT" -D "$P_OUT.h" -w '%{http_code}' --max-time 60 -X POST "$MCP_HTTP/api/v1/mail/$tool" \
+        ${tok:+-H "Authorization: Bearer $tok"} -H 'Content-Type: application/json' --data "$data" "$@")"
+}
+p_json() { python3 -c "import json,sys; d=json.load(open('$P_OUT')); print(eval(sys.argv[1], {}, {'d': d}))" "$1" 2>/dev/null; }
+p_same() { # <tool> <json> [drop-key] → "same" when MCP structured == REST body (minus drop-key)
+    m_call "$P_PAT" "$1" "$2"; p_rest "$P_PAT" "$1" "$2"
+    python3 - "$M_RES" "$P_OUT" "${3:-}" <<'PYEOF' 2>/dev/null
+import json, sys
+mcp = json.loads(sys.argv[1]); rest = json.load(open(sys.argv[2])); drop = sys.argv[3]
+a = mcp.get("structured") or {}
+for d in (a, rest):
+    d.pop(drop, None)
+print("same" if not mcp.get("is_error") and a == rest and a else f"differs: {json.dumps(a)[:200]} | {json.dumps(rest)[:200]}")
+PYEOF
+}
+
+if [ "$HAVE_DC" != 1 ] || [ -z "$MCP_DB_PW" ] || [ -z "${K_PA:-}" ] ; then
+    t_skip "MailD MCP REST mirror checks (need docker, MCP secrets and the $DOMAIN fixtures)"
+else
+    MCP_P_TOUCHED=1
+    dcx mcp python manage.py mcp_domains allow "$DOMAIN" > /dev/null 2>&1
+    k_login "$M_A" "$K_PA"; P_AT="$K_AT"
+    k_api POST /user/tokens '{"name":"p-all","scopes":["mail.read","mail.modify","mail.trash","mail.send"]}' "$P_AT"; P_PAT="$(k_json "d.get('token','')")"
+    k_api POST /user/tokens '{"name":"p-read","scopes":["mail.read"]}' "$P_AT"; P_PATR="$(k_json "d.get('token','')")"
+    dcx cron sh -c "printf 'attached-%s\n' $P_TAG > /tmp/$P_TAG.txt" > /dev/null 2>&1
+    m_inject "$P_TAG-att" --attach-type text/plain --attach-name "$P_TAG.txt" --attach "@/tmp/$P_TAG.txt"
+    dcx cron rm -f "/tmp/$P_TAG.txt" > /dev/null 2>&1
+    m_call "$P_PAT" search_emails "{\"account\":\"$M_A\",\"subject\":\"$P_TAG-att\",\"limit\":5}"; P_ID="$(m_res "d['structured']['messages'][0]['id']")"
+
+    # P1 — OpenAPI: one operation per MCP tool, each with its scope, every $ref resolvable
+    curl -s --max-time 30 "$MCP_HTTP/api/v1/openapi.json" > "$P_OUT"
+    P1_TOOLS="$(dcx mcp python tests/mcp_call.py "$P_PAT" list 2>/dev/null | tr -d '\r' | sort | paste -sd, -)"
+    P1="$(python3 - "$P_OUT" "$P1_TOOLS" <<'PYEOF' 2>/dev/null
+import json, sys
+d = json.load(open(sys.argv[1])); tools = sys.argv[2].split(",")
+ops = {p.rsplit("/", 1)[1]: v["post"] for p, v in d["paths"].items()}
+schemas = d["components"]["schemas"]
+refs = []
+def walk(n):
+    if isinstance(n, dict):
+        if "$ref" in n: refs.append(n["$ref"])
+        for v in n.values(): walk(v)
+    elif isinstance(n, list):
+        for v in n: walk(v)
+walk(d)
+ok = (d["openapi"].startswith("3.1") and sorted(ops) == tools and len(tools) == 21
+      and all(o["security"][0]["bearer"][0].startswith("mail.") for o in ops.values())
+      and all(r.startswith("#/components/schemas/") and r.rsplit("/", 1)[1] in schemas for r in refs)
+      and "$defs" not in json.dumps(d))
+print("ok" if ok else f"bad ops={sorted(ops)} tools={tools}")
+PYEOF
+)"
+    if [ "$P1" = ok ] ; then
+        t_ok "P1 /api/v1/openapi.json (OpenAPI 3.1): one POST per MCP tool (21), scope per operation, every schema \$ref resolvable"
+    else
+        t_fail "P1 OpenAPI document ($P1)"
+    fi
+
+    # P2 — SKILL.md: frontmatter, the base URL, every tool
+    P2_MD="$(curl -s --max-time 30 "$MCP_HTTP/api/v1/skill.md")"
+    P2_MISS=""
+    for p_t in ${P1_TOOLS//,/ } ; do printf '%s' "$P2_MD" | grep -q "\`$p_t\`" || P2_MISS="$P2_MISS $p_t" ; done
+    if printf '%s' "$P2_MD" | head -1 | grep -qx -- '---' && printf '%s' "$P2_MD" | grep -q '^name: maild-mail$' &&
+       printf '%s' "$P2_MD" | grep -q "/api/v1/mail/<tool>" && [ -z "$P2_MISS" ] && [ -n "$P1_TOOLS" ] ; then
+        t_ok "P2 /api/v1/skill.md: skill frontmatter, the REST base URL and all 21 tools"
+    else
+        t_fail "P2 SKILL.md (missing:$P2_MISS)"
+    fi
+
+    # P3 — parity: the same calls through the SDK client and through REST give the same results
+    P3=""
+    for p_case in "list_accounts|{}" "list_folders|{\"account\":\"$M_A\"}" "get_quota|{\"account\":\"$M_A\"}" \
+                  "search_emails|{\"account\":\"$M_A\",\"subject\":\"$P_TAG\",\"limit\":5}|next_cursor" \
+                  "get_email|{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$P_ID\",\"mark_read\":false}" \
+                  "get_thread|{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$P_ID\"}" ; do
+        IFS='|' read -r p_tool p_args p_drop <<< "$p_case"
+        p_r="$(p_same "$p_tool" "$p_args" "$p_drop")"
+        [ "$p_r" = same ] || P3="$P3 $p_tool: $p_r;"
+    done
+    if [ -z "$P3" ] ; then
+        t_ok "P3 parity: list_accounts, list_folders, get_quota, search_emails, get_email, get_thread return the same result over REST and MCP"
+    else
+        t_fail "P3 REST/MCP parity ($P3)"
+    fi
+
+    # P4 — get_attachment over REST is the file itself, byte-identical to the MCP blob
+    p_rest "$P_PAT" get_email "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$P_ID\",\"mark_read\":false}"; P4_PART="$(p_json "d['attachments'][0]['part']")"
+    P4_ARGS="{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$P_ID\",\"part\":\"$P4_PART\"}"
+    m_call "$P_PAT" get_attachment "$P4_ARGS"; P4_MCP="$(m_res "__import__('base64').b64decode(d['blobs'][0]).decode().strip()")"
+    p_rest "$P_PAT" get_attachment "$P4_ARGS"; P4_CT="$(grep -i '^content-type:' "$P_OUT.h" | tr -d '\r')"; P4_CD="$(grep -i '^content-disposition:' "$P_OUT.h" | tr -d '\r')"
+    if [ "$P_CODE" = 200 ] && [ "$(tr -d '\r\n' < "$P_OUT")" = "attached-$P_TAG" ] && [ "$P4_MCP" = "attached-$P_TAG" ] &&
+       [[ "$P4_CT" == *text/plain* ]] && [[ "$P4_CD" == *"attachment; filename*=UTF-8''$P_TAG.txt"* ]] ; then
+        t_ok "P4 get_attachment over REST returns the file itself (type + filename headers), identical to the MCP blob"
+    else
+        t_fail "P4 attachment (code=$P_CODE mcp='$P4_MCP' ct='$P4_CT' cd='$P4_CD')"
+    fi
+
+    # P5 — writes and the two-step confirmation through REST
+    p_rest "$P_PAT" mark_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$P_ID\"],\"flagged\":true}"; P5_MARK="$P_CODE"
+    m_call "$P_PAT" search_emails "{\"account\":\"$M_A\",\"subject\":\"$P_TAG-att\",\"flagged\":true}"; P5_FLAG="$(m_res "len(d['structured']['messages'])")"
+    p_rest "$P_PAT" trash_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$P_ID\"]}"
+    P5_ST1="$(p_json "d['status']")"; P5_H="$(p_json "d['confirm']")"; P5_PRE="$(p_json "len(d['preview'])")"
+    p_rest "$P_PAT" trash_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$P_ID\"],\"confirm\":\"$P5_H\"}"; P5_ST2="$(p_json "d['status']")"
+    p_rest "$P_PAT" trash_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$P_ID\"],\"confirm\":\"$P5_H\"}"; P5_REPLAY="$P_CODE/$(p_json "d['error']")"
+    m_call "$P_PAT" search_emails "{\"account\":\"$M_A\",\"folder\":\"Trash\",\"subject\":\"$P_TAG-att\"}"; P5_TID="$(m_res "d['structured']['messages'][0]['id']")"
+    p_rest "$P_PAT" restore_from_trash "{\"account\":\"$M_A\",\"ids\":[\"$P5_TID\"]}"; P5_REST="$(p_json "d['status']")"
+    if [ "$P5_MARK" = 200 ] && [ "$P5_FLAG" = 1 ] && [ "$P5_ST1" = confirmation_required ] && [ "$P5_PRE" = 1 ] &&
+       [ "$P5_ST2" = done ] && [ "$P5_REPLAY" = 400/confirmation_invalid ] && [ "$P5_REST" = done ] ; then
+        t_ok "P5 REST writes: mark_emails; trash_emails asks first (preview + confirm), runs once with confirm, refuses the replay; restore_from_trash"
+    else
+        t_fail "P5 REST writes (mark=$P5_MARK flagged=$P5_FLAG step1=$P5_ST1 preview=$P5_PRE step2=$P5_ST2 replay=$P5_REPLAY restore=$P5_REST)"
+    fi
+
+    # P6 — errors: missing token, bad arguments, scope, foreign address, unknown tool, method, body
+    p_rest "" list_accounts '{}'; P6_NOAUTH="$P_CODE/$(grep -ci 'resource_metadata' "$P_OUT.h")/$(grep -ci 'realm="MailD MCP REST"' "$P_OUT.h")"
+    p_rest "$P_PAT" search_emails '{"limit":"many"}'; P6_422="$P_CODE/$(p_json "d['error']+':'+d['details'][0]['field']")"
+    p_rest "$P_PATR" mark_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$P_ID\"],\"read\":true}"; P6_SCOPE="$P_CODE/$(p_json "d['error']+':'+d['scope']")"
+    p_rest "$P_PAT" list_folders "{\"account\":\"$M_B\"}"; P6_ADDR="$P_CODE/$(p_json "d['error']")"
+    p_rest "$P_PAT" no_such_tool '{}'; P6_404="$P_CODE"
+    p_rest "$P_PAT" list_accounts '[]'; P6_JSON="$P_CODE/$(p_json "d['error']")"
+    P6_GET="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $P_PAT" "$MCP_HTTP/api/v1/mail/list_accounts")"
+    if [ "$P6_NOAUTH" = 401/0/1 ] && [ "$P6_422" = 422/invalid_arguments:limit ] && [ "$P6_SCOPE" = 403/insufficient_scope:mail.modify ] &&
+       [ "$P6_ADDR" = 403/forbidden ] && [ "$P6_404" = 404 ] && [ "$P6_JSON" = 400/invalid_json ] && [ "$P6_GET" = 405 ] ; then
+        t_ok "P6 REST errors: 401 (REST realm, no OAuth discovery), 422 with the field, 403 insufficient_scope / foreign address, 404 unknown tool, 400 non-object body, 405 GET"
+    else
+        t_fail "P6 REST errors (noauth=$P6_NOAUTH 422=$P6_422 scope=$P6_SCOPE addr=$P6_ADDR 404=$P6_404 json=$P6_JSON get=$P6_GET)"
+    fi
+
+    # P7 — tokens: an OAuth access token is refused (bound to /api/v1/mcp); a master token needs X-MailD-Act-As
+    P7_CLIENT="$(curl -s -X POST "$MCP_HTTP/oauth/register" -H 'Content-Type: application/json' \
+        --data "{\"client_name\":\"p-rest\",\"redirect_uris\":[\"$O_REDIRECT\"]}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["client_id"])' 2>/dev/null)"
+    P7_V="p7-verifier-$(printf '%040d' 0)"
+    P7_C="$(python3 -c "import base64,hashlib,sys; print(base64.urlsafe_b64encode(hashlib.sha256(sys.argv[1].encode()).digest()).rstrip(b'=').decode())" "$P7_V")"
+    P7_REQ="$(o_loc "$(o_q "client_id=$P7_CLIENT" "redirect_uri=$O_REDIRECT" response_type=code "code_challenge=$P7_C" code_challenge_method=S256)" | sed -n 's/.*#//p')"
+    k_api POST /user/oauth/decision "{\"request_id\":\"$P7_REQ\",\"approve\":true,\"scopes\":[\"mail.read\"],\"addresses\":[\"$M_A\"]}" "$P_AT"
+    P7_CODE="$(k_json "d['redirect'].split('code=',1)[1].split('&',1)[0]")"
+    P7_OAT="$(curl -s --max-time 30 -X POST "$MCP_HTTP/oauth/token" --data-urlencode grant_type=authorization_code \
+        --data-urlencode "code=$P7_CODE" --data-urlencode "client_id=$P7_CLIENT" --data-urlencode "redirect_uri=$O_REDIRECT" \
+        --data-urlencode "code_verifier=$P7_V" | python3 -c 'import json,sys; print(json.load(sys.stdin)["access_token"])' 2>/dev/null)"
+    p_rest "$P7_OAT" list_accounts '{}'; P7_OAUTH="$P_CODE/$(p_json "d['reason']")"
+    P7_OAUTH_MCP="$(k_rpc "$P7_OAT" list_accounts)"
+    P7_MST="$(dcx mcp python manage.py shell -c "
+from mcpcore import tokens
+from mcpcore.models import AdminUser
+raw, _ = tokens.create_master(AdminUser.objects.order_by('id').first(), 'p5-rest', 1, ['mail.read'], None, '127.0.0.1')
+print(raw)" 2>/dev/null | tail -n1 | tr -d '\r')"
+    p_rest "$P7_MST" list_accounts '{}'; P7_NOACT="$P_CODE/$(p_json "d['error']")"
+    p_rest "$P7_MST" list_accounts '{}' -H "X-MailD-Act-As: $M_C"; P7_ACT="$P_CODE/$(p_json "d['accounts'][0]['address']")"
+    if [ "$P7_OAUTH" = 401/wrong_audience ] && [ "$P7_OAUTH_MCP" = 200 ] && [ "$P7_NOACT" = 400/act_as_required ] &&
+       [ "$P7_ACT" = "200/$M_C" ] ; then
+        t_ok "P7 REST tokens: an OAuth access token is refused (wrong_audience) though valid on /api/v1/mcp; a master token works with X-MailD-Act-As only"
+    else
+        t_fail "P7 REST tokens (oauth=$P7_OAUTH oauth-on-mcp=$P7_OAUTH_MCP master-no-act-as=$P7_NOACT master=$P7_ACT)"
+    fi
+
+    # P8 — audit: REST calls are recorded like MCP ones (access record + the tool's own event)
+    P8_LOG="$(dcx mcp sh -c "cat /var/log/maild-mcp/audit-$(date -u +%Y-%m-%d).log" 2>/dev/null)"
+    if printf '%s' "$P8_LOG" | grep '"event":"rest"' | grep -q '"tool":"trash_emails"' &&
+       printf '%s' "$P8_LOG" | grep -q '"result":"wrong_audience"' ; then
+        t_ok "P8 the audit log records REST access (with the tool) and the refused OAuth token"
+    else
+        t_fail "P8 REST audit records"
     fi
 fi
 

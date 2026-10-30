@@ -6,7 +6,7 @@ on behalf of a mailbox owner, through MCP (Streamable HTTP), a REST mirror and a
 - Design and decisions: [`technical-proposal.md`](technical-proposal.md)
 - Delivery status and log: [`progress.md`](progress.md)
 
-## Current state: P0–P4 done (see progress.md)
+## Current state: P0–P5 done (see progress.md)
 
 - Django 6.1 + uvicorn + MCP SDK 2.3, non-root (uid 10001), read-only rootfs.
 - `GET /healthz` → 200 when the `mcp` database, the catalogue and the mda IMAP greeting answer.
@@ -27,6 +27,11 @@ on behalf of a mailbox owner, through MCP (Streamable HTTP), a REST mirror and a
   change, domains allow-list, logging, user policy, master tokens (`X-MailD-Act-As` header,
   always audited), service email (internal or external SMTP + Test), logs viewer. CLI fallback:
   `manage.py mcp_admin_reset`.
+- REST mirror for scripts and skill-based agents: `POST /api/v1/mail/<tool>` with the tool's
+  arguments as a JSON object (PAT or master token), same results and rules as MCP;
+  `GET /api/v1/openapi.json` (OpenAPI 3.1) and `GET /api/v1/skill.md` (an Agent Skill) are
+  generated from the tool list. The user page's "Connect an assistant" card has copy-ready
+  settings per client.
 - OAuth 2.1 for "Add custom connector" (Claude, ChatGPT): discovery from the 401
   (`/.well-known/oauth-protected-resource`, `/.well-known/oauth-authorization-server`), PKCE S256,
   client ID metadata documents or dynamic registration, consent page `/consent`, 1 h access /
@@ -70,3 +75,11 @@ http://localhost:8085/api/v1/mcp`, or "Add custom connector" in Claude / ChatGPT
 `https://<MCP_HOSTNAME>/api/v1/mcp`) and the client discovers the OAuth server, opens the
 consent page and stores the tokens itself. Hosted clients (claude.ai, ChatGPT) need the
 public HTTPS host: the dev stack on localhost only serves local clients.
+
+REST (same tools, a PAT in `$MAILD_TOKEN`):
+
+```bash
+curl -s -X POST http://localhost:8085/api/v1/mail/search_emails -H "Authorization: Bearer $MAILD_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"unread": true, "limit": 5}'
+curl -s http://localhost:8085/api/v1/skill.md -o SKILL.md      # for skill-based agents
+```

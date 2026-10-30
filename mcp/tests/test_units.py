@@ -252,3 +252,58 @@ def test_redirect_match_exact_or_loopback_port():
     assert not redirect_matches(c, "https://c.example:8443/cb")
     assert not redirect_matches(c, "http://127.0.0.1:9/other")
     assert not redirect_matches(c, "http://localhost:9/callback")    # host must match too
+
+
+# --------------------------------------------------------------- REST mirror (P5) ---
+def test_openapi_defs_hoisting_shares_and_renames():
+    from restapi.docs import hoist_defs
+
+    components: dict = {}
+    a = {"type": "object", "properties": {"m": {"$ref": "#/$defs/Summary"}},
+         "$defs": {"Summary": {"type": "object", "properties": {"x": {"type": "string"}}}}}
+    out_a = hoist_defs(a, components, "tool_a")
+    assert "$defs" not in out_a and out_a["properties"]["m"]["$ref"] == "#/components/schemas/Summary"
+    assert "$defs" in a                                              # the tool's own schema is untouched
+    hoist_defs(a, components, "tool_b")                              # identical definition → shared
+    assert list(components) == ["Summary"]
+    c = {"items": {"$ref": "#/$defs/Summary"}, "$defs": {"Summary": {"type": "string"}}}
+    out_c = hoist_defs(c, components, "tool_c")                      # same name, other body → prefixed
+    assert out_c["items"]["$ref"] == "#/components/schemas/tool_c_Summary"
+    assert components["tool_c_Summary"] == {"type": "string"} and components["Summary"]["type"] == "object"
+
+
+def test_rest_error_mapping(monkeypatch):
+    import json
+
+    from mcp.server.mcpserver.exceptions import ToolError, UnexpectedToolError
+    from pydantic import BaseModel, ValidationError
+
+    from mcpserver.server import CodedToolError
+    import restapi
+    from restapi import _failure
+
+    monkeypatch.setattr(restapi.audit, "error", lambda *a, **k: None)   # units write no log files
+
+    def wrapped(cause):
+        try:
+            raise ToolError("Error executing tool x: boom") from cause
+        except ToolError as exc:
+            return exc
+
+    assert _failure(wrapped(CodedToolError("nope", 403, "forbidden"))) == (403, {"error": "forbidden", "message": "nope"})
+    status, body = _failure(wrapped(CodedToolError("later", 503, "mail_unavailable", True)))
+    assert status == 503 and body["retryable"] is True
+
+    class M(BaseModel):
+        limit: int
+    try:
+        M(limit="many")
+    except ValidationError as v:
+        status, body = _failure(wrapped(v))
+    assert status == 422 and body["details"][0]["field"] == "limit" and "many" not in str(body)
+    assert _failure(wrapped(ValueError("x"))) == (400, {"error": "tool_error", "message": "boom"})
+    try:
+        raise UnexpectedToolError("Error executing tool x") from RuntimeError("secret detail")
+    except UnexpectedToolError as exc:
+        status, body = _failure(exc)
+    assert status == 500 and "secret" not in json.dumps(body)

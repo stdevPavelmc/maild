@@ -19,7 +19,7 @@ for maintenance jobs.
 | `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083 (HTTP), 8084 (HTTPS, dev) |
 | `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
 | `cron`   | Scheduled jobs: db backup, traffic resume, SA…    | —                         |
-| `mcp`    | MailD MCP — AI-assistant mailbox access (Django + MCP SDK; IMAP master user; user page, admin panel `/adminmcp`, 21 tools; see `mcp/progress.md`) | 8085 (dev) |
+| `mcp`    | MailD MCP — AI-assistant mailbox access (Django + MCP SDK; IMAP master user; user page, admin panel `/adminmcp`, 21 tools over MCP (OAuth 2.1) and REST `/api/v1/mail` + OpenAPI + SKILL.md; see `mcp/progress.md`) | 8085 (dev) |
 | `dozzle` | Dev-only live container log viewer                | 8082                      |
 
 ## Core Principles — never break these
@@ -73,7 +73,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (167 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (175 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```
@@ -87,7 +87,7 @@ cd adminng/pwa && npm run i18n:check     # en/es key + placeholder parity (also 
 ./adminng/pwa-test/run.sh superadmin     # TOTP login + devices panel (never resets the enrollment)
 ./adminng/pwa-test/run.sh visual         # PNG screenshots (desktop/mobile, EN/ES) in ldata/e2e/screens
 ./adminng/pwa-test/run.sh a11y           # axe-core WCAG 2.1 A/AA reports in ldata/e2e/a11y
-./adminng/pwa-test/run.sh mcp            # MailD MCP user page, OAuth consent + /adminmcp admin panel flows
+./adminng/pwa-test/run.sh mcp            # MailD MCP user page (connect card), OAuth consent + /adminmcp admin panel flows
 ```
 
 - `bootstrap-dev.sh` provisions: `ldata/` dirs, self-signed certs, and the test fixtures —

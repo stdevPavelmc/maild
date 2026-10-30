@@ -364,5 +364,27 @@
     "allow": "Permitir",
     "deny": "Denegar",
     "missing": "Esta página la abre una aplicación que pide acceso; empiece desde la aplicación."
+  },
+  "connect": {
+    "title": "Conectar un asistente",
+    "intro": "Elija su aplicación. Las que usan OAuth (Claude, ChatGPT, Claude Code) solo necesitan la dirección: abren aquí una página de acceso y usted decide qué pueden hacer. Las demás usan un token de acceso personal de la lista de arriba.",
+    "clients": "Cliente",
+    "client": {
+      "claude": "Claude",
+      "chatgpt": "ChatGPT",
+      "claudeCode": "Claude Code",
+      "gemini": "Gemini CLI",
+      "mcpRemote": "mcp-remote",
+      "rest": "REST / skill"
+    },
+    "how": {
+      "claude": "Claude (web o escritorio): Configuración → Conectores → Añadir conector personalizado, pegue esta URL y conecte; usted inicia sesión aquí y aprueba el acceso.",
+      "chatgpt": "ChatGPT: Configuración → Conectores → Crear (modo desarrollador), pegue esta URL con autenticación OAuth; usted inicia sesión aquí y aprueba el acceso.",
+      "claudeCode": "Claude Code: ejecute uno de estos comandos y luego /mcp para iniciar sesión (primera forma) o empiece a usarlo (forma con token).",
+      "gemini": "Gemini CLI: añada esto a ~/.gemini/settings.json, con un token de la lista de arriba.",
+      "mcpRemote": "Cualquier aplicación que solo ejecuta servidores locales (stdio), p. ej. los ficheros de configuración de Claude Desktop: use el puente mcp-remote, con un token de la lista de arriba.",
+      "rest": "Scripts y agentes basados en skills: las mismas operaciones por HTTP simple, con un token de la lista de arriba."
+    },
+    "docs": "Documentación:"
   }
 }

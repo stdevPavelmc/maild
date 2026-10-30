@@ -52,7 +52,7 @@ compose network.
 | `api` | `pavelmc/maild-api:develop` | AdminNG API + first-boot seeder | — (internal) | db |
 | `mua` | `pavelmc/maild-mua:develop` | SnappyMail webmail | 8081 | mda |
 | `cron` | `pavelmc/maild-cron:develop` | maintenance jobs | — | db |
-| `mcp` | `pavelmc/maild-mcp:develop` | MailD MCP: AI-assistant access to the mailboxes (IMAP master user, user page, read tools; service mail via amavis:10026) | 8085 | db, mda, amavis |
+| `mcp` | `pavelmc/maild-mcp:develop` | MailD MCP: AI-assistant access to the mailboxes (IMAP master user; 21 tools over MCP `/api/v1/mcp` with OAuth 2.1 and over REST `/api/v1/mail/<tool>` + OpenAPI + SKILL.md; user page, admin panel `/adminmcp`; mail via amavis:10026) | 8085 | db, mda, amavis |
 | `dozzle` | `amir20/dozzle:latest` | live log viewer (dev only) | 8082 | — |
 | `pwa-test` | `pavelmc/maild-pwa-test:develop` | Playwright + Lighthouse harness (dev only, one-shot) | — | api, adminng |
 

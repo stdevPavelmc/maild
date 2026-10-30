@@ -164,3 +164,26 @@ test('preferences: dirty badge, Restore discards, Update persists; activity list
   await page.getByRole('button', { name: 'Refresh' }).click()
   await expect(page.getByTestId('activity-list')).toContainText('prefs.updated')
 })
+
+test('connection help: copy-ready settings per client, built from the page origin', async ({ page, baseURL }) => {
+  await signIn(page, ALICE)
+  const card = page.getByRole('region', { name: 'Connect an assistant' })
+  const snippet = card.getByTestId('connect-snippet')
+  const mcpUrl = `${new URL(baseURL ?? page.url()).origin}/api/v1/mcp`
+  await expect(snippet).toHaveText(mcpUrl)                                 // Claude: the connector URL
+  await card.getByRole('button', { name: 'Claude Code' }).click()
+  await expect(card.getByRole('button', { name: 'Claude Code' })).toHaveAttribute('aria-pressed', 'true')
+  await expect(snippet).toContainText(`claude mcp add --transport http maild ${mcpUrl}`)
+  await card.getByRole('button', { name: 'Gemini CLI' }).click()
+  expect(JSON.parse((await snippet.textContent()) ?? '{}').mcpServers.maild.httpUrl).toBe(mcpUrl)
+  await card.getByRole('button', { name: 'REST / skill' }).click()
+  await expect(snippet).toContainText('/api/v1/mail/list_accounts')
+  const skill = await page.request.get(await card.getByRole('link', { name: 'SKILL.md' }).getAttribute('href') ?? '')
+  expect(skill.ok()).toBe(true)
+  expect(await skill.text()).toContain('name: maild-mail')
+  const api = await page.request.get(await card.getByRole('link', { name: 'openapi.json' }).getAttribute('href') ?? '')
+  expect((await api.json()).openapi).toBe('3.1.0')
+  // phone width: the snippets scroll inside their box, never the page
+  await page.setViewportSize({ width: 360, height: 800 })
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+})
