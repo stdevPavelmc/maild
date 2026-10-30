@@ -48,7 +48,12 @@
     "not_found": "No encontrado.",
     "main_address": "La dirección principal no se puede cambiar aquí.",
     "invalid_lang": "Idioma no soportado.",
-    "invalid_action": "Acción desconocida."
+    "invalid_action": "Acción desconocida.",
+    "invalid_confirm_mode": "Ese modo de confirmación no está disponible en este servidor.",
+    "invalid_sender": "El remitente predeterminado debe ser una dirección confirmada de esta cuenta.",
+    "signature_too_long": "La firma es demasiado larga.",
+    "too_many_folders": "Demasiadas carpetas ocultas.",
+    "inbox_not_hideable": "INBOX no se puede ocultar a los agentes."
   },
   "confirm": {
     "title": "Confirmar una dirección",
@@ -160,5 +165,32 @@
     "foreverConfirm": "Crearlo de todos modos",
     "revokeTitle": "¿Revocar este token?",
     "revokeBody": "\"{{name}}\" deja de funcionar al instante y no se puede volver a activar."
+  },
+  "prefs": {
+    "title": "Preferencias",
+    "unsaved": "cambios sin guardar",
+    "update": "Actualizar",
+    "restore": "Restaurar",
+    "saved": "Preferencias guardadas.",
+    "confirmSend": "Preguntarme antes de que un agente envíe correo",
+    "confirmModes": {
+      "always": "Siempre",
+      "external": "Solo para destinatarios fuera de este servidor",
+      "never": "Nunca"
+    },
+    "confirmHint": "Cuando hace falta confirmar, el asistente recibe primero una vista previa y debe llamar de nuevo para enviar.",
+    "defaultSender": "Remitente predeterminado",
+    "firstAddress": "La primera dirección utilizable",
+    "signature": "Firma",
+    "signatureHint": "Se añade al correo que envían los agentes (hasta 2000 caracteres).",
+    "hiddenFolders": "Carpetas ocultas a los agentes",
+    "hiddenHint": "Nombres de carpeta separados por comas. Los agentes nunca las listan, buscan ni tocan (INBOX no se puede ocultar).",
+    "allowAttachments": "Permitir que los agentes descarguen adjuntos"
+  },
+  "activity": {
+    "title": "Actividad",
+    "refresh": "Actualizar",
+    "none": "Todavía nada.",
+    "token": "token"
   }
 }

@@ -6,15 +6,23 @@ on behalf of a mailbox owner, through MCP (Streamable HTTP), a REST mirror and a
 - Design and decisions: [`technical-proposal.md`](technical-proposal.md)
 - Delivery status and log: [`progress.md`](progress.md)
 
-## Current state: P0 done, P1 in progress (see progress.md)
+## Current state: P0–P1b done, P2 in progress (see progress.md)
 
 - Django 6.1 + uvicorn + MCP SDK 2.3, non-root (uid 10001), read-only rootfs.
 - `GET /healthz` → 200 when the `mcp` database, the catalogue and the mda IMAP greeting answer.
 - User page (`/`, React SPA in `ui/`, EN/ES): sign in with the mailbox password (ALTCHA),
   MCP switch, secondary addresses (magic link), access tokens.
 - MCP endpoint `POST /api/v1/mcp` (Streamable HTTP, stateless), `Authorization: Bearer
-  mdmcp_pat_…`: `list_accounts`, `list_folders`, `check_new_mail`, `search_emails`,
-  `get_email`, `get_thread`, `get_attachment`, `get_quota`.
+  mdmcp_pat_…`, 21 tools:
+  - read (`mail.read`): `list_accounts`, `list_folders`, `check_new_mail`, `search_emails`,
+    `get_email`, `get_thread`, `get_attachment`, `get_quota`;
+  - modify (`mail.modify`): `mark_emails`, `move_emails`, `create_folder`, `rename_folder`, `save_draft`;
+  - trash/spam (`mail.trash`, two-step with a `confirm` handle): `report_spam`, `not_spam`,
+    `trash_emails`, `restore_from_trash`, `delete_folder` — nothing is ever deleted for good;
+  - send (`mail.send`): `send_email`, `reply_email`, `forward_email` via amavis:10026, copy in
+    Sent, rate-limited, confirmation for recipients outside the server (preference).
+- User preferences: confirmation mode, default sender, signature, folders hidden from agents,
+  attachment download; Activity list.
 - Mailbox access goes through a Dovecot master user over IMAP STARTTLS (`mda:143`, certificate
   pinned); the container never mounts the mail storage.
 - Database access only as the restricted `maild_mcp` role (`db/ensure_roles.sh`); the
@@ -28,7 +36,7 @@ Optional (image defaults in `Dockerfile`, documented in `env.sample`): `MCP_HOST
 `MCP_ADMIN_USER/PASSWORD/EMAIL` (first boot only), `MCP_SERVICE_EMAIL/PASSWORD`,
 `MCP_DOVECOT_MASTER_USER`, `MCP_DB`, `MCP_DB_USER`, `MCP_IMAP_*`, `MCP_PUBLIC_URL`,
 `MCP_TRUSTED_PROXIES`, `MCP_SMTP_HOST/PORT`, `MCP_ACCESS_TTL`, `MCP_USER_SESSION_TTL`,
-`MCP_WORKERS`, `MCP_DEBUG`.
+`MCP_SEND_RATE_RECIPIENTS`, `MCP_SEND_RATE_WINDOW`, `MAX_MESSAGESIZE`, `MCP_WORKERS`, `MCP_DEBUG`.
 
 ## Operations
 

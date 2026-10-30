@@ -17,6 +17,15 @@ export interface Address {
   resend_count: number
 }
 
+export interface Prefs {
+  lang: 'en' | 'es'
+  confirm_send: 'always' | 'external' | 'never'
+  default_sender: string
+  signature: string
+  hidden_folders: string[]
+  allow_attachments: boolean
+}
+
 export interface Account {
   id: number
   main_email: string
@@ -25,6 +34,19 @@ export interface Account {
   addresses: Address[]
   mcp_url: string
   login_email?: string
+  prefs: Prefs
+  confirm_modes: Prefs['confirm_send'][]
+}
+
+export interface ActivityItem {
+  ts: string
+  category: string
+  event: string
+  result: string
+  ip: string
+  token: string
+  client: string
+  target: string
 }
 
 export interface Token {

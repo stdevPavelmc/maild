@@ -10,7 +10,7 @@ from django.http import HttpRequest, JsonResponse
 from ninja import NinjaAPI, Schema
 from ninja.security import HttpBearer
 
-from mcpcore import accounts, audit, tokens, webauth
+from mcpcore import accounts, audit, policy, prefs as prefs_mod, tokens, webauth
 from mcpcore.accounts import AccountError
 from mcpcore.models import Account, AccountAddress
 
@@ -137,7 +137,8 @@ def _address(a: AccountAddress) -> dict:
 
 def _account(account: Account) -> dict:
     return {"id": account.id, "main_email": account.main_email, "mcp_enabled": account.mcp_enabled,
-            "lang": (account.prefs or {}).get("lang", "en"),
+            "lang": prefs_mod.get(account)["lang"],
+            "prefs": prefs_mod.get(account), "confirm_modes": list(policy.CONFIRM_MODES),
             "addresses": [_address(a) for a in account.addresses.order_by("-is_main", "email")],
             "mcp_url": settings.MCP_RESOURCE_URL}
 
@@ -160,13 +161,42 @@ def switch(request, data: SwitchIn):
 
 
 class PrefsIn(Schema):
-    lang: str
+    lang: str | None = None
+    confirm_send: str | None = None
+    default_sender: str | None = None
+    signature: str | None = None
+    hidden_folders: list[str] | None = None
+    allow_attachments: bool | None = None
 
 
 @api.put("/user/prefs", auth=user_auth)
 def prefs(request, data: PrefsIn):
-    accounts.set_lang(request.account, data.lang)
+    before = prefs_mod.get(request.account)
+    after = prefs_mod.update(request.account, data.dict(exclude_none=True))
+    changed = sorted(k for k in after if after[k] != before.get(k))
+    if changed:
+        audit.event("token.lifecycle", "prefs.updated", actor={"type": "user", "account": request.account.id},
+                    ip=_ip(request), detail={"changed": changed})
     return _account(request.account)
+
+
+_ACTIVITY_FIELDS = ("ts", "category", "event", "result", "ip")
+
+
+@api.get("/user/activity", auth=user_auth)
+def activity(request):
+    """The account's last 50 actions (proposal §7.3.3), from the audit log."""
+    # actions only: the per-request `bearer.access` records would drown them
+    rows = audit.recent("", account_id=request.account.id, limit=50, exclude=("bearer.access",))
+    out = []
+    for r in rows:
+        item = {k: r.get(k, "") for k in _ACTIVITY_FIELDS}
+        item["token"] = (r.get("token") or {}).get("public_id", "")
+        item["client"] = (r.get("token") or {}).get("client", "")
+        target = r.get("target") or {}
+        item["target"] = ", ".join(f"{k}={v}" for k, v in target.items() if k in ("account", "folder", "address", "tool"))
+        out.append(item)
+    return {"items": out}
 
 
 class AddressIn(Schema):

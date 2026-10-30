@@ -1,6 +1,6 @@
 """MailD MCP data model (proposal §10). Tables arrive with the phase that uses them, each with
 its own migration: P0 admin_user; P1 domain_policy, account, account_address, token,
-web_session, login_failure, altcha_used, notice_throttle."""
+web_session, login_failure, altcha_used, notice_throttle; P2 confirm_handle, send_counter."""
 
 from django.db import models
 
@@ -149,3 +149,30 @@ class NoticeThrottle(models.Model):
     class Meta:
         db_table = "notice_throttle"
         constraints = [models.UniqueConstraint(fields=["kind", "key"], name="notice_throttle_kind_key")]
+
+
+class ConfirmHandle(models.Model):
+    """Two-step confirmation (proposal §8.3): the first call returns a preview and this handle;
+    the second call with it executes. Single use, 5 min, bound to token + tool + arguments."""
+
+    hash = models.CharField(max_length=64, primary_key=True)
+    token = models.ForeignKey(Token, on_delete=models.CASCADE)
+    tool = models.CharField(max_length=64)
+    args_digest = models.CharField(max_length=64)
+    expires_at = models.DateTimeField()
+    used = models.BooleanField(default=False)
+
+    class Meta:
+        db_table = "confirm_handle"
+
+
+class SendCounter(models.Model):
+    """Recipients sent per fixed window, per subject (`acct:<id>` and `addr:<email>`)."""
+
+    subject = models.CharField(max_length=320)
+    window_start = models.DateTimeField()
+    recipients = models.IntegerField(default=0)
+
+    class Meta:
+        db_table = "send_counter"
+        constraints = [models.UniqueConstraint(fields=["subject", "window_start"], name="send_counter_subject_window")]

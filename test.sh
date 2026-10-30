@@ -311,6 +311,7 @@ RES_SEEDED=0
 IMAPSIEVE_TOUCHED=0
 MCP_TOUCHED=0
 MCP_K_TOUCHED=0
+MCP_M_TOUCHED=0
 MCP_LEGACY_USER="mcp-legacy-probe@${DOMAIN}"
 MCP_INACTIVE_USER="mcp-inactive-probe@${DOMAIN}"
 cleanup() {
@@ -337,6 +338,16 @@ cleanup() {
                 > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
         fi
+        # Phase M (MCP write/send): every maild-p2-* message and folder, the send counters.
+        if [ "$MCP_M_TOUCHED" = 1 ]; then
+            for m_box in "alice@$DOMAIN" "bob@$DOMAIN" "charlie@$DOMAIN" ; do
+                for m_f in INBOX Sent Drafts Junk Trash ; do
+                    dcx mda doveadm expunge -u "$m_box" mailbox "$m_f" subject "maild-p2-" > /dev/null 2>&1 || true
+                done
+            done
+            dcx mda sh -c "doveadm mailbox list -u alice@$DOMAIN | grep -E '^P2r?-maild-p2-' | while read -r f; do doveadm mailbox delete -u alice@$DOMAIN \"\$f\"; done" > /dev/null 2>&1 || true
+            dcx db psql -U maild -d mcp -q -c "DELETE FROM send_counter; DELETE FROM confirm_handle;" > /dev/null 2>&1 || true
+        fi
         # Phase L (amavis listeners): the 10026 probe mail and, if L6 was interrupted, its placeholder.
         dcx mda doveadm expunge -u "$DEPLOY_ADMIN" mailbox INBOX subject "maild-p1b-internal-" > /dev/null 2>&1 || true
         [ -n "${L_PLACEHOLDER:-}" ] && docker rm -f "$L_PLACEHOLDER" > /dev/null 2>&1 || true
@@ -346,6 +357,7 @@ cleanup() {
         if [ "$MCP_K_TOUCHED" = 1 ]; then
             dcx db psql -U maild -d mcp -q -c "
                 DELETE FROM web_session WHERE kind='user' AND subject_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
+                DELETE FROM confirm_handle WHERE token_id IN (SELECT t.id FROM token t JOIN account a ON a.id = t.account_id WHERE a.main_email LIKE '%@${DOMAIN}');
                 DELETE FROM token WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM account_address WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM account WHERE main_email LIKE '%@${DOMAIN}';
@@ -1507,6 +1519,31 @@ else
             t_fail "G14 the outbound alert fires once per user per day and honours the ignore list (rc=$OW_RC2/$OW_RC3)"
             info "$(tail -n 4 "$TMPRUN/ow2.log" "$TMPRUN/ow3.log" | sed 's/^/        /')"
         fi
+
+        # G14b — mail sent through the MailD MCP enters at amavis:10026, skipping Postfix SASL: its
+        # "maild-mcp: sent user=…" lines count toward the same daily total, and its own limiter's
+        # "maild-mcp: throttled" line is reported like ratelimitd's (P2, proposal §9.3).
+        OW_MCP_USER="mcp-spike-$RANDOM$RANDOM@example.net"
+        OW_TMP="$(mktemp)"
+        for i in $(seq 1 "$OW_SPIKE") ; do
+            echo "${OW_STAMP} $(hostname) maild-mcp: mcp: INFO - maild-mcp: sent user=${OW_MCP_USER} rcpts=1 token=0000000000000000" >> "$OW_TMP"
+        done
+        echo "${OW_STAMP} $(hostname) maild-mcp: mcp: WARNING - maild-mcp: throttled user=${OW_MCP_USER} rcpts=3 token=0000000000000000" >> "$OW_TMP"
+        dcx cron sh -c 'cat >> /var/log/syslog' < "$OW_TMP" || true
+        rm -f "$OW_TMP"
+        OW_BEFORE="$(subj_count "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT")"
+        timeout -k10 120 "${DC[@]}" exec -T cron /scripts/outbound_watch.sh > "$TMPRUN/ow4.log" 2>&1
+        if wait_subj_count_gt "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT" "${OW_BEFORE:-0}" 240 ; then
+            OW_UID="$(msg_newest_uid "$DEPLOY_ADMIN" INBOX "$OW_SUBJECT")"
+            msg_text "$DEPLOY_ADMIN" INBOX "${OW_UID:-0}" > "$TMPRUN/ow-mail4.txt" 2>&1
+        fi
+        if grep -qF "${OW_MCP_USER}: ${OW_SPIKE} message(s)" "$TMPRUN/ow-mail4.txt" 2>/dev/null && \
+           grep -q 'maild-mcp: throttled' "$TMPRUN/ow-mail4.txt" ; then
+            t_ok "G14b MCP sends count toward the outbound alert and the MCP limiter's throttle lines are reported"
+        else
+            t_fail "G14b the outbound alert counts MCP sends (expected '${OW_MCP_USER}: ${OW_SPIKE} message(s)' + the MCP throttle line)"
+            info "$(tail -n 4 "$TMPRUN/ow4.log" | sed 's/^/        /')"
+        fi
     fi
     dcx cron sh -c 'rm -f /tmp/maild-outbound-alerted-*' > /dev/null 2>&1 || true
 
@@ -2471,9 +2508,9 @@ else
     fi
 
     # K9 — the official SDK client sees the eight read tools (P1 exit criterion, scripted half)
-    K9_TOOLS="$(dcx mcp python tests/mcp_call.py "$K_PAT" list 2>/dev/null | tr -d '\r' | paste -sd, -)"
+    K9_TOOLS="$(dcx mcp python tests/mcp_call.py "$K_PAT" list 2>/dev/null | tr -d '\r' | head -n 8 | paste -sd, -)"
     if [ "$K9_TOOLS" = "list_accounts,list_folders,check_new_mail,search_emails,get_email,get_thread,get_attachment,get_quota" ] ; then
-        t_ok "K9 the MCP SDK client lists the eight read tools over Streamable HTTP with the PAT"
+        t_ok "K9 the MCP SDK client lists the eight read tools (first, in order) over Streamable HTTP with the PAT"
     else
         t_fail "K9 tools/list (got: $K9_TOOLS)"
     fi
@@ -2632,6 +2669,253 @@ print(f.group(1) if f else "")' 2>/dev/null)"
         t_ok "K22 the audit/access logs (audit-$K22_DAY.log) record logins, tool calls and security events, and no password or token"
     else
         t_fail "K22 audit log content"
+    fi
+fi
+
+# ================================= M. MailD MCP (P2: write access + sending) ===
+# mcp/technical-proposal.md §6, §8.3, §7.3.3 and the 2026-10-30 decisions in mcp/progress.md:
+# flags/move/folders/drafts, the two-step trash/spam/delete tools (handles bound to token + tool +
+# arguments, single use; nothing is ever expunged), send/reply/forward through amavis:10026
+# (sender ownership, Bcc envelope-only and kept in Sent, DKIM, confirmation for external
+# recipients or by preference, the recipient rate limit, the log line outbound_watch counts) and
+# the send-related preferences (signature, hidden folders, attachments) + the Activity list.
+# Test mail is injected from cron through amavis:10026 (bank INTERNAL admits cron). Self-cleaning:
+# the maild-p2-* messages and folders are removed, the counters reset; the accounts go with K's.
+section "M. MailD MCP write tools and sending (flags, folders, trash/spam, send/reply/forward)"
+
+M_TAG="maild-p2-$(chrono | cut -c1-10)"
+M_A="alice@$DOMAIN"; M_B="bob@$DOMAIN"; M_C="charlie@$DOMAIN"
+m_res() { python3 -c "import json,sys; d=json.loads(sys.argv[2]); print(eval(sys.argv[1], {}, {'d': d}))" "$1" "$M_RES" 2>/dev/null; }
+m_call() { M_RES="$(dcx mcp python tests/mcp_call.py "$1" call "$2" "$3" 2>/dev/null | tail -n1)"; }
+m_inject() { # <subject> [extra swaks args…] — From bob To alice, through amavis:10026 (cron is admitted).
+    # `Message-Id` in swaks's own capitalisation replaces its header instead of adding a second one
+    local subj="$1"; shift
+    dcx cron sh -c "swaks --server amavis --port 10026 --from $M_B --to $M_A --header 'Subject: $subj' \
+        --header 'Message-Id: <$subj@$DOMAIN>' $* >/dev/null 2>&1"
+    wait_msg "$M_A" INBOX "$subj" 60
+}
+m_id() { # <subject> [folder] → the MCP id of the newest match (via search_emails)
+    m_call "$M_PAT" search_emails "{\"account\":\"$M_A\",\"folder\":\"${2:-INBOX}\",\"subject\":\"$1\",\"limit\":5}"
+    m_res "d['structured']['messages'][0]['id']"
+}
+m_flag_count() { dcx mda doveadm search -u "$M_A" mailbox "$1" uid "$2" "$3" 2>/dev/null | wc -l | tr -d ' '; }
+
+if [ "$HAVE_DC" != 1 ] || [ -z "$MCP_DB_PW" ] || [ -z "${K_PA:-}" ] ; then
+    t_skip "MailD MCP write/send checks (need docker, MCP secrets and the $DOMAIN fixtures)"
+else
+    MCP_M_TOUCHED=1
+    dcx mcp python manage.py mcp_domains allow "$DOMAIN" > /dev/null 2>&1
+    k_login "$M_A" "$K_PA"; M_AT="$K_AT"
+    k_api POST /user/tokens '{"name":"m-all","scopes":["mail.read","mail.modify","mail.trash","mail.send"]}' "$M_AT"; M_PAT="$(k_json "d.get('token','')")"
+    k_api POST /user/tokens '{"name":"m-all-2","scopes":["mail.read","mail.modify","mail.trash","mail.send"]}' "$M_AT"; M_PAT2="$(k_json "d.get('token','')")"
+    k_api POST /user/tokens '{"name":"m-read","scopes":["mail.read"]}' "$M_AT"; M_PATR="$(k_json "d.get('token','')")"
+    m_inject "$M_TAG-one"; m_inject "$M_TAG-two"
+    M_ID1="$(m_id "$M_TAG-one")"; M_ID2="$(m_id "$M_TAG-two")"; M_UID1="${M_ID1#*.}"
+
+    # M1 — the tool list grew to 21, in a stable order
+    M1="$(dcx mcp python tests/mcp_call.py "$M_PAT" list 2>/dev/null | tr -d '\r' | paste -sd, -)"
+    if [ "$M1" = "list_accounts,list_folders,check_new_mail,search_emails,get_email,get_thread,get_attachment,get_quota,mark_emails,move_emails,create_folder,rename_folder,save_draft,report_spam,not_spam,trash_emails,restore_from_trash,delete_folder,send_email,reply_email,forward_email" ] ; then
+        t_ok "M1 tools/list: the 8 read tools + 13 write/send tools"
+    else
+        t_fail "M1 tools/list (got: $M1)"
+    fi
+
+    # M2 — mark_emails sets and clears \Seen and \Flagged
+    m_call "$M_PAT" mark_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID1\"],\"read\":true,\"flagged\":true}"
+    M2_ON="$(m_flag_count INBOX "$M_UID1" seen)$(m_flag_count INBOX "$M_UID1" flagged)"
+    m_call "$M_PAT" mark_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID1\"],\"read\":false,\"flagged\":false}"
+    M2_OFF="$(m_flag_count INBOX "$M_UID1" seen)$(m_flag_count INBOX "$M_UID1" flagged)"
+    if [ "$M2_ON" = 11 ] && [ "$M2_OFF" = 00 ] ; then
+        t_ok "M2 mark_emails sets and clears \\Seen and \\Flagged"
+    else
+        t_fail "M2 mark_emails (seen/flagged after set=$M2_ON after clear=$M2_OFF, want 11/00)"
+    fi
+
+    # M3 — folders: create, move into, rename, refuse to delete a non-empty / special folder,
+    # delete an empty one in two steps
+    M_F="P2-$M_TAG"; M_F2="P2r-$M_TAG"
+    m_call "$M_PAT" create_folder "{\"account\":\"$M_A\",\"name\":\"$M_F\"}"; M3_C="$(m_res "d['structured']['status']")"
+    m_call "$M_PAT" move_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID2\"],\"target\":\"$M_F\"}"; M3_M="$(m_res "d['structured']['affected']")"
+    m_call "$M_PAT" rename_folder "{\"account\":\"$M_A\",\"folder\":\"$M_F\",\"new_name\":\"$M_F2\"}"; M3_R="$(m_res "d['structured']['status']")"
+    m_call "$M_PAT" delete_folder "{\"account\":\"$M_A\",\"folder\":\"$M_F2\"}"; M3_NE="$(m_res "d['is_error'] and 'not empty' in d['text']")"
+    m_call "$M_PAT" delete_folder "{\"account\":\"$M_A\",\"folder\":\"Sent\"}"; M3_SP="$(m_res "d['is_error']")"
+    M_ID2B="$(m_id "$M_TAG-two" "$M_F2")"
+    m_call "$M_PAT" move_emails "{\"account\":\"$M_A\",\"folder\":\"$M_F2\",\"ids\":[\"$M_ID2B\"],\"target\":\"INBOX\"}"
+    m_call "$M_PAT" delete_folder "{\"account\":\"$M_A\",\"folder\":\"$M_F2\"}"; M3_H="$(m_res "d['structured']['confirm']")"
+    m_call "$M_PAT" delete_folder "{\"account\":\"$M_A\",\"folder\":\"$M_F2\",\"confirm\":\"$M3_H\"}"; M3_D="$(m_res "d['structured']['status']")"
+    M3_GONE="$(dcx mda doveadm mailbox list -u "$M_A" 2>/dev/null | grep -cx "$M_F2")"
+    if [ "$M3_C" = done ] && [ "$M3_M" = 1 ] && [ "$M3_R" = done ] && [ "$M3_NE" = True ] && [ "$M3_SP" = True ] &&
+       [ "$M3_D" = done ] && [ "$M3_GONE" = 0 ] ; then
+        t_ok "M3 create/move/rename folders; delete_folder refuses non-empty and special folders, deletes an empty one in two steps"
+    else
+        t_fail "M3 folders (create=$M3_C move=$M3_M rename=$M3_R nonempty-refused=$M3_NE special-refused=$M3_SP delete=$M3_D gone=$M3_GONE)"
+    fi
+    M_ID2="$(m_id "$M_TAG-two")"
+
+    # M4 — save_draft files a \Draft in Drafts and sends nothing
+    m_call "$M_PAT" save_draft "{\"account\":\"$M_A\",\"to\":[\"$M_B\"],\"subject\":\"$M_TAG-draft\",\"body_text\":\"draft\"}"
+    M4_N="$(dcx mda doveadm search -u "$M_A" mailbox Drafts subject "$M_TAG-draft" draft 2>/dev/null | wc -l | tr -d ' ')"
+    M4_B="$(subj_count "$M_B" INBOX "$M_TAG-draft")"
+    if [ "$(m_res "d['structured']['status']")" = done ] && [ "$M4_N" = 1 ] && [ "${M4_B:-0}" = 0 ] ; then
+        t_ok "M4 save_draft stores a \\Draft in Drafts and sends nothing"
+    else
+        t_fail "M4 save_draft (drafts=$M4_N delivered-to-bob=$M4_B)"
+    fi
+
+    # M5 — report_spam is two-step: the preview moves nothing; the handle moves to Junk and the
+    # imapsieve Bayes learning fires (same proof as F4: the vmail-owned sa-learn state)
+    IMAPSIEVE_TOUCHED=1
+    dcx mda rm -rf /tmp/.spamassassin > /dev/null 2>&1 || true
+    m_call "$M_PAT" report_spam "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID1\"]}"
+    M5_ST="$(m_res "d['structured']['status']")"; M5_H="$(m_res "d['structured']['confirm']")"; M5_PV="$(m_res "len(d['structured']['preview'])")"
+    M5_STILL="$(subj_count "$M_A" INBOX "$M_TAG-one")"
+    m_call "$M_PAT" report_spam "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID1\"],\"confirm\":\"$M5_H\"}"
+    M5_DONE="$(m_res "d['structured']['to_folder']")"
+    M5_ART=""; for _ in 1 2 3 4 5 ; do M5_ART="$(dcx mda sh -c 'stat -c %u /tmp/.spamassassin 2>/dev/null' 2>/dev/null | tr -d ' \r')"; [ "$M5_ART" = 5000 ] && break; sleep 2; done
+    if [ "$M5_ST" = confirmation_required ] && [ "$M5_PV" = 1 ] && [ "$M5_STILL" = 1 ] && [ "$M5_DONE" = Junk ] && [ "$M5_ART" = 5000 ] ; then
+        t_ok "M5 report_spam previews first (nothing moved), moves to Junk with the handle, and the Bayes learning fires"
+    else
+        t_fail "M5 report_spam (first=$M5_ST preview=$M5_PV still-in-inbox=$M5_STILL moved-to=$M5_DONE sa-learn uid=$M5_ART)"
+    fi
+
+    # M6 — a handle is single use and bound to token + arguments; not_spam brings the message back
+    M_IDJ="$(m_id "$M_TAG-one" Junk)"
+    m_call "$M_PAT" not_spam "{\"account\":\"$M_A\",\"ids\":[\"$M_IDJ\"]}"; M6_H="$(m_res "d['structured']['confirm']")"
+    m_call "$M_PAT2" not_spam "{\"account\":\"$M_A\",\"ids\":[\"$M_IDJ\"],\"confirm\":\"$M6_H\"}"; M6_OTHER="$(m_res "d['is_error']")"
+    m_call "$M_PAT" not_spam "{\"account\":\"$M_A\",\"ids\":[\"$M_IDJ\"],\"target\":\"Drafts\",\"confirm\":\"$M6_H\"}"; M6_ARGS="$(m_res "d['is_error']")"
+    m_call "$M_PAT" not_spam "{\"account\":\"$M_A\",\"ids\":[\"$M_IDJ\"],\"confirm\":\"$M6_H\"}"; M6_OK="$(m_res "d['structured']['to_folder']")"
+    m_call "$M_PAT" not_spam "{\"account\":\"$M_A\",\"ids\":[\"$M_IDJ\"],\"confirm\":\"$M6_H\"}"; M6_REPLAY="$(m_res "d['is_error']")"
+    if [ "$M6_OTHER" = True ] && [ "$M6_ARGS" = True ] && [ "$M6_OK" = INBOX ] && [ "$M6_REPLAY" = True ] ; then
+        t_ok "M6 confirmation handles refuse another token, other arguments and a replay; not_spam restores to INBOX"
+    else
+        t_fail "M6 handles/not_spam (other-token=$M6_OTHER other-args=$M6_ARGS done=$M6_OK replay=$M6_REPLAY)"
+    fi
+    M_ID1="$(m_id "$M_TAG-one")"
+
+    # M7 — trash is two-step, restore undoes it, nothing is ever expunged
+    M7_TOTAL0="$(( $(mbox_count "$M_A" INBOX) + $(mbox_count "$M_A" Trash) ))"
+    m_call "$M_PAT" trash_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID1\",\"$M_ID2\"]}"; M7_H="$(m_res "d['structured']['confirm']")"
+    m_call "$M_PAT" trash_emails "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"ids\":[\"$M_ID1\",\"$M_ID2\"],\"confirm\":\"$M7_H\"}"; M7_T="$(m_res "d['structured']['affected']")"
+    M7_IN_TRASH="$(subj_count "$M_A" Trash "$M_TAG-")"
+    M7_TIDS="$(dcx mcp python tests/mcp_call.py "$M_PAT" call search_emails "{\"account\":\"$M_A\",\"folder\":\"Trash\",\"subject\":\"$M_TAG-\"}" 2>/dev/null | tail -n1 |
+               python3 -c "import json,sys; print(json.dumps([m['id'] for m in json.load(sys.stdin)['structured']['messages']]))" 2>/dev/null)"
+    m_call "$M_PAT" restore_from_trash "{\"account\":\"$M_A\",\"ids\":${M7_TIDS:-[]}}"; M7_R="$(m_res "d['structured']['affected']")"
+    M7_TOTAL1="$(( $(mbox_count "$M_A" INBOX) + $(mbox_count "$M_A" Trash) ))"
+    if [ "$M7_T" = 2 ] && [ "$M7_IN_TRASH" = 2 ] && [ "$M7_R" = 2 ] && [ "$M7_TOTAL0" = "$M7_TOTAL1" ] ; then
+        t_ok "M7 trash_emails (two steps) moves to Trash, restore_from_trash brings both back, nothing expunged ($M7_TOTAL1 messages before and after)"
+    else
+        t_fail "M7 trash/restore (trashed=$M7_T in-trash=$M7_IN_TRASH restored=$M7_R total $M7_TOTAL0 → $M7_TOTAL1)"
+    fi
+
+    M_ID1="$(m_id "$M_TAG-one")"   # trash + restore gave the messages new UIDs
+
+    # M8 — send inside the hosted domains: no confirmation, DKIM-signed, Bcc only on the envelope,
+    # kept in the Sent copy, one "maild-mcp: sent" line
+    m_call "$M_PAT" send_email "{\"to\":[\"$M_B\"],\"bcc\":[\"$M_C\"],\"subject\":\"$M_TAG-send\",\"body_text\":\"hello\"}"
+    M8_ST="$(m_res "d['structured']['status']")"; M8_SF="$(m_res "d['structured']['sent_folder']")"
+    wait_msg "$M_B" INBOX "$M_TAG-send" 60; wait_msg "$M_C" INBOX "$M_TAG-send" 60
+    M8_BU="$(msg_newest_uid "$M_B" INBOX "$M_TAG-send")"; M8_CU="$(msg_newest_uid "$M_C" INBOX "$M_TAG-send")"
+    M8_BTXT="$(msg_text "$M_B" INBOX "${M8_BU:-0}")"; M8_CTXT="$(msg_text "$M_C" INBOX "${M8_CU:-0}")"
+    M8_SU="$(msg_newest_uid "$M_A" Sent "$M_TAG-send")"; M8_STXT="$(msg_text "$M_A" Sent "${M8_SU:-0}")"
+    M8_LOG="$("${DC[@]}" logs --no-log-prefix --since 3m mcp 2>/dev/null | grep -c "maild-mcp: sent user=$M_A rcpts=2")"
+    if [ "$M8_ST" = sent ] && [ "$M8_SF" = Sent ] && printf '%s' "$M8_BTXT" | grep -qi '^DKIM-Signature:' &&
+       ! printf '%s\n%s' "$M8_BTXT" "$M8_CTXT" | grep -qi '^Bcc:' && [ -n "$M8_CU" ] &&
+       printf '%s' "$M8_STXT" | grep -qi "^Bcc: $M_C" && [ "${M8_LOG:-0}" -ge 1 ] ; then
+        t_ok "M8 send_email (internal): no confirmation, DKIM-signed, Bcc delivered but hidden, kept in the Sent copy, logged for outbound_watch"
+    else
+        t_fail "M8 send (status=$M8_ST sent=$M8_SF bob=${M8_BU:-none} charlie=${M8_CU:-none} log=$M8_LOG)"
+    fi
+
+    # M9 — an external recipient needs the confirmation; the preview submits nothing
+    M9_LOG0="$("${DC[@]}" logs --no-log-prefix mcp 2>/dev/null | grep -c 'maild-mcp: sent')"
+    m_call "$M_PAT" send_email "{\"to\":[\"someone@$RELAY_PROBE_DOMAIN\"],\"subject\":\"$M_TAG-ext\",\"body_text\":\"x\"}"
+    M9_ST="$(m_res "d['structured']['status']")"; M9_WHY="$(m_res "d['structured']['preview']['reason']")"
+    M9_LOG1="$("${DC[@]}" logs --no-log-prefix mcp 2>/dev/null | grep -c 'maild-mcp: sent')"
+    if [ "$M9_ST" = confirmation_required ] && printf '%s' "$M9_WHY" | grep -q "someone@$RELAY_PROBE_DOMAIN" && [ "$M9_LOG0" = "$M9_LOG1" ] ; then
+        t_ok "M9 an external recipient needs the two-step confirmation (preview names it, nothing submitted)"
+    else
+        t_fail "M9 external confirmation (status=$M9_ST reason='$M9_WHY' sends $M9_LOG0 → $M9_LOG1)"
+    fi
+
+    # M10 — sender ownership and scope
+    m_call "$M_PAT" send_email "{\"sender\":\"$M_C\",\"to\":[\"$M_B\"],\"subject\":\"$M_TAG-forged\",\"body_text\":\"x\"}"; M10_FOREIGN="$(m_res "d['is_error'] and 'not an address this token may send from' in d['text']")"
+    M10_SCOPE="$(k_rpc "$M_PATR" send_email)"
+    if [ "$M10_FOREIGN" = True ] && [ "$M10_SCOPE" = 403 ] ; then
+        t_ok "M10 a sender that is not the caller's is refused; a read-only token gets 403 on send_email"
+    else
+        t_fail "M10 sender/scope (foreign-refused=$M10_FOREIGN read-only=$M10_SCOPE)"
+    fi
+
+    # M11 — reply: default sender = the address it was sent to, Re: subject, threading headers, quote
+    m_call "$M_PAT" reply_email "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$M_ID1\",\"body_text\":\"my reply\"}"
+    M11_ST="$(m_res "d['structured']['status']")"; M11_SND="$(m_res "d['structured']['sender']")"
+    wait_msg "$M_B" INBOX "Re: $M_TAG-one" 60
+    M11_U="$(msg_newest_uid "$M_B" INBOX "Re: $M_TAG-one")"; M11_TXT="$(msg_text "$M_B" INBOX "${M11_U:-0}")"
+    if [ "$M11_ST" = sent ] && [ "$M11_SND" = "$M_A" ] && printf '%s' "$M11_TXT" | grep -q "^In-Reply-To: <$M_TAG-one@$DOMAIN>" &&
+       printf '%s' "$M11_TXT" | grep -q "wrote:" ; then
+        t_ok "M11 reply_email answers from the address it was sent to, with Re:, In-Reply-To and the quoted original"
+    else
+        t_fail "M11 reply (status=$M11_ST sender=$M11_SND delivered=${M11_U:-none})"
+    fi
+
+    # M12 — forward keeps the attachment
+    dcx cron sh -c "printf 'attached-%s\n' $M_TAG > /tmp/$M_TAG.txt" > /dev/null 2>&1
+    m_inject "$M_TAG-att" --attach-type text/plain --attach-name "$M_TAG.txt" --attach "@/tmp/$M_TAG.txt"
+    dcx cron rm -f "/tmp/$M_TAG.txt" > /dev/null 2>&1
+    M_IDA="$(m_id "$M_TAG-att")"
+    m_call "$M_PAT" forward_email "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$M_IDA\",\"to\":[\"$M_C\"],\"body_text\":\"fyi\"}"
+    M12_ST="$(m_res "d['structured']['status']")"
+    wait_msg "$M_C" INBOX "Fwd: $M_TAG-att" 60
+    M12_U="$(msg_newest_uid "$M_C" INBOX "Fwd: $M_TAG-att")"
+    if [ "$M12_ST" = sent ] && msg_text "$M_C" INBOX "${M12_U:-0}" | grep -q "filename=\"\\?$M_TAG.txt" ; then
+        t_ok "M12 forward_email delivers 'Fwd:' with the original attachment"
+    else
+        t_fail "M12 forward (status=$M12_ST delivered=${M12_U:-none})"
+    fi
+
+    # M13 — the recipient rate limit (per account): a window already at the limit refuses the send
+    M13_LIMIT="$(dcx mcp printenv MCP_SEND_RATE_RECIPIENTS 2>/dev/null | tr -d '\r')"; M13_LIMIT="${M13_LIMIT:-200}"
+    M13_ACC="$(dcx db psql -U maild -d mcp -tAc "SELECT id FROM account WHERE main_email='$M_A'" 2>/dev/null | tr -d '\r ')"
+    dcx db psql -U maild -d mcp -q -c "INSERT INTO send_counter (subject, window_start, recipients)
+        VALUES ('acct:$M13_ACC', to_timestamp(floor(extract(epoch FROM now()) / 3600) * 3600), $M13_LIMIT)
+        ON CONFLICT (subject, window_start) DO UPDATE SET recipients = $M13_LIMIT" > /dev/null 2>&1
+    m_call "$M_PAT" send_email "{\"to\":[\"$M_B\"],\"subject\":\"$M_TAG-throttled\",\"body_text\":\"x\"}"
+    M13_ERR="$(m_res "d['is_error'] and 'send limit reached' in d['text']")"
+    M13_LOG="$("${DC[@]}" logs --no-log-prefix --since 2m mcp 2>/dev/null | grep -c "maild-mcp: throttled user=$M_A")"
+    dcx db psql -U maild -d mcp -q -c "DELETE FROM send_counter WHERE subject IN ('acct:$M13_ACC', 'addr:$M_A')" > /dev/null 2>&1
+    if [ "$M13_ERR" = True ] && [ "${M13_LOG:-0}" -ge 1 ] && [ "$(subj_count "$M_B" INBOX "$M_TAG-throttled")" = 0 ] ; then
+        t_ok "M13 the send rate limit refuses a send over $M13_LIMIT recipients/window (logged as maild-mcp: throttled)"
+    else
+        t_fail "M13 rate limit (refused=$M13_ERR log=$M13_LOG)"
+    fi
+
+    # M14 — preferences: confirmation "always", signature, hidden folder, attachments off
+    k_api PUT /user/prefs "{\"confirm_send\":\"always\",\"signature\":\"$M_TAG-sig\",\"hidden_folders\":[\"Drafts\"],\"allow_attachments\":false}" "$M_AT"; M14_PUT="$K_CODE"
+    k_api PUT /user/prefs '{"confirm_send":"never"}' "$M_AT"; M14_NEVER="$K_CODE"
+    m_call "$M_PAT" send_email "{\"to\":[\"$M_B\"],\"subject\":\"$M_TAG-sig\",\"body_text\":\"x\"}"; M14_H="$(m_res "d['structured']['confirm']")"; M14_ST="$(m_res "d['structured']['status']")"
+    m_call "$M_PAT" send_email "{\"to\":[\"$M_B\"],\"subject\":\"$M_TAG-sig\",\"body_text\":\"x\",\"confirm\":\"$M14_H\"}"
+    wait_msg "$M_B" INBOX "$M_TAG-sig" 60; M14_U="$(msg_newest_uid "$M_B" INBOX "$M_TAG-sig")"
+    M14_SIG="$(msg_text "$M_B" INBOX "${M14_U:-0}" | grep -c "$M_TAG-sig")"
+    m_call "$M_PAT" list_folders "{\"account\":\"$M_A\"}"; M14_HID="$(m_res "'Drafts' not in [f['name'] for f in d['structured']['folders']]")"
+    m_call "$M_PAT" search_emails "{\"account\":\"$M_A\",\"folder\":\"Drafts\"}"; M14_HSRCH="$(m_res "d['is_error'] and 'hidden' in d['text']")"
+    m_call "$M_PAT" get_email "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$M_IDA\",\"mark_read\":false}"; M14_PART="$(m_res "d['structured']['attachments'][0]['part']")"
+    m_call "$M_PAT" get_attachment "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$M_IDA\",\"part\":\"$M14_PART\"}"; M14_ATT="$(m_res "d['is_error']")"
+    k_api PUT /user/prefs '{"confirm_send":"external","signature":"","hidden_folders":[],"allow_attachments":true}' "$M_AT"
+    m_call "$M_PAT" get_attachment "{\"account\":\"$M_A\",\"folder\":\"INBOX\",\"id\":\"$M_IDA\",\"part\":\"$M14_PART\"}"; M14_ATT2="$(m_res "d['is_error']")"
+    if [ "$M14_PUT" = 200 ] && [ "$M14_NEVER" = 400 ] && [ "$M14_ST" = confirmation_required ] && [ "${M14_SIG:-0}" -ge 1 ] &&
+       [ "$M14_HID" = True ] && [ "$M14_HSRCH" = True ] && [ "$M14_ATT" = True ] && [ "$M14_ATT2" = False ] ; then
+        t_ok "M14 preferences: 'always' confirms even internal mail ('never' is not offered), the signature is appended, a hidden folder is neither listed nor searchable, attachments can be withheld"
+    else
+        t_fail "M14 preferences (put=$M14_PUT never=$M14_NEVER confirm=$M14_ST signature=$M14_SIG hidden-list=$M14_HID hidden-search=$M14_HSRCH att-off=$M14_ATT att-on-error=$M14_ATT2)"
+    fi
+
+    # M15 — the Activity list (last 50 actions) shows the tool calls
+    k_api GET /user/activity "" "$M_AT"
+    M15="$(k_json "[i['event'] for i in d['items']]")"
+    if [ "$K_CODE" = 200 ] && printf '%s' "$M15" | grep -q "'send_email'" && printf '%s' "$M15" | grep -q "'trash_emails'" ; then
+        t_ok "M15 the Activity list (GET /webapi/user/activity) shows the account's recent tool calls"
+    else
+        t_fail "M15 activity (code=$K_CODE events=$(printf '%s' "$M15" | head -c 160))"
     fi
 fi
 

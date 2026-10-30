@@ -22,6 +22,40 @@ CLAIM_NOTICE_INTERVAL = DAY        # D11: one postmaster notice per (claimer, ad
 
 SCOPES = ("mail.read", "mail.modify", "mail.trash", "mail.send")
 
+# --- sending (proposal §6; P3 moves the admin-side knobs into the settings table) ---
+import os as _os
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(_os.environ.get(name, "").strip() or default)
+    except ValueError:
+        return default
+
+
+SEND_RATE_RECIPIENTS = _int_env("MCP_SEND_RATE_RECIPIENTS", 200)   # per window, per account AND per sender
+SEND_RATE_WINDOW = _int_env("MCP_SEND_RATE_WINDOW", 3600)
+MAX_MESSAGESIZE = _int_env("MAX_MESSAGESIZE", 34865152)           # same variable (and default) as the mta
+CONFIRM_TTL = 300                  # confirmation handles: single use, bound to token + tool + arguments
+ALLOW_EXTERNAL = True              # admin: allow sending outside the hosted domains
+FORCE_CONFIRM = False              # admin: confirmation for every send, whatever the user prefers
+ALLOW_NO_CONFIRM = False           # admin: offer the "never" mode (decision 2026-10-30: not before P3)
+MAX_QUOTED_CHARS = 20_000          # original text quoted in replies / forwards
+
+CONFIRM_MODES = ("always", "external") + (("never",) if ALLOW_NO_CONFIRM else ())
+
+# user preferences (proposal §7.3.3) and their defaults
+DEFAULT_PREFS = {
+    "lang": "en",
+    "confirm_send": "external",
+    "default_sender": "",          # "" = the first usable address
+    "signature": "",
+    "hidden_folders": [],
+    "allow_attachments": True,
+}
+MAX_SIGNATURE_CHARS = 2000
+MAX_HIDDEN_FOLDERS = 50
+
 
 def resend_delay(resends_so_far: int) -> int:
     return min(RESEND_BASE * (2 ** resends_so_far), RESEND_CAP)

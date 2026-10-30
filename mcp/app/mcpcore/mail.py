@@ -96,12 +96,12 @@ def _has_attachment(bs) -> bool:
 
 
 # ----------------------------------------------------------------- folders ---
-def folders(address: str) -> list[dict]:
+def folders(address: str, hidden: set[str] = frozenset()) -> list[dict]:
     with imap.mailbox(address) as c:
         out = []
         for flags, _delim, name in c.list_folders():
             names = _flag_names(flags)
-            if "\\Noselect" in names or "\\NonExistent" in names:
+            if "\\Noselect" in names or "\\NonExistent" in names or name in hidden:
                 continue
             st = c.folder_status(name, ["MESSAGES", "UNSEEN", "UIDNEXT", "UIDVALIDITY"])
             special = next((SPECIAL[f] for f in names if f in SPECIAL), None)
@@ -180,9 +180,9 @@ def search_folder(address: str, folder: str, criteria: list, offset: int, limit:
         return out, total
 
 
-def all_folders(address: str) -> list[str]:
+def all_folders(address: str, hidden: set[str] = frozenset()) -> list[str]:
     with imap.mailbox(address) as c:
-        return [n for n, _s in _folder_names(c)]
+        return [n for n, _s in _folder_names(c) if n not in hidden]
 
 
 # ------------------------------------------------------------------- fetch ---
@@ -279,7 +279,8 @@ def _any_of(terms: list[list]) -> list:
     return ["OR", terms[0], _any_of(terms[1:])]
 
 
-def get_thread(address: str, folder: str, message_id: str, limit: int = 50) -> list[dict]:
+def get_thread(address: str, folder: str, message_id: str, limit: int = 50,
+               hidden: set[str] = frozenset()) -> list[dict]:
     with imap.mailbox(address) as c:
         uidvalidity = _examine(c, folder)
         uid = _check_uidvalidity(uidvalidity, message_id)
@@ -292,7 +293,7 @@ def get_thread(address: str, folder: str, message_id: str, limit: int = 50) -> l
             return []
         found: dict[tuple[str, int], dict] = {}
         for name, special in _folder_names(c):
-            if special in ("trash", "junk"):
+            if special in ("trash", "junk") or name in hidden:
                 continue
             v = _examine(c, name)
             terms = [t for mid in ids for t in (["HEADER", "Message-ID", mid], ["HEADER", "References", mid])]
@@ -325,13 +326,14 @@ def quota(address: str) -> dict:
 
 
 # --------------------------------------------------------------- new mail ---
-def new_mail(address: str, marks: dict | None, limit: int) -> tuple[list[dict], dict]:
+def new_mail(address: str, marks: dict | None, limit: int,
+             hidden: set[str] = frozenset()) -> tuple[list[dict], dict]:
     """Arrivals since `marks` ({folder: [uidvalidity, uidnext]}). Without marks: the newest unread
     messages in INBOX. Returns (messages, new marks). Never marks anything read."""
     out: list[dict] = []
     new_marks: dict = {}
     with imap.mailbox(address) as c:
-        watched = [n for n, s in _folder_names(c) if s not in NOT_WATCHED]
+        watched = [n for n, s in _folder_names(c) if s not in NOT_WATCHED and n not in hidden]
         for name in watched:
             st = c.folder_status(name, ["UIDNEXT", "UIDVALIDITY"])
             v, nxt = int(st[b"UIDVALIDITY"]), int(st[b"UIDNEXT"])
@@ -356,3 +358,167 @@ def new_mail(address: str, marks: dict | None, limit: int) -> tuple[list[dict], 
                 out = [_summary(address, "INBOX", v, u, data[u]) for u in uids if u in data]
     out.sort(key=lambda m: m["date"] or "", reverse=True)
     return out[:limit], new_marks
+
+
+# ================================================================ writes (P2) ===
+# Nothing here ever expunges or deletes a message: "trash" and "spam" are MOVEs into the
+# special-use folders (Dovecot's imapsieve learns spam/ham from Junk moves), and delete_folder
+# only removes an EMPTY, non-special folder.
+
+MAX_IDS = 500
+FOLDER_RE = re.compile(r'^[^\x00-\x1f*%\\"]{1,200}$')
+
+
+def special_folder(c, kind: str) -> str:
+    for name, special in _folder_names(c):
+        if special == kind:
+            return name
+    raise MailError(f"this mailbox has no {kind} folder")
+
+
+def _special_of(c, folder: str) -> str | None:
+    for name, special in _folder_names(c):
+        if name == folder:
+            return special
+    raise MailError(f"folder '{folder}' does not exist")
+
+
+def _uids(c, folder: str, ids: list[str], readonly: bool = False) -> list[int]:
+    if not ids:
+        raise MailError("'ids' is empty")
+    if len(ids) > MAX_IDS:
+        raise MailError(f"at most {MAX_IDS} messages per call")
+    uidvalidity = _examine(c, folder, readonly=readonly)
+    uids = [_check_uidvalidity(uidvalidity, i) for i in ids]
+    present = set(c.search(["UID", ",".join(str(u) for u in uids)]))
+    missing = [i for i, u in zip(ids, uids) if u not in present]
+    if missing:
+        raise MailError(f"not in '{folder}' (moved or deleted?): {', '.join(missing[:5])}")
+    return uids
+
+
+def describe(address: str, folder: str, ids: list[str]) -> list[dict]:
+    """Summaries for a confirmation preview (read-only)."""
+    with imap.mailbox(address) as c:
+        uids = _uids(c, folder, ids, readonly=True)
+        v = _examine(c, folder)
+        data = c.fetch(uids, SUMMARY_FETCH)
+        return [_summary(address, folder, v, u, data[u]) for u in uids if u in data]
+
+
+def mark(address: str, folder: str, ids: list[str], read: bool | None, flagged: bool | None) -> int:
+    if read is None and flagged is None:
+        raise MailError("set 'read' and/or 'flagged'")
+    with imap.mailbox(address) as c:
+        uids = _uids(c, folder, ids)
+        for flag, value in ((b"\\Seen", read), (b"\\Flagged", flagged)):
+            if value is True:
+                c.add_flags(uids, [flag])
+            elif value is False:
+                c.remove_flags(uids, [flag])
+        return len(uids)
+
+
+def _move(c, folder: str, uids: list[int], target: str) -> None:
+    if target == folder:
+        raise MailError("source and target folder are the same")
+    _special_of(c, target)  # must exist
+    c.move(uids, target)
+
+
+def move(address: str, folder: str, ids: list[str], target: str) -> dict:
+    """Between ordinary folders; Junk and Trash have their own tools."""
+    with imap.mailbox(address) as c:
+        if _special_of(c, target) in ("junk", "trash"):
+            raise MailError("use report_spam / trash_emails to move into Junk or Trash")
+        if _special_of(c, folder) in ("junk", "trash"):
+            raise MailError("use not_spam / restore_from_trash to move out of Junk or Trash")
+        uids = _uids(c, folder, ids)
+        _move(c, folder, uids, target)
+        return {"moved": len(uids), "from": folder, "to": target}
+
+
+def move_special(address: str, folder: str, ids: list[str], into: str | None = None,
+                 out_of: str | None = None, target: str = "INBOX") -> dict:
+    """into='junk'|'trash' (report_spam / trash_emails), or out_of='junk'|'trash' (not_spam /
+    restore_from_trash) back to `target`. `folder` is ignored when moving out of a special one."""
+    with imap.mailbox(address) as c:
+        if into:
+            dest = special_folder(c, into)
+            if _special_of(c, folder) == into:
+                raise MailError(f"the messages are already in {dest}")
+            src = folder
+        else:
+            src = special_folder(c, out_of)
+            dest = target
+            if _special_of(c, dest) in ("junk", "trash"):
+                raise MailError("restore into an ordinary folder")
+        uids = _uids(c, src, ids)
+        _move(c, src, uids, dest)
+        return {"moved": len(uids), "from": src, "to": dest}
+
+
+def _check_folder_name(name: str) -> str:
+    name = (name or "").strip()
+    if not FOLDER_RE.match(name) or name.upper() == "INBOX":
+        raise MailError(f"'{name}' is not a usable folder name")
+    return name
+
+
+def create_folder(address: str, name: str) -> str:
+    name = _check_folder_name(name)
+    with imap.mailbox(address) as c:
+        if c.folder_exists(name):
+            raise MailError(f"folder '{name}' already exists")
+        c.create_folder(name)
+        c.subscribe_folder(name)
+    return name
+
+
+def rename_folder(address: str, old: str, new: str) -> str:
+    new = _check_folder_name(new)
+    with imap.mailbox(address) as c:
+        if old.upper() == "INBOX" or _special_of(c, old):
+            raise MailError("INBOX and the special folders (Sent, Drafts, Junk, Trash…) cannot be renamed")
+        if c.folder_exists(new):
+            raise MailError(f"folder '{new}' already exists")
+        c.rename_folder(old, new)
+        c.subscribe_folder(new)
+    return new
+
+
+def folder_info(address: str, name: str) -> dict:
+    with imap.mailbox(address) as c:
+        special = _special_of(c, name)
+        st = c.folder_status(name, ["MESSAGES"])
+        delim = next((d for _f, d, n in c.list_folders() if n == name), None)
+        delim = delim.decode() if isinstance(delim, bytes) else (delim or "/")
+        children = [n for _f, _d, n in c.list_folders(name + delim, "*")]
+        return {"name": name, "special_use": special, "messages": int(st.get(b"MESSAGES", 0)),
+                "children": [n for n in children if n != name]}
+
+
+def delete_folder(address: str, name: str) -> None:
+    info = folder_info(address, name)
+    if name.upper() == "INBOX" or info["special_use"]:
+        raise MailError("INBOX and the special folders cannot be deleted")
+    if info["messages"] or info["children"]:
+        raise MailError(f"'{name}' is not empty ({info['messages']} message(s), {len(info['children'])} subfolder(s)): "
+                        "move its content first — messages are never deleted for good")
+    with imap.mailbox(address) as c:
+        c.delete_folder(name)
+
+
+def append(address: str, kind: str, raw: bytes, flags: list[bytes]) -> str:
+    """APPEND to a special-use folder (sent / drafts); returns the folder name."""
+    with imap.mailbox(address) as c:
+        folder = special_folder(c, kind)
+        c.append(folder, raw, flags=flags)
+        return folder
+
+
+def get_raw(address: str, folder: str, message_id: str) -> bytes:
+    with imap.mailbox(address) as c:
+        uidvalidity = _examine(c, folder)
+        uid = _check_uidvalidity(uidvalidity, message_id)
+        return _fetch_raw(c, uid)

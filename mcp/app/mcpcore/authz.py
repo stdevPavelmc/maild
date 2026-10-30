@@ -18,6 +18,12 @@ TOOL_SCOPES = {
     "list_accounts": "mail.read", "list_folders": "mail.read", "check_new_mail": "mail.read",
     "search_emails": "mail.read", "get_email": "mail.read", "get_thread": "mail.read",
     "get_attachment": "mail.read", "get_quota": "mail.read",
+    # P2
+    "mark_emails": "mail.modify", "move_emails": "mail.modify", "create_folder": "mail.modify",
+    "rename_folder": "mail.modify", "save_draft": "mail.modify",
+    "report_spam": "mail.trash", "not_spam": "mail.trash", "trash_emails": "mail.trash",
+    "restore_from_trash": "mail.trash", "delete_folder": "mail.trash",
+    "send_email": "mail.send", "reply_email": "mail.send", "forward_email": "mail.send",
 }
 
 
@@ -63,6 +69,21 @@ class Principal:
                              "usable": not reason, "reason": reason})
             self._addresses = rows
         return self._addresses
+
+    def prefs(self) -> dict:
+        from mcpcore import prefs
+
+        return prefs.get(self.account)
+
+    def hidden(self) -> set[str]:
+        """Folders the user hid from agents (§7.3.3): never listed, searched or touched."""
+        return set(self.prefs().get("hidden_folders") or [])
+
+    def check_folder(self, *folders: str) -> None:
+        hidden = self.hidden()
+        for f in folders:
+            if f and f in hidden:
+                raise Denied(f"folder '{f}' is hidden from agents by the mailbox owner")
 
     def usable(self) -> list[str]:
         return [a["address"] for a in self.addresses() if a["usable"]]

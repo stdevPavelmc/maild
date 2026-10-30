@@ -48,7 +48,12 @@
     "not_found": "Not found.",
     "main_address": "The main address cannot be changed here.",
     "invalid_lang": "Unsupported language.",
-    "invalid_action": "Unknown action."
+    "invalid_action": "Unknown action.",
+    "invalid_confirm_mode": "That confirmation mode is not available on this server.",
+    "invalid_sender": "The default sender must be a confirmed address of this account.",
+    "signature_too_long": "The signature is too long.",
+    "too_many_folders": "Too many hidden folders.",
+    "inbox_not_hideable": "INBOX cannot be hidden from agents."
   },
   "confirm": {
     "title": "Confirm an address",
@@ -160,5 +165,32 @@
     "foreverConfirm": "Create it anyway",
     "revokeTitle": "Revoke this token?",
     "revokeBody": "\"{{name}}\" stops working at once and cannot be enabled again."
+  },
+  "prefs": {
+    "title": "Preferences",
+    "unsaved": "unsaved changes",
+    "update": "Update",
+    "restore": "Restore",
+    "saved": "Preferences saved.",
+    "confirmSend": "Ask me before an agent sends mail",
+    "confirmModes": {
+      "always": "Always",
+      "external": "Only for recipients outside this server",
+      "never": "Never"
+    },
+    "confirmHint": "When a confirmation is needed, the assistant first gets a preview and has to call again to send.",
+    "defaultSender": "Default sender",
+    "firstAddress": "The first usable address",
+    "signature": "Signature",
+    "signatureHint": "Appended to mail sent by agents (up to 2000 characters).",
+    "hiddenFolders": "Folders hidden from agents",
+    "hiddenHint": "Comma-separated folder names. Agents never list, search or touch them (INBOX cannot be hidden).",
+    "allowAttachments": "Let agents download attachments"
+  },
+  "activity": {
+    "title": "Activity",
+    "refresh": "Refresh",
+    "none": "Nothing yet.",
+    "token": "token"
   }
 }

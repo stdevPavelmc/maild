@@ -9,7 +9,7 @@
 # What the role gets (and nothing else):
 #   - owner of MCP_DB: full control of its own database only;
 #   - on the catalogue (POSTGRES_DB): column-level SELECT on domain/mailbox (never
-#     mailbox.password), SELECT on the maild_provision sentinel, EXECUTE on
+#     mailbox.password) and alias_domain, SELECT on the maild_provision sentinel, EXECUTE on
 #     maild_mcp_ensure_service_mailbox() — its only write path (003_mcp_service_mailbox.sql).
 #
 # Declarative: the password is re-asserted (rotation = change the env file + restart db) and
@@ -52,6 +52,8 @@ REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM :"role";
 GRANT USAGE ON SCHEMA public TO :"role";
 GRANT SELECT (domain, active) ON public.domain TO :"role";
 GRANT SELECT (username, domain, local_part, name, active) ON public.mailbox TO :"role";
+-- P2: "external recipient" = not an active domain or active alias domain (send confirmation)
+GRANT SELECT (alias_domain, target_domain, active) ON public.alias_domain TO :"role";
 GRANT SELECT ON public.maild_provision TO :"role";
 REVOKE ALL ON FUNCTION public.maild_mcp_ensure_service_mailbox(text, text, text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.maild_mcp_ensure_service_mailbox(text, text, text) TO :"role";

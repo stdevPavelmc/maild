@@ -53,3 +53,13 @@ def domains() -> list[tuple[str, bool]]:
     with _cursor() as cur:
         cur.execute("SELECT domain, active FROM domain ORDER BY domain")
         return [(row[0], bool(row[1])) for row in cur.fetchall()]
+
+
+def hosted_domains() -> set[str]:
+    """Active domains + active alias domains: a recipient outside these is "external"."""
+    with _cursor() as cur:
+        cur.execute("SELECT domain FROM domain WHERE active")
+        out = {row[0].lower() for row in cur.fetchall()}
+        cur.execute("SELECT alias_domain FROM alias_domain WHERE active")
+        out |= {row[0].lower() for row in cur.fetchall()}
+    return out

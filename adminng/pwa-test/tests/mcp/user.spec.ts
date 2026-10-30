@@ -128,3 +128,39 @@ test('Spanish catalogue and a phone-width layout without horizontal scroll', asy
   expect(overflow).toBeLessThanOrEqual(0)
   await page.getByLabel('Idioma').selectOption('en')
 })
+
+test('preferences: dirty badge, Restore discards, Update persists; activity lists the actions', async ({ page }) => {
+  await signIn(page, ALICE)
+  const card = page.getByTestId('prefs-card')
+  await expect(page.getByLabel('Ask me before an agent sends mail').locator('option')).toHaveText([
+    'Always',
+    'Only for recipients outside this server',
+  ]) // "never" is not offered before the admin setting exists (P3)
+
+  // Restore drops local edits
+  await card.getByLabel('Signature').fill('e2e signature')
+  await expect(page.getByTestId('prefs-dirty')).toBeVisible()
+  await page.getByTestId('prefs-restore').click()
+  await expect(card.getByLabel('Signature')).toHaveValue('')
+  await expect(page.getByTestId('prefs-dirty')).toHaveCount(0)
+
+  // Update saves to the server
+  await page.getByLabel('Ask me before an agent sends mail').selectOption('always')
+  await card.getByLabel('Signature').fill('e2e signature')
+  await card.getByLabel('Folders hidden from agents').fill('Private, Archive/Tax')
+  await page.getByTestId('prefs-update').click()
+  await expect(page.getByText('Preferences saved.')).toBeVisible()
+  await page.reload()
+  await expect(page.getByLabel('Ask me before an agent sends mail')).toHaveValue('always')
+  await expect(page.getByTestId('prefs-card').getByLabel('Signature')).toHaveValue('e2e signature')
+  await expect(page.getByTestId('prefs-card').getByLabel('Folders hidden from agents')).toHaveValue('Archive/Tax, Private')
+
+  // INBOX can never be hidden
+  await page.getByTestId('prefs-card').getByLabel('Folders hidden from agents').fill('INBOX')
+  await page.getByTestId('prefs-update').click()
+  await expect(page.getByText('INBOX cannot be hidden from agents.')).toBeVisible()
+
+  // the activity list shows the preference change (an action, not the per-request noise)
+  await page.getByRole('button', { name: 'Refresh' }).click()
+  await expect(page.getByTestId('activity-list')).toContainText('prefs.updated')
+})

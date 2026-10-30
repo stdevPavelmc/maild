@@ -32,7 +32,7 @@ Rules:
 | P0 | mda master user + rehash fix; `MCP_DB` + `ensure_roles.sh` + migration 003; compose chain; empty `mcp` container with `/healthz` + service mailbox | verified | 2026-10-29 | 2026-10-29 | 2026-10-29 |
 | P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | done | 2026-10-29 | 2026-10-30 | |
 | P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | done | 2026-10-30 | 2026-10-30 | |
-| P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | — | | | |
+| P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | done | 2026-10-30 | 2026-10-30 | |
 | P3 | Admin panel (all groups), master tokens, external SMTP + test | — | | | |
 | P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | — | | | |
 | P5 | REST mirror, OpenAPI, SKILL.md, docs | — | | | |
@@ -202,22 +202,38 @@ Log
 
 ## P2 — Write access + sending
 
-Status: —
+Status: done (clean-stack verification pending, with P1/P1b)
 
 Checklist
-- [ ] `mark_emails`, `move_emails`, `create_folder`, `rename_folder`, `save_draft`
-- [ ] `report_spam`, `not_spam`, `trash_emails`, `restore_from_trash`, `delete_folder` with confirm handles; no expunge path anywhere
-- [ ] `send_email`, `reply_email` (default sender rule), `forward_email` via `amavis:10026`; sender ownership check; Bcc handling; Sent copy
-- [ ] Send rate limiter + `maild-mcp: sent` log line; size limit
-- [ ] Send confirmation per user preference (external recipients by default)
-- [ ] Service mail (2FA, magic links, notices) via the same path
-- [ ] Tests: DKIM-signed delivery, Sent copy present, alias sender refused, foreign sender refused, Junk move triggers Bayes learn, Trash never expunged, rate limit triggers
-- [ ] Full `./test.sh` green
+- [x] `mark_emails`, `move_emails`, `create_folder`, `rename_folder`, `save_draft`
+- [x] `report_spam`, `not_spam`, `trash_emails`, `restore_from_trash`, `delete_folder` with confirm handles; no expunge path anywhere
+- [x] `send_email`, `reply_email` (default sender rule), `forward_email` via `amavis:10026`; sender ownership check; Bcc handling; Sent copy
+- [x] Send rate limiter + `maild-mcp: sent` log line; size limit
+- [x] Send confirmation per user preference (external recipients by default)
+- [x] Service mail (2FA, magic links, notices) via the same path (amavis:10026 since P1b; 2FA codes arrive with the P3 admin)
+- [x] Tests: DKIM-signed delivery, Sent copy present, alias sender refused, foreign sender refused, Junk move triggers Bayes learn, Trash never expunged, rate limit triggers — M1–M15, G14b; alias sender: aliases are never account addresses (accounts.add_address only admits active catalogue *mailboxes*), so the foreign-sender check (M10) covers it
+- [x] Full `./test.sh` green — 149 passed / 0 failed / 0 skipped, 6m34s
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-30 | action | Baseline inherited from P1b's full pass (133/0/0) + the AdminNG fix `8a38f44` (pwa-test verify 5/5). P2 → Initiated. |
+| 2026-10-30 | decision | **Asked Pavel** — Preferences (§7.3.3) in P2: the **send-related** ones (send confirmation mode, default sender, signature, folders hidden from agents, allow attachment download) + the **Activity** list (last 50 actions). Email notifications (new token / new IP / master-token access) → P3 with master tokens. |
+| 2026-10-30 | decision | **Asked Pavel** — "external recipient" = a domain that is **not an active domain or active alias domain** of this server's catalogue. Needs a new column-level read-only grant for the MCP role: `SELECT (alias_domain, target_domain, active) ON alias_domain` (db/ensure_roles.sh; extends D8's list, still no write and no password column). |
+| 2026-10-30 | decision | **Asked Pavel** — confirmation mode **"never" not offered until P3** (policy constant `ALLOW_NO_CONFIRM = False`; P3's admin setting may enable it). |
+| 2026-10-30 | decision | **Asked Pavel** — §9.3 follow-up **in P2**: `cron/scripts/outbound_watch.sh` also counts the MCP's `maild-mcp: sent user=… rcpts=…` lines per sender and alerts on the same threshold. |
+| 2026-10-30 | decision | Confirmation handles in a table (`confirm_handle`: HMAC of `mdmcp_cf_…`, token, tool, SHA-256 of the canonical JSON of every other argument, 5 min, `used`), not signed tokens: single use needs state. A mismatched redeem (other token / tool / arguments) does not consume the handle. `delete_folder` checks the folder (exists, empty, not special) BEFORE issuing a handle, so a handle is never minted for a call that would fail. |
+| 2026-10-30 | decision | Sends: `sender` (not `from`, SDK limit noted in P1); default = reply hint (Delivered-To/To/Cc) → `default_sender` preference → first usable address. Rate limit = fixed windows of `MCP_SEND_RATE_WINDOW` in `send_counter`, checked before submit for both `acct:<id>` and `addr:<sender>`, recorded with the recipients amavis accepted. Max 100 recipients per message. Size check on the Sent copy (incl. Bcc) against `MAX_MESSAGESIZE` (mta's variable, passed through). Amavis 4xx → "retryable"; no queueing. A failed Sent APPEND is a warning, the send stands (§6). |
+| 2026-10-30 | decision | Hidden folders are enforced in the tool layer (`Principal.check_folder`) and in every folder iteration (list_folders, search `*`, get_thread, check_new_mail); `get_attachment` honours `allow_attachments`. Audit category of a tool call = its scope (`mail.modify`/`mail.trash`/`mail.send`). |
+| 2026-10-30 | finding | `alias_domain` grant added to `db/ensure_roles.sh` (decision above); db rebuilt + restarted, role re-asserted, the MCP role reads the table (0 rows in dev). |
+| 2026-10-30 | action | Smoke on dev: send to bob + Bcc charlie → delivered DKIM-signed, no `Bcc:` header in either copy, `Bcc: charlie@…` in alice's Sent copy, `maild-mcp: sent user=alice@example.net rcpts=2` logged; external recipient → `confirmation_required`; foreign sender refused; trash handle refused for other ids, works once, refused on replay. |
+| 2026-10-30 | action | `test.sh` section M (M1–M15) + G14b. First K+M run 34/37: (1) K9 asserted exactly 8 tools → now "the first 8, in order"; (2) Activity flooded by per-request `bearer.access` records → excluded from `/webapi/user/activity`; (3) M11 used a message id made stale by M7's trash/restore → id re-read. Then M11 still failed: swaks adds its own `Message-Id`, and the test's `Message-ID` (other case) became a second header (the reply correctly threaded on the first) → the injection now overrides swaks's header. K+M: **37/37**; cleanup leaves no account, handle, counter or `maild-p2-*` mail. |
+| 2026-10-30 | action | User page: Preferences card (Update / Restore / dirty badge, §7.1 pattern; "never" not offered) + Activity card; `i18n:check` 150 keys. `run.sh mcp`: **7/7** (new: prefs dirty/restore/update/reload, INBOX not hideable, activity shows `prefs.updated`). pytest: **18/18** (+ digest, address parsing incl. CRLF injection, subjects/quote, recipients). (pytest's pip target reused `/tmp/maild-mcp-p1`, kept until P1 is verified.) |
+| 2026-10-30 | action | Docs: `.agents/services/{catalog,configuration}.md`, `.agents/devops/workflows.md` (sections M, G14b; 149 checks), `AGENTS.md`, `env.sample` (`MCP_SEND_RATE_*`), `mcp/README.md`, `Changelog.md`; compose chain passthrough `MCP_SEND_RATE_RECIPIENTS`, `MCP_SEND_RATE_WINDOW`, `MAX_MESSAGESIZE` (4 files, gitlab in sync). |
+| 2026-10-30 | finding | First full run: 148/1 — G14b failed because the **cron image was not rebuilt** after the `outbound_watch.sh` edit (the container ran the old script). Rebuilt + recreated cron (amavis's watchdog re-admitted its new address, as L6 proves). |
+| 2026-10-30 | action | Full `./test.sh`: **149 passed / 0 failed / 0 skipped, 6m34s** (133 + M1–M15 + G14b). §13 exit criterion (DKIM-signed send, Sent copy, Bayes learn on Junk) covered by M8 and M5. P2 → **done**. Nothing committed yet. |
+| 2026-10-30 | action | P2 committed on branch `mcp`. |
 
 ---
 

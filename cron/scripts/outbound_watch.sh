@@ -13,6 +13,10 @@
 #     the mta's OUTBOUND_RATE_EXEMPT_USERS).
 #   - A dead ratelimitd is NOT detected here: it is fail-open for mail, and the
 #     mta healthcheck already goes unhealthy when it stops answering.
+#   - Mail sent through the MailD MCP skips Postfix SASL (it enters at amavis:10026), so the
+#     MCP logs one "maild-mcp: sent user=<addr> rcpts=<n>" line per message and one
+#     "maild-mcp: throttled user=<addr>" line when its own limiter refuses a send: they count
+#     into the same per-user totals and alerts (mcp/technical-proposal.md §6, §9.3).
 #
 # Like resume.sh it needs the production syslog (cron binds the host /var/log,
 # every service logs through Docker's syslog driver); in dev test.sh phase G
@@ -52,12 +56,16 @@ is_ignored() {   # <user> -> 0 when the user is on the alert ignore list
 # today's outbound messages per authenticated user. Only the queue-id "from=" lines count
 # (one per accepted message, sasl_username attached because smtpd_sasl_authenticated_header
 # = yes); reject lines also carry sasl_username and would double-count.
-USERCOUNTS="$(grep -h ${MTA} ${LOGS} 2>/dev/null | grep -E "${DAY_RE}" | grep 'from=<' | \
-    grep -o 'sasl_username=[^ ,;)]*' | cut -d= -f2 | tr '[:upper:]' '[:lower:]' | \
+SASL_USERS="$(grep -h ${MTA} ${LOGS} 2>/dev/null | grep -E "${DAY_RE}" | grep 'from=<' | \
+    grep -o 'sasl_username=[^ ,;)]*' | cut -d= -f2)"
+# one line per message sent through the MCP (its sender address is the user)
+MCP_USERS="$(grep -h 'maild-mcp: sent user=' ${LOGS} 2>/dev/null | grep -E "${DAY_RE}" | \
+    sed -n 's/.*maild-mcp: sent user=\([^ ]*\).*/\1/p')"
+USERCOUNTS="$(printf '%s\n%s\n' "${SASL_USERS}" "${MCP_USERS}" | grep -v '^$' | tr '[:upper:]' '[:lower:]' | \
     sort | uniq -c | sort -rn)"
 
 # the throttle's own engagement lines, verbatim for the report
-THROTTLED="$(grep -h 'maild-ratelimit: throttled' ${LOGS} 2>/dev/null | grep -E "${DAY_RE}")"
+THROTTLED="$(grep -hE 'maild-ratelimit: throttled|maild-mcp: throttled' ${LOGS} 2>/dev/null | grep -E "${DAY_RE}")"
 THROTTLED_USERS="$(printf '%s\n' "${THROTTLED}" | sed -n 's/.*throttled user=\([^ ]*\).*/\1/p' | sort -u)"
 
 OVER=""
@@ -97,13 +105,14 @@ REPORT=$(mktemp)
     printf '%s\n' "${USERCOUNTS}" | head -n 10 | awk '{printf "  %6s  %s\n", $1, $2}'
     if [ -n "${THROTTLED}" ] ; then
         echo ""
-        echo "Rate-limit engagements (throttled by the mta's ratelimitd):"
+        echo "Rate-limit engagements (the mta's ratelimitd, or the MCP's own send limiter):"
         printf '%s\n' "${THROTTLED}" | sed 's/^/  /'
     fi
     echo ""
     echo "If this is a phished account, change its password (PostfixAdmin or the"
     echo "AdminNG panel) and review the outbound traffic below. The hard per-user"
-    echo "limit is OUTBOUND_RATE_RECIPIENTS on the mta (see env.sample)."
+    echo "limit is OUTBOUND_RATE_RECIPIENTS on the mta and MCP_SEND_RATE_RECIPIENTS for mail"
+    echo "sent through the MailD MCP (see env.sample)."
 } > "${REPORT}"
 
 # email — same channel as resume.sh

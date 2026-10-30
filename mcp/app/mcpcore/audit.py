@@ -84,8 +84,10 @@ def prune() -> int:
     return removed
 
 
-def recent(category_prefix: str, *, account_id: int | None = None, limit: int = 50) -> list[dict]:
-    """Newest audit records (newest file first), optionally for one account."""
+def recent(category_prefix: str, *, account_id: int | None = None, limit: int = 50,
+           exclude: tuple[str, ...] = ()) -> list[dict]:
+    """Newest audit records (newest file first), optionally for one account, skipping the
+    categories in `exclude`."""
     out: list[dict] = []
     for path in sorted(Path(settings.MCP_LOG_DIR).glob("audit-*.log"), reverse=True):
         try:
@@ -97,7 +99,7 @@ def recent(category_prefix: str, *, account_id: int | None = None, limit: int = 
                 rec = json.loads(line)
             except ValueError:
                 continue
-            if not rec.get("category", "").startswith(category_prefix):
+            if not rec.get("category", "").startswith(category_prefix) or rec.get("category") in exclude:
                 continue
             if account_id is not None and (rec.get("actor") or {}).get("account") != account_id:
                 continue

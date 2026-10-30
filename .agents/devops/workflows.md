@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 133 checks
+./test.sh                 # 149 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -130,6 +130,13 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   never sets `\Seen`, `get_email` does), plus the audit logs; it deletes the `example.net` MCP
   accounts and restores the domain policy on exit. Browser flows for the MCP user page:
   `./adminng/pwa-test/run.sh mcp`.
+- Section M covers the P2 write side through the SDK client: flags, folders (create / move /
+  rename / delete-only-empty in two steps), drafts, `report_spam` (preview first, then Junk + the
+  imapsieve Bayes evidence), handle binding (other token / other arguments / replay refused),
+  trash + restore (nothing expunged), sending (DKIM, Bcc hidden but kept in Sent, the log line),
+  external-recipient confirmation, sender ownership and scope, reply threading, forward with the
+  attachment, the recipient rate limit, the preferences and the Activity list. Test mail is
+  injected from cron through amavis:10026. G14b checks that MCP sends count in the outbound alert.
 - Section L covers the amavis listeners (D13): 10024 admits only the mta and 10026 only
   cron/mcp (cron and api probes, the `DENIED ACCESS` log line), a DKIM-signed delivery through
   10026, and the peer-IP watchdog (cron is stopped, a placeholder container takes a free

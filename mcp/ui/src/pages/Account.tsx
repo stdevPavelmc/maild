@@ -5,6 +5,7 @@ import { formatDate } from '../lib/utils'
 import { Alert, Button, Card, Field, StatusBadge, TypeToConfirm } from '../components/ui'
 import { errorText } from './Login'
 import Tokens from './Tokens'
+import { ActivityCard, PreferencesCard } from './Preferences'
 
 type Pending = { kind: 'disable' | 'enable' | 'remove'; address: Address } | null
 
@@ -216,6 +217,10 @@ export default function Account({
       </Card>
 
       <Tokens addresses={usableForTokens} onError={(text) => setNotice({ kind: 'error', text })} />
+
+      <PreferencesCard account={account} onChange={onChange} />
+
+      <ActivityCard />
 
       {pending && (
         <TypeToConfirm

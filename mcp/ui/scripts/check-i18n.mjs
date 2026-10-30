@@ -22,7 +22,7 @@ const here = dirname(fileURLToPath(import.meta.url))
 const dir = join(here, '..', 'src', 'i18n')
 
 /** Keys that are intentionally identical in both languages. */
-const SAME_BY_DESIGN = new Set(['app.title', 'tokens.scope.mail.read', 'tokens.scope.mail.modify', 'tokens.scope.mail.trash', 'tokens.scope.mail.send', 'common.ok'])
+const SAME_BY_DESIGN = new Set(['app.title', 'tokens.scope.mail.read', 'tokens.scope.mail.modify', 'tokens.scope.mail.trash', 'tokens.scope.mail.send', 'common.ok', 'activity.token'])
 
 function flatten(node, prefix = '', out = new Map()) {
   for (const [key, value] of Object.entries(node)) {

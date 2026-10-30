@@ -110,3 +110,39 @@ def test_env_duration_rejects_garbage(monkeypatch):
     monkeypatch.setenv("X_TTL", "soon")
     with pytest.raises(ImproperlyConfigured):
         env_duration("X_TTL", "1")
+
+
+# ------------------------------------------------------------------- P2 ---
+from mcpcore import confirm, sending  # noqa: E402
+
+
+def test_confirm_digest_ignores_the_handle_and_key_order_but_not_values():
+    a = confirm.digest("trash_emails", {"account": "a@x.cu", "ids": ["1.2"], "confirm": "mdmcp_cf_x"})
+    b = confirm.digest("trash_emails", {"ids": ["1.2"], "account": "a@x.cu"})
+    assert a == b
+    assert a != confirm.digest("trash_emails", {"account": "a@x.cu", "ids": ["1.3"]})
+    assert a != confirm.digest("report_spam", {"account": "a@x.cu", "ids": ["1.2"]})
+
+
+def test_parse_addresses():
+    assert sending.parse_addresses(["Bob <BOB@x.cu>", "c@x.cu, d@x.cu"], "to") == ["bob@x.cu", "c@x.cu", "d@x.cu"]
+    assert sending.parse_addresses("a@x.cu, a@x.cu", "to") == ["a@x.cu"]
+    assert sending.parse_addresses(None, "cc") == []
+    with pytest.raises(sending.SendError):
+        sending.parse_addresses(["a@x.cu\r\nBcc: evil@y.org"], "to")   # header injection
+    with pytest.raises(sending.SendError):
+        sending.parse_addresses(["not-an-address"], "to")
+
+
+def test_subjects_and_quote():
+    assert sending.reply_subject("Hello") == "Re: Hello"
+    assert sending.reply_subject("RE: Hello") == "RE: Hello"
+    assert sending.forward_subject("Hello") == "Fwd: Hello"
+    assert sending.forward_subject("Fw: Hello") == "Fw: Hello"
+    q = sending.quote({"date": "Mon", "from": "bob@x.cu"}, "line 1\nline 2")
+    assert q.startswith("On Mon, bob@x.cu wrote:\n") and "> line 1\n> line 2" in q
+
+
+def test_outgoing_recipients_are_unique_and_include_bcc():
+    out = sending.Outgoing(sender="a@x.cu", to=["b@x.cu"], cc=["b@x.cu", "c@x.cu"], bcc=["d@x.cu"])
+    assert out.recipients == ["b@x.cu", "c@x.cu", "d@x.cu"]

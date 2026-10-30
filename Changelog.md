@@ -18,7 +18,7 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## Unreleased — MailD MCP (P0, P1, P1b — `mcp/progress.md`)
+## Unreleased — MailD MCP (P0, P1, P1b, P2 — `mcp/progress.md`)
 - Added: new `mcp` service (image `maild-mcp`, hostname `mcp`) — P0 skeleton: Django + uvicorn,
   `/healthz`, first-boot admin seed and the service mailbox `MCP_SERVICE_EMAIL` (default
   `mcp@<DEFAULT_DOMAIN>`, created when missing, never modified; generated passwords printed once
@@ -43,6 +43,13 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Security: `rehash-password.sh` skips master-user logins — without it the first MCP access to
   a mailbox still on a legacy `$1$` hash would have replaced that user's password with the
   master password.
+- Added (P2): 13 MCP write tools — flags, move, folders, drafts; spam/ham, trash/restore and
+  folder delete behind a two-step confirmation handle (nothing is ever deleted for good); and
+  send/reply/forward through amavis:10026 with sender ownership, a recipient rate limit
+  (`MCP_SEND_RATE_RECIPIENTS`/`MCP_SEND_RATE_WINDOW`), the mta's `MAX_MESSAGESIZE`, a copy in
+  Sent and a confirmation for recipients outside the server. User preferences (confirmation,
+  default sender, signature, hidden folders, attachments) and an Activity list. cron's
+  `outbound_watch.sh` now counts mail sent through the MCP.
 - Security (P1b, D13): amavis's 10024 listener accepted SMTP from **any** source (`inet_acl
   0.0.0.0/0`), so every container on the shared `maild` network (the ingress included) could
   send DKIM-signed mail as any hosted address. 10024 now admits only the mta; a new listener

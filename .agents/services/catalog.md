@@ -27,8 +27,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   EXECUTE revoked from PUBLIC) → `ensure_roles.sh`. The last one runs only when
   `MCP_DB_PASSWORD` is set: it creates/re-asserts the `MCP_DB_USER` role (default `maild_mcp`,
   no superuser/createdb/createrole), makes it owner of `MCP_DB`, and **declaratively** revokes and
-  re-grants its catalogue rights on every boot — column `SELECT` on `domain(domain, active)` and
-  `mailbox(username, domain, local_part, name, active)` (never `password`), `SELECT` on
+  re-grants its catalogue rights on every boot — column `SELECT` on `domain(domain, active)`,
+  `mailbox(username, domain, local_part, name, active)` (never `password`) and
+  `alias_domain(alias_domain, target_domain, active)` (P2: "external recipient"), `SELECT` on
   `maild_provision`, `EXECUTE` on the function. The password reaches psql as a stdin variable,
   never on a command line. Rotation = change the env file + restart db (and recreate mcp).
 - Env (new schema): defaults baked in `db/Dockerfile` (`POSTGRES_HOST/DB/USER/EXTRA_DB`);
@@ -415,8 +416,10 @@ more. See `.agents/services/provisioning.md`.
   the gate, 1 findings mailed, 2 the check could not run, 3 the report could not be
   mailed.
 - `outbound_watch.sh` (audit F-12, alerting half): parses the production syslog for the
-  day's per-user submission volume (`sasl_username=` on queue-id `from=` lines) and the
-  mta's `maild-ratelimit: throttled` lines, and mails an `[ALERT]` to the admin via
+  day's per-user submission volume (`sasl_username=` on queue-id `from=` lines, plus one
+  `maild-mcp: sent user=` line per message sent through the MailD MCP, which skips Postfix SASL)
+  and the throttle lines (the mta's `maild-ratelimit: throttled`, the MCP's `maild-mcp:
+  throttled`), and mails an `[ALERT]` to the admin via
   `swaks` → amavis:10026 when a user crosses `OUTBOUND_ALERT_MESSAGES` (default
   150/day, `0` = off) or tripped the throttle. `OUTBOUND_ALERT_IGNORE_USERS` is the
   alert-side twin of the mta's `OUTBOUND_RATE_EXEMPT_USERS`; one alert per user per day
@@ -490,6 +493,32 @@ more. See `.agents/services/provisioning.md`.
   notice per claimer/address/day), owner wins over a pending claim, a disabled secondary's own
   login is refused. PATs `mdmcp_pat_…` (HMAC-stored, scopes, optional address subset, 30 d /
   n days / forever, idle 30 d → disabled, re-enable only from the page).
+- **Write tools (P2)**: `mark_emails`, `move_emails`, `create_folder`, `rename_folder`,
+  `save_draft` (scope `mail.modify`); `report_spam`, `not_spam`, `trash_emails`,
+  `restore_from_trash`, `delete_folder` (`mail.trash`) — the destructive ones are **two-step**:
+  without `confirm` they return a preview + a handle (`mdmcp_cf_…`, `confirm_handle` table, HMAC
+  stored, single use, 5 min, bound to token + tool + a digest of every other argument). No path
+  expunges: spam/trash are MOVEs into the special-use folders (Junk moves fire imapsieve's Bayes
+  learning through the master-user IMAP session), `delete_folder` only takes an empty, non-special
+  folder.
+- **Sending (P2)**: `send_email`, `reply_email`, `forward_email` (`mail.send`, filter/argument
+  `sender`, not `from`) build the MIME message (`policy.SMTP`, generated `Message-ID`,
+  `User-Agent: MailD-MCP/…`, `X-MailD-MCP-Token: <public id>`, signature preference) and submit it
+  to `amavis:10026` (DKIM-signed by bank INTERNAL). Enforced by the MCP because the path skips
+  Postfix: sender = a usable address of the caller; recipients per window per account AND per
+  sender (`send_counter`, `MCP_SEND_RATE_RECIPIENTS`/`MCP_SEND_RATE_WINDOW`, logged as
+  `maild-mcp: throttled`); `MAX_MESSAGESIZE` (the mta's variable). `Bcc` only on the envelope,
+  kept in the Sent copy (APPEND `\Seen`; a failed APPEND is a warning, the send stands). Every
+  send logs `maild-mcp: sent user=<addr> rcpts=<n> token=<id>` (counted by cron's
+  `outbound_watch.sh`). Confirmation by preference: `always`, or `external` (default: any
+  recipient outside the active domains + alias domains); `never` is not offered until the P3
+  admin setting. Reply: default sender = the caller's address in Delivered-To/To/Cc, else the
+  mailbox; `Re:`, In-Reply-To/References, quoted original. Forward keeps attachments unless told
+  not to.
+- **Preferences (P2)** `account.prefs`, `GET/PUT /webapi/user/prefs`: `confirm_send`,
+  `default_sender`, `signature`, `hidden_folders` (never listed, searched, threaded, watched or
+  touched; INBOX cannot be hidden), `allow_attachments`; `GET /webapi/user/activity` = the last
+  50 audit actions of the account (per-request `bearer.access` records excluded).
 - **Service mail** (magic links, notices) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10026, bank
   INTERNAL) as `MCP_SERVICE_EMAIL`, EN/ES, `Auto-Submitted: auto-generated`.
 - **Logs**: JSON Lines `audit-/access-/errors-YYYY-MM-DD.log` in `MCP_LOG_DIR` (O_APPEND, 90 files
@@ -517,7 +546,8 @@ more. See `.agents/services/provisioning.md`.
   the mail storage.
 - Ports: dev publishes `8085:8080`; production has no published port, Traefik labels route
   `${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}` to 8080 (TLS at the operator's ingress).
-- `test.sh` J7–J11 (role grants, service mailbox, healthz), G4c (backup archive) and K1–K22
+- `test.sh` J7–J11 (role grants, service mailbox, healthz), G4c (backup archive), G14b (MCP sends
+  in the outbound alert), M1–M15 (write tools, confirmations, sending, preferences) and K1–K22
   (user side + read tools through the SDK client, `tests/mcp_call.py`); browser flows:
   `./adminng/pwa-test/run.sh mcp`; unit tests: `mcp/tests/test_units.py` (pytest, run in a
   throwaway container — command in `mcp/tests/conftest.py`).
