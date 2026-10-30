@@ -3,7 +3,7 @@ import { useVirtualizer } from '@tanstack/react-virtual'
 import { useTranslation } from 'react-i18next'
 import { api, type AuditEvent, type Domain } from '../lib/api'
 import { cacheLogs, cachedLogs, db } from '../lib/cache'
-import { useSelectedDomain } from '../lib/selectedDomain'
+import { setSelectedDomain, useSelectedDomain } from '../lib/selectedDomain'
 import { Badge, ErrorBanner, SectionHeader, Select } from '../components/kit'
 import { Button } from '../components/ui/button'
 
@@ -12,9 +12,10 @@ export const NOBODY_ACTOR = '__none__'
 
 export function LogsPage() {
   const { t } = useTranslation()
-  const scope = useSelectedDomain()
+  // The Domain filter IS the global shell scope (spec §6.2), like the Accounts page's selector:
+  // one state, so the sidebar, the mobile menu and this filter can never disagree.
+  const domain = useSelectedDomain()
   const [actor, setActor] = useState('')
-  const [domain, setDomain] = useState('')
   const [action, setAction] = useState('')
   const [domains, setDomains] = useState<string[]>([])
   const [actors, setActors] = useState<string[]>([])
@@ -24,15 +25,6 @@ export function LogsPage() {
   const [error, setError] = useState<string | null>(null)
   const [offline, setOffline] = useState(false)
   const parentRef = useRef<HTMLDivElement>(null)
-
-  // Adopt the global shell domain scope once (local override wins after that).
-  const scoped = useRef(false)
-  useEffect(() => {
-    if (!scoped.current && scope) {
-      scoped.current = true
-      setDomain(scope)
-    }
-  }, [scope])
 
 
   const load = useCallback(
@@ -142,7 +134,7 @@ export function LogsPage() {
       <div className="grid gap-2 sm:grid-cols-3">
         <label className="block text-sm">
           <span className="mb-1 block text-slate-400">{t('logs.domain')}</span>
-          <Select aria-label={t('logs.domain')} value={domain} onChange={(event) => setDomain(event.target.value)}>
+          <Select aria-label={t('logs.domain')} value={domain} onChange={(event) => setSelectedDomain(event.target.value)}>
             <option value="">{t('logs.allDomains')}</option>
             {domains.map((entry) => (
               <option key={entry} value={entry}>{entry}</option>

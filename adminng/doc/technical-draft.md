@@ -534,6 +534,10 @@ confirm button (§6.3) so no destructive click can be a reflex.
   notification bell — pending device requests surface there), bottom sticky
   tab bar (`[⚙️ Admin]` `[✉️ Accounts]` `[📋 Logs]` — Admin includes devices),
   and a contextual **FAB (+)** for the create-action of the current section.
+- **One domain scope:** the selector is a single per-browser state
+  (`lib/selectedDomain.ts`). Any in-page domain picker (the Accounts toolbar, the
+  Logs filter bar) is a view of that same state, never a private copy, so the
+  sidebar, the mobile menu and the page always show — and query — the same domain.
 - Same routes, same components — the shell collapses/expands by form factor.
 
 ### 6.3 Screens & flows (from the UI/UX draft, refined)

@@ -50,6 +50,10 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
   watchdog (`PEER_WATCH_INTERVAL`, shared with the mta) re-renders the ACLs and reloads amavis
   when a peer is recreated. Cron jobs submit to `AMAVIS_SUBMIT_PORT` (default 10026), the MCP
   to `MCP_SMTP_PORT` (default 10026). The dev compose no longer publishes 10024.
+- Fixed: AdminNG Logs — the Domain filter kept a private copy of the global domain scope (taken
+  once), so on the Logs screen the sidebar selector and the filter could show different domains
+  and changing the sidebar did nothing. The filter is now the global scope itself, like the
+  Accounts selector; the browser flow checks the sync both ways.
 - Fixed: `bootstrap-dev.sh` left `ldata/vmail/<domain>` root-owned, so Dovecot could not create
   the home of any mailbox added later to a fixture domain.
 

@@ -109,9 +109,12 @@ test('the full admin flow works in a real browser', async ({ page }) => {
   await test.step('the logs filters are tenant-scoped dropdowns', async () => {
     await page.getByRole('link', { name: /Logs/ }).first().click()
 
-    const domain = page.getByLabel('Domain', { exact: true })
-    const actor = page.getByLabel('Actor', { exact: true })
-    const action = page.getByLabel('Action', { exact: true })
+    // The page's Domain filter is the global shell scope (one state, like the Accounts selector),
+    // so "Domain" labels two controls on this screen: take the filter from the page body.
+    const main = page.getByRole('main')
+    const domain = main.getByLabel('Domain', { exact: true })
+    const actor = main.getByLabel('Actor', { exact: true })
+    const action = main.getByLabel('Action', { exact: true })
     await expect(domain).toBeVisible()
     await expect(actor).toBeVisible()
     await expect(action).toBeVisible()
@@ -130,6 +133,16 @@ test('the full admin flow works in a real browser', async ({ page }) => {
     })
     await actor.selectOption('__none__')
     await expect.poll(() => calls.some((url) => url.includes('actor=__none__'))).toBe(true)
+    await actor.selectOption('')
+
+    // One scope, both ways: the filter moves the sidebar scope (and the query) …
+    const scope = page.locator('#domain-scope')
+    await domain.selectOption('example.net')
+    await expect(scope).toHaveValue('example.net')
+    await expect.poll(() => calls.some((url) => url.includes('domain=example.net'))).toBe(true)
+    // … and the sidebar scope moves the filter (it used to be copied once, then ignored).
+    await scope.selectOption('')
+    await expect(domain).toHaveValue('')
   })
 
   await test.step('switching the language translates the navigation', async () => {
