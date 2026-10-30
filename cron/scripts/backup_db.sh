@@ -32,6 +32,9 @@ BACKUP_RETENTION_DAYS=15
 # on every boot, used by the api. Defaulted here because the cron image bakes no
 # ADMINNG_* variables of its own.
 : "${ADMINNG_DB:=adminng}"
+# The MailD MCP's own database (accounts, tokens, settings): created by the db image, owned by
+# the MCP role, dumped here as POSTGRES_USER (superuser), so the ownership does not get in the way.
+: "${MCP_DB:=mcp}"
 # An empty dump compressed is ~20 bytes and a real mailddb dump is tens of KB, so anything
 # below this is not a backup (overridable from the environment).
 BACKUP_MIN_BYTES="${BACKUP_MIN_BYTES:-1024}"
@@ -74,6 +77,7 @@ log "=== Starting PostgreSQL backup ==="
 {
     echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
     [ -n "${ADMINNG_DB:-}" ] && echo "$POSTGRES_HOST:5432:$ADMINNG_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
+    [ -n "${MCP_DB:-}" ] && echo "$POSTGRES_HOST:5432:$MCP_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
 } > ~/.pgpass
 chmod 0600 ~/.pgpass
 
@@ -256,10 +260,93 @@ if [ "${ADMINNG_STATUS}" = "FAILED" ]; then
     FAIL_REASON="the AdminNG database dump failed: ${ADMINNG_FAIL} (the catalogue archive was kept)"
 fi
 
+# --- MailD MCP database (accounts, addresses, tokens, settings) ----------------
+# A third archive with the same treatment and the same failure rule as AdminNG. SKIPPED (not
+# FAILED) when the database does not exist or has no table yet: the db image creates it on
+# every boot, but it stays empty until the mcp container has run its migrations.
+MCP_BACKUP_FILE="${BACKUP_DIR}/maild_mcp_${DATE}.sql.gz"
+MCP_STATUS="SKIPPED"
+MCP_BYTES=0
+MCP_SIZE="n/a"
+MCP_TABLES=0
+MCP_FAIL=""
+
+if [ "${BACKUP_STATUS}" = "SUCCESS" ] && [ -n "${MCP_DB:-}" ]; then
+    MCP_HAS_TABLES=$(psql -h ${POSTGRES_HOST} -U ${POSTGRES_USER} -d "${MCP_DB}" -w -tA \
+        -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" 2>/dev/null | tr -d '[:space:]')
+    if [ -z "${MCP_HAS_TABLES}" ] || [ "${MCP_HAS_TABLES}" = "0" ]; then
+        log "MCP database ${MCP_DB} missing or empty, skipping its archive"
+    else
+        log "Backing up MCP database: ${MCP_DB}"
+
+        MCP_ERR=$(mktemp)
+        pg_dump -h ${POSTGRES_HOST} \
+                -U ${POSTGRES_USER} \
+                -d "${MCP_DB}" \
+                -w \
+                --no-owner \
+                --no-acl \
+                2> ${MCP_ERR} \
+            | gzip > "${MCP_BACKUP_FILE}" 2>> ${LOG_FILE}
+
+        PIPE_RC=("${PIPESTATUS[@]}")
+        MCP_DUMP_RC="${PIPE_RC[0]:-1}"
+        MCP_GZIP_RC="${PIPE_RC[1]:-1}"
+
+        if [ -s "${MCP_ERR}" ]; then
+            log "pg_dump (${MCP_DB}) reported:"
+            sed 's/^/    /' ${MCP_ERR} | tee -a ${LOG_FILE} > /dev/null
+        fi
+        rm -f ${MCP_ERR}
+
+        if [ "${MCP_DUMP_RC}" -ne 0 ]; then
+            MCP_STATUS="FAILED" ; MCP_FAIL="pg_dump exited with ${MCP_DUMP_RC}"
+        elif [ "${MCP_GZIP_RC}" -ne 0 ]; then
+            MCP_STATUS="FAILED" ; MCP_FAIL="gzip exited with ${MCP_GZIP_RC}"
+        else
+            MCP_BYTES=$(stat -c %s "${MCP_BACKUP_FILE}" 2>/dev/null || echo 0)
+            MCP_SIZE=$(du -h "${MCP_BACKUP_FILE}" | cut -f1)
+            if [ "${MCP_BYTES}" -lt "${BACKUP_MIN_BYTES}" ]; then
+                MCP_STATUS="FAILED" ; MCP_FAIL="archive is only ${MCP_BYTES} bytes"
+            elif ! gzip -t "${MCP_BACKUP_FILE}" 2>> ${LOG_FILE}; then
+                MCP_STATUS="FAILED" ; MCP_FAIL="gzip -t failed"
+            else
+                MCP_MARKERS=$(zcat "${MCP_BACKUP_FILE}" | awk '
+                    /^-- PostgreSQL database dump$/          { header = 1 }
+                    /^-- PostgreSQL database dump complete$/ { trailer = 1 }
+                    /^CREATE TABLE /                         { tables++ }
+                    END { printf "%d %d %d", header, trailer, tables+0 }')
+                MCP_HEADER="${MCP_MARKERS%% *}"
+                MCP_REST="${MCP_MARKERS#* }"
+                MCP_TRAILER="${MCP_REST%% *}"
+                MCP_TABLES="${MCP_REST##* }"
+                if [ "${MCP_HEADER}" != "1" ] || [ "${MCP_TRAILER}" != "1" ]; then
+                    MCP_STATUS="FAILED"
+                    MCP_FAIL="payload is not a complete SQL dump (header=${MCP_HEADER}, trailer=${MCP_TRAILER})"
+                else
+                    MCP_STATUS="SUCCESS"
+                fi
+            fi
+        fi
+
+        if [ "${MCP_STATUS}" = "FAILED" ]; then
+            rm -f "${MCP_BACKUP_FILE}"
+            log "ERROR: MCP backup FAILED: ${MCP_FAIL}"
+        else
+            log "MCP backup completed: ${MCP_BACKUP_FILE} (${MCP_SIZE}, ${MCP_BYTES} bytes, ${MCP_TABLES} tables)"
+        fi
+    fi
+fi
+
+if [ "${MCP_STATUS}" = "FAILED" ]; then
+    BACKUP_STATUS="FAILED"
+    FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }the MCP database dump failed: ${MCP_FAIL} (the catalogue archive was kept)"
+fi
+
 # Clean up old backups (keep only last 15 days)
 log "Cleaning up old backups (keeping last ${BACKUP_RETENTION_DAYS} days)..."
 
-OLD_BACKUPS=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f -mtime +${BACKUP_RETENTION_DAYS})
+OLD_BACKUPS=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f -mtime +${BACKUP_RETENTION_DAYS})
 
 if [ -n "$OLD_BACKUPS" ]; then
     echo "$OLD_BACKUPS" | while read -r old_file; do
@@ -271,7 +358,7 @@ else
 fi
 
 # Count current backups
-BACKUP_COUNT=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f | wc -l)
+BACKUP_COUNT=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f | wc -l)
 log "Current backup count: ${BACKUP_COUNT}"
 
 # Calculate total backup size
@@ -280,7 +367,7 @@ log "Total backup storage used: ${TOTAL_SIZE}"
 
 # List recent backups
 log "Recent backups:"
-find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f -mtime -${BACKUP_RETENTION_DAYS} -exec ls -lh {} \; | \
+find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f -mtime -${BACKUP_RETENTION_DAYS} -exec ls -lh {} \; | \
     awk '{print $9, "(" $5 ")"}' | tee -a ${LOG_FILE}
 
 log "=== Backup process completed ==="
@@ -310,12 +397,16 @@ AdminNG database: ${ADMINNG_DB:-adminng} (${ADMINNG_STATUS})
 AdminNG File: ${ADMINNG_BACKUP_FILE}
 AdminNG Size: ${ADMINNG_SIZE} (${ADMINNG_BYTES} bytes, ${ADMINNG_TABLES} tables)
 
+MCP database: ${MCP_DB:-mcp} (${MCP_STATUS})
+MCP File: ${MCP_BACKUP_FILE}
+MCP Size: ${MCP_SIZE} (${MCP_BYTES} bytes, ${MCP_TABLES} tables)
+
 Retention Policy: ${BACKUP_RETENTION_DAYS} days
 Current Backup Count: ${BACKUP_COUNT}
 Total Storage Used: ${TOTAL_SIZE}
 
 Recent Backups:
-$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" \) -type f -mtime -7 -printf "%TY-%Tm-%Td %TH:%TM %f (%s bytes)\n" | sort -r)
+$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f -mtime -7 -printf "%TY-%Tm-%Td %TH:%TM %f (%s bytes)\n" | sort -r)
 
 Log file: ${LOG_FILE}
 

@@ -99,13 +99,13 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 - **Auth works, delivery loops:** the mta still points at a dead mda IP — restart the mta.
 - **Secret drift:** created the stack without `--env-file env.dev`? Postgres honours its
   password only on first init: `down` → `rm -rf ldata/` → bootstrap again.
-- **Port conflicts on the host:** `ss -tulpn | grep -E ':(25|465|587|993|995|5432|8080|8081|8082)\b'`.
+- **Port conflicts on the host:** `ss -tulpn | grep -E ':(25|465|587|993|995|5432|8080|8081|8082|8083|8084|8085)\b'`.
 
 ## Test suite
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 84 checks
+./test.sh                 # 105 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -118,6 +118,13 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   twice, so its `flock` release is proven), the imapsieve Junk-move learning trigger (a real
   IMAP COPY) and the `sa-update` loop with the rules it maintains (`spamassassin --lint` plus
   the `.pre` family of the installed major).
+- Section J covers the MailD MCP foundations (P0): the Dovecot master user (IMAP only, never an
+  inactive mailbox, never rehashing a legacy `$1$` row with the master password — with a control
+  proving the own-login rehash still works, and the `auth_user=<mcp>` login trail), the
+  `maild_mcp` role grants, the service mailbox (created once, untouched on restart) and
+  `/healthz`; G4c checks the MCP backup archive. It creates two throwaway mailboxes
+  (`mcp-*-probe@example.net`) and removes them on exit; it skips when `env.dev` carries no
+  MCP secrets.
 - The F-12 outbound throttle is covered end to end: the `submission`/`smtps` policy wiring
   and the fail-open contract are asserted from the live `master.cf`, the limit and the hard
   per-account exemption are probed by speaking the Postfix policy protocol straight to

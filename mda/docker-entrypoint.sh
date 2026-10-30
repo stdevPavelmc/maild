@@ -167,6 +167,32 @@ if [ "$1" = 'dovecot' ]; then
     sed -i "s/^auth_allow_weak_schemes.*/auth_allow_weak_schemes = ${WEAK_SCHEMES}/" \
         /etc/dovecot/conf.d/10-auth.conf
 
+    # --- MailD MCP master user (opt-in, every boot) --------------------------
+    # Set MCP_DOVECOT_MASTER_PASSWORD and the mcp container can open any active
+    # mailbox over IMAP as `user@domain*${MCP_DOVECOT_MASTER_USER}`. Unset, the
+    # master passdb and its password file are removed, so a stack without the
+    # MCP has no master user at all. Rendered on every boot: rotating (or
+    # removing) the password is "change the env file + recreate mda".
+    MASTER_CONF=/etc/dovecot/conf.d/auth-master.conf.ext
+    MASTER_FILE=/etc/dovecot/master-users
+    if [ -n "${MCP_DOVECOT_MASTER_PASSWORD:-}" ] ; then
+        MASTER_NAME="${MCP_DOVECOT_MASTER_USER:-mcp}"
+        # the password goes to doveadm on stdin twice (prompt + retype), never argv
+        if ! MASTER_HASH="$(printf '%s\n%s\n' "${MCP_DOVECOT_MASTER_PASSWORD}" "${MCP_DOVECOT_MASTER_PASSWORD}" \
+                | doveadm pw -s ARGON2ID 2>/dev/null)" || [ -z "${MASTER_HASH}" ] ; then
+            echo "mda: ERROR - could not hash MCP_DOVECOT_MASTER_PASSWORD, master user NOT enabled" >&2
+            rm -f "${MASTER_CONF}" "${MASTER_FILE}"
+        else
+            ( umask 027 ; printf '%s:%s\n' "${MASTER_NAME}" "${MASTER_HASH}" > "${MASTER_FILE}" )
+            chown root:dovecot "${MASTER_FILE}"
+            chmod 0640 "${MASTER_FILE}"
+            cp /etc/dovecot/conf.d/auth-master.conf.ext.in "${MASTER_CONF}"
+            echo "mda: INFO - MCP master user '${MASTER_NAME}' enabled (IMAP only)"
+        fi
+    else
+        rm -f "${MASTER_CONF}" "${MASTER_FILE}"
+    fi
+
     # daily mailbox quota report: a background loop that mails the admin the
     # mailboxes over QUOTA_REPORT_THRESHOLD (80% by default) on the first tick
     # past QUOTA_REPORT_HOUR:QUOTA_REPORT_MINUTE (00:01 by default) with no

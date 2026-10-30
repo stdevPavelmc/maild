@@ -1,0 +1,22 @@
+# MailD MCP: Dovecot master user (proposal mcp/technical-proposal.md §5.3, §9.1).
+#
+# Installed as auth-master.conf.ext by docker-entrypoint.sh only when
+# MCP_DOVECOT_MASTER_PASSWORD is set; /etc/dovecot/master-users is rendered on
+# the same boot (`<MCP_DOVECOT_MASTER_USER>:{ARGON2ID}…`, 0640 root:dovecot).
+#
+# Login: `user@domain*<master>` + the master password. The master passdb sits
+# inside `protocol imap`, so the same credentials fail over POP3, ManageSieve
+# and SMTP AUTH (the mta's SASL on the auth socket). The userdb lookup still
+# runs for the target user (`active='1'`), so inactive or deleted mailboxes
+# cannot be opened. Every master login is logged with the master name.
+auth_master_user_separator = *
+
+protocol imap {
+  passdb mcp_master {
+    driver = passwd-file
+    master = yes
+    passwd_file_path = /etc/dovecot/master-users
+    # continue to the SQL passdb so the target user must exist and be active
+    result_success = continue
+  }
+}

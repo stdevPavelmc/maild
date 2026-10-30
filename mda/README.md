@@ -16,7 +16,15 @@ LMTP local delivery, SASL authentication for the MTA, and mailbox quota enforcem
 - **Password schemes & migration (F-18):** Argon2id is the default hashing scheme. Legacy
   MD5-CRYPT (`$1$`) hashes coexist and are migrated automatically to Argon2id upon successful
   login via `scripts/rehash-password.sh`. Weak scheme support is date-gated and will be disabled
-  on **2027-02-01**.
+  on **2027-02-01**. The rehash is skipped on master-user logins (the plaintext there is the
+  master password, not the user's).
+- **MailD MCP master user (opt-in):** with `MCP_DOVECOT_MASTER_PASSWORD` set, the `mcp`
+  container can open any **active** mailbox over **IMAP only** as
+  `user@domain*<MCP_DOVECOT_MASTER_USER>` (default `mcp`). The entrypoint renders
+  `/etc/dovecot/master-users` (Argon2id) and enables `conf.d/auth-master.conf.ext` on every
+  boot, and removes both when the variable is unset. POP3, ManageSieve and SMTP AUTH refuse
+  the master credentials. Every login line carries `auth_user=<…>`: the master name on a master
+  login, so MCP accesses are visible in `docker compose logs mda`.
 - **Instant SpamAssassin Bayes learning:** ImapSieve triggers scripts in `/usr/lib/dovecot/sieve-pipe/`
   whenever a user moves mail into (`learn-spam.sh`) or out of (`learn-ham.sh`) the `Junk` folder.
 - **Daily quota reporting:** A background loop runs `/scripts/quota_report.sh` daily, emailing
@@ -67,6 +75,8 @@ production, `env.dev` in development) overrides any value.
 - `COUNTRY=JM`, `STATE=Kingston`, `CITY=Kingston`, `ORG=MailD`, `OU=MailD`: Self-signed TLS certificate subject fields.
 
 ### Optional overrides
+- `MCP_DOVECOT_MASTER_PASSWORD`: enables the MCP master user (unset = none). Rotation: change it in the env file and recreate `mda` and `mcp`.
+- `MCP_DOVECOT_MASTER_USER`: master login name (default `mcp`; must match the mcp container).
 - `QUOTA_REPORT_THRESHOLD`: Percentage threshold to flag mailboxes in daily report (default 80).
 - `QUOTA_REPORT_CRITICAL`: Critical percentage threshold in daily report (default 99).
 - `QUOTA_REPORT_ONLY_WHEN_WARN`: Only send email when mailboxes exceed the threshold (default true).

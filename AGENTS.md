@@ -19,12 +19,13 @@ for maintenance jobs.
 | `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083 (HTTP), 8084 (HTTPS, dev) |
 | `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
 | `cron`   | Scheduled jobs: db backup, traffic resume, SA…    | —                         |
+| `mcp`    | MailD MCP — AI-assistant mailbox access (Django; IMAP master user; P0 skeleton, see `mcp/progress.md`) | 8085 (dev) |
 | `dozzle` | Dev-only live container log viewer                | 8082                      |
 
 ## Core Principles — never break these
 
 - **Never rename service hostnames** (`db`, `mta`, `mda`, `amavis`, `clamav`,
-  `mua`, `cron`, `api`, `adminng`) — they are hardcoded across entrypoints,
+  `mua`, `cron`, `api`, `adminng`, `mcp`) — they are hardcoded across entrypoints,
   Postfix/Dovecot/Amavis config and the test suite.
 - **Never change the database schema** without a migration script. `db/ensure_databases.sh`
   only *creates missing* databases (`POSTGRES_EXTRA_DB`); it never alters existing ones.
@@ -55,9 +56,9 @@ for maintenance jobs.
   `.gitlab-ci.yml`). `compose-dockerhub.yml` no longer exists: `docker-compose.yml` *is* the
   Docker Hub file. Images are always named `maild-<svc>:<tag>`; `dozzle` and `pwa-test`
   are dev-only.
-- **Production HTTP is proxied.** `mua` (`webmail.${DEFAULT_DOMAIN}`) and `adminng`
-  (`adminng.${DEFAULT_DOMAIN}`) carry Traefik labels on every production compose file, and
-  the stack terminates **no** TLS for them. The operator must supply an ingress controller
+- **Production HTTP is proxied.** `mua` (`webmail.${DEFAULT_DOMAIN}`), `adminng`
+  (`adminng.${DEFAULT_DOMAIN}`) and `mcp` (`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`) carry
+  Traefik labels on every production compose file, and the stack terminates **no** TLS for them. The operator must supply an ingress controller
   that terminates TLS (Traefik, Nginx, …) and joins the external `maild` network.
 - **MTA & MDA ports** all MTA ports [25, 465, 587] are exposed to the production
   dockerfiles; in the case of the MDA only the 993 & 995 ports are exposed, no
@@ -72,7 +73,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (93 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (105 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```

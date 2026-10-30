@@ -44,8 +44,12 @@ userdb sql {
   # (Dovecot docs: "Converting Password Schemes"). rehash-password.sh uses it to
   # rehash legacy $1$ rows to Argon2id on successful logins. It never reaches a
   # mail process and is never logged.
+  # master_user is the master login name on a master-user login (MailD MCP,
+  # `user@domain*mcp`) and empty otherwise; rehash-password.sh skips the rehash
+  # when it is set, because PLAIN_PASS then holds the master password.
   fields {
     plain_pass = %{password}
+    master_user = %{master_user}
   }
 
   # doveadm -A (the daily quota report) iterates the active mailboxes

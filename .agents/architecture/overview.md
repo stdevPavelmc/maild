@@ -49,6 +49,7 @@ compose network.
 | `api` | `pavelmc/maild-api:develop` | AdminNG API + first-boot seeder | — (internal) | db |
 | `mua` | `pavelmc/maild-mua:develop` | SnappyMail webmail | 8081 | mda |
 | `cron` | `pavelmc/maild-cron:develop` | maintenance jobs | — | db |
+| `mcp` | `pavelmc/maild-mcp:develop` | MailD MCP: AI-assistant access to the mailboxes (IMAP master user); P0 skeleton | 8085 | db, mda, amavis |
 | `dozzle` | `amir20/dozzle:latest` | live log viewer (dev only) | 8082 | — |
 | `pwa-test` | `pavelmc/maild-pwa-test:develop` | Playwright + Lighthouse harness (dev only, one-shot) | — | api, adminng |
 
@@ -58,7 +59,7 @@ compose network.
   real bounded waiting (Postgres, the catalogue schema, Dovecot's auth socket, the web UIs,
   the ClamAV signatures).
 - Production images are `pavelmc/maild-<svc>:latest` (Docker Hub), `ghcr.io/stdevpavelmc/maild-<svc>:latest`
-  (GitHub) or `${IMG_<SVC>}:${TAG}` (GitLab). The web UIs (`mua`, `adminng`) are exposed via
+  (GitHub) or `${IMG_<SVC>}:${TAG}` (GitLab). The web UIs (`mua`, `adminng`, `mcp`) are exposed via
   Traefik labels and fronted by an external ingress that terminates TLS — the stack ships none.
 
 ## Startup order
@@ -71,6 +72,9 @@ compose network.
 5. `mta` (needs mda + amavis + clamav) — last, it hard-depends on its peers.
 6. `api`, `adminng`, `mua`, `cron` — after db; the `api` container seeds the catalogue on
    boot (and `db` creates its schema), which is why bootstrap waits for the schema first.
+7. `mcp` — gates (bounded) on the `maild_provision` sentinel, migrates its own DB, seeds its
+   admin and ensures its service mailbox before uvicorn starts. The `db` must have run
+   `ensure_roles.sh` (the `maild_mcp` role) — until then mcp keeps waiting.
 
 First-boot provisioning rides on this order: the `db` entrypoint applies
 `db/migrations/001_maild_provision.sql` (the sentinel table) and
@@ -86,13 +90,14 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 | `ldata/db` | `/var/lib/postgresql/data` | db |
 | `ldata/vmail` | `/home/vmail` | mda, mta, cron |
 | `ldata/spool` | `/var/spool/` | mda, mta, amavis |
-| `ldata/certs` | `/certs` | mda, mta, adminng (read-only TLS certs in dev) |
+| `ldata/certs` | `/certs` | mda, mta, adminng, mcp (read-only TLS certs in dev; mcp verifies mda's STARTTLS) |
 | `ldata/clamav` | `/var/lib/clamav` | clamav |
 | `ldata/amavis` | `/var/lib/amavis` | clamav, amavis (quarantine in `virusmails/`); cron **read-only** (the DKIM keys `dkim/db.txt` + `dkim/*.txt` for `check_dns.sh`) |
 | `ldata/spamassassin` | `/var/lib/spamassassin` | amavis (bayes db), cron (learning) |
 | `ldata/mua_web` | `/var/www/html/data` | mua (only the writable `data/` dir!) |
 | `ldata/logs` | `/var/log` | cron (empty in dev — JSON logging, see DEV-SETUP.md) |
 | `ldata/backups` | `/backups` | cron (db dumps) |
+| `ldata/mcp_logs` | `/var/log/maild-mcp` | mcp (audit/access/error logs; owner 10001, prepared by bootstrap) |
 | `ldata/dozzle` | `/data` | dozzle |
 | `ldata/e2e` | `/artifacts` | pwa-test (Playwright reports/traces, screenshots, axe JSON, Lighthouse) |
 
@@ -102,7 +107,7 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 
 | Service | ENTRYPOINT → CMD | HEALTHCHECK |
 |---------|------------------|-------------|
-| db | `docker-entrypoint-wrapper.sh` → `ensure_databases.sh` → stock postgres entrypoint; `CMD postgres` | `pg_isready -U $POSTGRES_USER` |
+| db | `docker-entrypoint-wrapper.sh` → stock postgres entrypoint, then `ensure_databases.sh` → `migrate.sh` → `ensure_roles.sh`; `CMD postgres` | `pg_isready -U $POSTGRES_USER` |
 | clamav | `/docker-entrypoint.sh` (foreground) | `/check.sh` |
 | amavis | `/docker-entrypoint.sh` → `amavisd` (`CMD amavis`) | `/check.sh` |
 | mda | `/docker-entrypoint.sh` → `dovecot` | `/check.sh` |
@@ -111,6 +116,7 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 | adminng | stock nginx entrypoint → `nginx -g daemon off` | busybox `wget -q -O /dev/null http://127.0.0.1/` |
 | mua | `/docker-entrypoint.sh` → apache (base image default) | `curl -f http://localhost/` |
 | cron | `/docker-entrypoint.sh` → `cron -f -L 2` | none |
+| mcp | `/docker-entrypoint.sh` → `manage.py mcp_boot` → `uvicorn asgi:application` | HTTP `GET /healthz` (db + catalogue + IMAP greeting) |
 
 The `amavis`, `mua` and `mta` entrypoints additionally gate on the `maild_provision` sentinel
 before their DB-dependent config stage; the `api` bootstrap (`app/provision.py`) seeds the
@@ -127,7 +133,7 @@ catalogue and writes it. See `.agents/services/provisioning.md`.
 | 03:30 | `learn_from_folders.sh` | Bayes learning from Junk + INBOX samples |
 | hourly (:23) | `outbound_watch.sh` | per-user outbound volume + throttle alerts (needs syslog) |
 | 04:20 | `check_dns.sh` | public-DNS health check per active domain (MX/SPF/DMARC/DKIM/PTR/blocklists) → mails only the deviations |
-| 08:00 | `backup_db.sh` | catalogue dump to `/backups/db` |
+| 08:00 | `backup_db.sh` | catalogue + AdminNG + MCP dumps to `/backups/db` |
 
 SpamAssassin rule updates run on the amavis container (`amavis/sa-update-loop.sh`), not cron.
 

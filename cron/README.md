@@ -34,9 +34,10 @@ The container executes scheduled jobs defined in `/etc/cron.d/maild` (crontab op
   - DNSBL / SURBL blocklists (`multi.surbl.org`, `zen.spamhaus.org`).
   - Emails findings to `DNS_CHECK_TO` (defaults to `postmaster@DEFAULT_DOMAIN`) only if findings meet or exceed `DNS_CHECK_ALERT_LEVEL` (default `warning`). Silent when healthy.
 - **08:00 UTC — Automated database backups (`backup_db.sh`):**
-  Uses `pg_dump` to create compressed dual backups:
+  Uses `pg_dump` to create compressed backups:
   - `maild_backup_<date>.sql.gz`: Catalogue database (`mailddb`).
   - `maild_adminng_<date>.sql.gz`: AdminNG state database (`adminng`).
+  - `maild_mcp_<date>.sql.gz`: MailD MCP database (`MCP_DB`, default `mcp`); skipped while that database is missing or empty.
   - Validates gzip archive integrity and prunes archives older than 15 days.
 
 ## Volumes

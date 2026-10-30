@@ -16,6 +16,7 @@ volumes:
   db:           # database storage
   mua_web:      # mua web data
   db_backups:   # database backups
+  mcp_logs:     # mcp audit/access/error logs
 
 services:
   db:
@@ -28,6 +29,8 @@ services:
       # explicit on every DB consumer: compose interpolation does not read env_file
       # contents, and the guard makes a missing password fail at `compose config`.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # MailD MCP role (db/ensure_roles.sh); empty = no MCP role, the stack still boots
+      MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:-}
     # operator env file (from env.sample); overrides any same-named image ENV default
     env_file:
       - .env
@@ -139,6 +142,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
       MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+      # MailD MCP Dovecot master user (IMAP only); empty = no master user
+      MCP_DOVECOT_MASTER_PASSWORD: ${MCP_DOVECOT_MASTER_PASSWORD:-}
     # DEFAULT_MAILBOX_SIZE (200M), the quota-report schedule and the self-signed
     # cert subject now default in the image; override them from .env when needed.
     # Operator env file; overrides any same-named image ENV default.
@@ -283,3 +288,71 @@ services:
       driver: syslog
       options:
         syslog-address: "unixgram:///dev/log"
+
+  mcp:
+    image: ${IMG_MCP}:${TAG}
+    build: ./mcp/
+    container_name: maild-mcp
+    hostname: mcp
+    restart: always
+    # NO env_file on purpose (mcp/progress.md P0, 2026-10-29): the operator file carries
+    # POSTGRES_PASSWORD and every other service's secrets, and the mcp connects to the db only
+    # as the restricted MCP_DB_USER role (D8). Allow-list: a new MCP_* tunable must be added here.
+    environment:
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+      MCP_SECRET_KEY: ${MCP_SECRET_KEY:?set MCP_SECRET_KEY in .env}
+      MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:?set MCP_DB_PASSWORD in .env}
+      MCP_DOVECOT_MASTER_PASSWORD: ${MCP_DOVECOT_MASTER_PASSWORD:?set MCP_DOVECOT_MASTER_PASSWORD in .env}
+      # optional tunables: bare keys pass the value from the operator file through and stay
+      # UNSET when it is absent, so the image ENV default applies
+      MCP_DB:
+      MCP_DB_USER:
+      MCP_HOSTNAME:
+      MCP_ADMIN_USER:
+      MCP_ADMIN_PASSWORD:
+      MCP_ADMIN_EMAIL:
+      MCP_SERVICE_EMAIL:
+      MCP_SERVICE_PASSWORD:
+      MCP_DOVECOT_MASTER_USER:
+      MCP_IMAP_HOST:
+      MCP_IMAP_PORT:
+      MCP_IMAP_CA_FILE:
+      MCP_WORKERS:
+      MCP_DEBUG:
+      POSTGRES_HOST:
+      POSTGRES_PORT:
+      POSTGRES_DB:
+      PROVISION_WAIT_TIMEOUT:
+    # No published port: exposed through the ingress proxy (Traefik labels below).
+    volumes:
+      - mcp_logs:/var/log/maild-mcp
+      # verifies the STARTTLS certificate of mda:143 (the mcp never mounts mail storage)
+      - /certs:/certs:ro
+    depends_on:
+      - db
+      - mda
+      - amavis
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
+    networks:
+      - maild
+    logging: # See https://docs.docker.com/config/containers/logging/syslog/
+      driver: syslog
+      options:
+        syslog-address: "unixgram:///dev/log"
+    labels:
+      # Ingress (Traefik) — https://${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}
+      - "traefik.enable=true"
+      - "traefik.http.routers.mcp.rule=Host(`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`)"
+      - "traefik.http.routers.mcp.entrypoints=websecure"
+      - "traefik.http.routers.mcp.tls=true"
+      # custom service (non default port)
+      - "traefik.http.routers.mcp.service=mcp_custom_port"
+      - "traefik.http.services.mcp_custom_port.loadbalancer.server.port=8080"
+      #- "traefik.docker.network=maild"

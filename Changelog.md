@@ -18,6 +18,29 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## Unreleased — MailD MCP (P0 foundations, `mcp/progress.md`)
+- Added: new `mcp` service (image `maild-mcp`, hostname `mcp`) — P0 skeleton: Django + uvicorn,
+  `/healthz`, first-boot admin seed and the service mailbox `MCP_SERVICE_EMAIL` (default
+  `mcp@<DEFAULT_DOMAIN>`, created when missing, never modified; generated passwords printed once
+  in `docker compose logs mcp`). In all four compose files with Traefik labels for
+  `${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`. **Upgrade note:** compose now requires
+  `MCP_DB_PASSWORD`, `MCP_SECRET_KEY` and `MCP_DOVECOT_MASTER_PASSWORD` in `.env` (see env.sample).
+  Editing `.env` recreates every service that reads it, and `adminng` (nginx → `api`) and
+  `amavis` (→ `mta`) cache their peers' IPs at start: bring the whole stack down and up again
+  (`docker compose down && docker compose up -d`) rather than a partial `up`.
+- Added: Dovecot master user for the MCP (`MCP_DOVECOT_MASTER_PASSWORD`, opt-in on the `mda`):
+  IMAP only, active mailboxes only; login lines now carry `auth_user=<…>`.
+- Added: db migration `003_mcp_service_mailbox.sql` (`maild_mcp_ensure_service_mailbox()`,
+  `SECURITY DEFINER`, insert-only) and `db/ensure_roles.sh`: the restricted `maild_mcp` role
+  (owner of the new `mcp` database, column-level read-only catalogue grants, never
+  `mailbox.password`).
+- Added: `backup_db.sh` writes a third archive, `maild_mcp_*.sql.gz`.
+- Security: `rehash-password.sh` skips master-user logins — without it the first MCP access to
+  a mailbox still on a legacy `$1$` hash would have replaced that user's password with the
+  master password.
+- Fixed: `bootstrap-dev.sh` left `ldata/vmail/<domain>` root-owned, so Dovecot could not create
+  the home of any mailbox added later to a fixture domain.
+
 ## 2026-10-25 1.8.0
 - Added: **daily public-DNS health check** — `cron/scripts/check_dns.sh`, scheduled at 04:20 UTC
   in `cron/crontab`. For every active domain in the catalogue it verifies what the outside world

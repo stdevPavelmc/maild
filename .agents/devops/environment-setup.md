@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - Docker + compose v2; bash; openssl; curl; git.
-- Free host ports: 25, 110, 143, 465, 587, 993, 995, 4190, 5432, 8081, 8082, 8083, 8084, 12345.
+- Free host ports: 25, 110, 143, 465, 587, 993, 995, 4190, 5432, 8081, 8082, 8083, 8084, 8085, 12345.
 - A local `swaks` binary is handy: `.local/bin/swaks` (git-ignored dir).
 
 ## Quick start (one command)
@@ -32,7 +32,7 @@ Re-run any time; `--help` lists all options.
 ## Manual path (what bootstrap automates)
 
 ```bash
-mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua_web,logs,certs,dozzle,backups}
+mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua_web,logs,certs,dozzle,backups,mcp_logs}
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout ldata/certs/mail.key -out ldata/certs/mail.crt \
   -subj "/C=JM/ST=Kingston/L=Kingston/O=MailD/OU=Dev/CN=mail.localhost"
@@ -59,6 +59,7 @@ configs and `test.creds` come from `bootstrap-dev.sh`. For a hand-seeded stack s
 | AdminNG PWA | http://localhost:8083 |
 | AdminNG PWA (TLS, dev) | https://localhost:8084 — LAN: `https://<lan-ip>:8084`; import `ldata/certs/adminng-ca.der` on the device first |
 | Log viewer (dozzle) | http://localhost:8082 |
+| MailD MCP (P0: `/healthz` only) | http://localhost:8085/healthz — admin/service-mailbox passwords are printed once in `docker compose … logs mcp` on first boot |
 | PostgreSQL | localhost:5432 — user `maild`, db `mailddb` (+ `contacts`), password = `POSTGRES_PASSWORD` from `env.dev` |
 | SMTP / SMTPS / Submission | localhost:25 / 465 / 587 |
 | POP3 / IMAP / TLS | 110 / 143 / 993 / 995 |
@@ -89,8 +90,10 @@ purpose; the AdminNG API verifies legacy hashes until the 2027-02-01 removal).
 1. Never run the production compose file locally; never touch production data from dev.
 2. `ldata/` is disposable in dev: `down` → `rm -rf ldata/` → re-run bootstrap. Never delete
    production volumes like that.
-3. `ldata/vmail` must be owned by uid/gid 5000, `ldata/mua_web` by `www-data` — bootstrap
-   repairs both; `sudo chown -R 5000:5000 ldata/vmail` if you create them by hand.
+3. `ldata/vmail` must be owned by uid/gid 5000 (the domain directories too: a root-owned
+   `ldata/vmail/<domain>` stops Dovecot from creating any new mailbox home in it),
+   `ldata/mua_web` by `www-data`, `ldata/mcp_logs` by 10001 — bootstrap repairs all of them;
+   `sudo chown -R 5000:5000 ldata/vmail` if you create them by hand.
 4. Never commit secrets/certs (`.env`, `test.creds`, `ldata/`, `*.log`, `.local/` are
    git-ignored). Warn loudly if any are staged.
 

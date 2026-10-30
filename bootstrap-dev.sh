@@ -235,6 +235,7 @@ MAIL_ADMIN_USER="${MAIL_ADMIN_USER:-sysadmin}"
 ADMINNG_PORT="8083"
 ADMINNG_TLS_PORT="8084"
 MUA_PORT="8081"
+MCP_PORT="8085"
 
 valid_domain "$TEST_DOMAIN" || die "--domain '$TEST_DOMAIN' is not a valid domain name"
 if [ "$SKIP_DEFAULT_DOMAIN" = 0 ]; then
@@ -298,7 +299,10 @@ bind_prep "pavelmc/maild-amavis:develop" "ldata/amavis" \
 # (the amavis one) as the vehicle.
 bind_prep "pavelmc/maild-amavis:develop" "ldata/clamav" \
 	"chown -R 100:101 /target && chmod 0750 /target"
-ok "amavis TEMPBASE and the clamav volume are in place"
+# mcp: runs as uid 10001 on a read-only rootfs, its only writable path is the log volume
+bind_prep "pavelmc/maild-amavis:develop" "ldata/mcp_logs" \
+	"chown 10001:10001 /target && chmod 0750 /target"
+ok "amavis TEMPBASE, the clamav volume and the mcp log dir are in place"
 
 # The AdminNG HTTPS listener (dev port 8084) reads a local CA + leaf from the
 # shared certs volume. A stack that already ran leaves ldata/certs owned by root
@@ -339,8 +343,10 @@ if [ "$DO_START" = 1 ]; then
 	# path via depends_on — a subset `up` would otherwise leave it crash-looping and mail deferred.
 	# `clamav` and `amavis` are explicit (not only via mta's depends_on): the content
 	# filter sits in the delivery path, so its readiness gates everything below.
-	log "docker compose up -d db mda mta mua cron clamav amavis api adminng"
-	timeout -k10 600 "${DC[@]}" up -d db mda mta mua cron clamav amavis api adminng >/dev/null ||
+	# `mcp` (MailD MCP) waits on its own for the provisioning sentinel; its readiness is
+	# checked at the end, once the catalogue (and so its service-mailbox domain) exists.
+	log "docker compose up -d db mda mta mua cron clamav amavis api adminng mcp"
+	timeout -k10 600 "${DC[@]}" up -d db mda mta mua cron clamav amavis api adminng mcp >/dev/null ||
 		die "'docker compose up -d' failed: see 'docker compose -f $COMPOSE_FILE logs'"
 else
 	log "--no-start: assuming the stack is already up"
@@ -360,6 +366,7 @@ probe_mda_auth() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda test -S /
 # AdminNG end to end: nginx serves the PWA and proxies /api/v1/ to the api service,
 # which answers only when its own database is up and migrated.
 probe_adminng_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${ADMINNG_PORT}/api/v1/health"; }
+probe_mcp_http() { timeout -k10 20 curl -sf -o /dev/null "http://localhost:${MCP_PORT}/healthz"; }
 probe_clamav_db() { timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T clamav \
 	sh -c 'test -f /var/lib/clamav/main.cvd || test -f /var/lib/clamav/main.cld'; }
 
@@ -759,13 +766,21 @@ step "mailbox homes on the vmail volume"
 # A fresh ./ldata/vmail is created by docker as root, and Dovecot/LMTP write as uid:gid 5000
 # (spike-log §11 item 5: "mkdir(/home/vmail/...) failed: Permission denied"). Fix it from inside
 # the mda container, which runs as root — no sudo on the workstation needed.
+# The domain level is chowned too: `mkdir -p` creates it as root, and a root-owned
+# /home/vmail/<domain> stops Dovecot from creating the home of any mailbox added later in that
+# domain (e.g. the MCP service mailbox, mcp/progress.md P0 2026-10-29).
 home_dirs=()
+domain_dirs=()
 for addr in "${ADDRESSES[@]}"; do
 	home_dirs+=("/home/vmail/${addr##*@}/${addr%%@*}")
+	case " ${domain_dirs[*]} " in
+		*" /home/vmail/${addr##*@} "*) ;;
+		*) domain_dirs+=("/home/vmail/${addr##*@}") ;;
+	esac
 done
 timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda mkdir -p /home/vmail "${home_dirs[@]}" ||
 	die "could not create the mailbox home directories (docker compose -f $COMPOSE_FILE logs mda)"
-timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda chown 5000:5000 /home/vmail "${home_dirs[@]}" ||
+timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda chown 5000:5000 /home/vmail "${domain_dirs[@]}" "${home_dirs[@]}" ||
 	die "could not set the vmail ownership (docker compose -f $COMPOSE_FILE logs mda)"
 timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda chmod 0700 "${home_dirs[@]}" || true
 ok "vmail homes ready (owner 5000:5000, ${#home_dirs[@]} mailboxes)"
@@ -891,6 +906,19 @@ else
 	log "--skip-verify: credentials were written but not verified"
 fi
 
+# -------------------------------------------------------------------- mcp ----
+# Not fatal: the mail stack is usable without it. It gates on the provisioning sentinel and
+# creates its service mailbox in DEFAULT_DOMAIN, so with --skip-default-domain it cannot boot.
+if [ "$DO_START" = 1 ] && [ -n "$(env_file_value "$ENV_FILE" MCP_DB_PASSWORD || true)" ]; then
+	step "MailD MCP"
+	log "waiting for mcp /healthz on :${MCP_PORT} (up to ${WAIT_HTTP}s)"
+	if wait_up "$WAIT_HTTP" probe_mcp_http; then
+		ok "mcp (:${MCP_PORT}) is healthy (db, catalogue, IMAP); first-boot passwords: '${DC[*]} logs mcp'"
+	else
+		warn "mcp did not answer http://localhost:${MCP_PORT}/healthz within ${WAIT_HTTP}s: check '${DC[*]} logs mcp' (it needs DEFAULT_DOMAIN in the catalogue)"
+	fi
+fi
+
 # ---------------------------------------------------------------- summary ----
 PROVISIONED_DOMAINS=("$TEST_DOMAIN")
 [ "$SKIP_DEFAULT_DOMAIN" = 0 ] && PROVISIONED_DOMAINS=("$DEFAULT_DOMAIN" "$TEST_DOMAIN")
@@ -899,6 +927,7 @@ step "summary"
 printf '  %s\n' "domains     : ${PROVISIONED_DOMAINS[*]}"
 printf '  %s\n' "adminng UI  : http://localhost:${ADMINNG_PORT}   (AdminNG PWA)"
 printf '  %s\n' "adminng TLS : https://localhost:${ADMINNG_TLS_PORT}  (LAN/phone; install ldata/certs/adminng-ca.der first)"
+printf '  %s\n' "mcp         : http://localhost:${MCP_PORT}/healthz   (MailD MCP, P0)"
 printf '  %s\n' "webmail     : http://localhost:${MUA_PORT}   (SnappyMail)"
 printf '  %s\n' "credentials : ${CREDS_FILE} (mode 600, git-ignored)"
 printf '\n  %-30s %-34s %s\n' "MAILBOX" "PASSWORD" "ROLE"

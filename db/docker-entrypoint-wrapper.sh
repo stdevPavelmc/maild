@@ -34,6 +34,11 @@ echo "db: INFO - postgres is ready, ensuring extra databases"
 echo "db: INFO - applying schema migrations"
 /usr/local/bin/migrate.sh || echo "db: WARNING - database migrations failed"
 
+# MailD MCP role (only when MCP_DB_PASSWORD is set): after the migrations, because it grants
+# EXECUTE on a function migration 003 creates
+echo "db: INFO - ensuring database roles"
+/usr/local/bin/ensure_roles.sh || echo "db: WARNING - database role ensure failed"
+
 # keep the container alive while Postgres runs; `wait` returns early when a trap
 # fires, so loop until the process is really gone
 while kill -0 "$pid" 2>/dev/null; do

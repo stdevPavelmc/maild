@@ -31,6 +31,15 @@ export PATH
 
 log() { echo "rehash-on-login: $*" >&2; }
 
+# Master-user login (MailD MCP, `user@domain*mcp` + the master password): the
+# plaintext in PLAIN_PASS is the *master* password, not the user's. Rehashing
+# it would replace the user's legacy hash with the master password (user locked
+# out, master password becomes theirs). MASTER_USER comes from the userdb
+# `master_user = %{master_user}` field (auth-sql.conf.ext), empty otherwise.
+if [ -n "${MASTER_USER:-}" ] ; then
+    exec "$@"
+fi
+
 # No plaintext (e.g. a GSSAPI/CLIENT-CERT login) or no user@domain: nothing to
 # rehash, go straight to the real binary.
 if [ -z "${PLAIN_PASS:-}" ] || [ -z "${USER:-}" ] || ! printf '%s' "${USER}" | grep -q '@' ; then

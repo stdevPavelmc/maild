@@ -1,0 +1,5 @@
+# planning documents live beside the code; they are not part of the image
+*.md
+!README.md
+**/__pycache__
+**/*.pyc

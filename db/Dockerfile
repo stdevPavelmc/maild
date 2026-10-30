@@ -7,7 +7,8 @@ FROM postgres:18-trixie
 # document was validated against; .agents/devops/base-images.md carries the canonical rule.
 
 # Extra databases are ensured on *every* boot by the entrypoint wrapper; schema migrations
-# (the maild_provision sentinel) are applied right after, by migrate.sh. ADMINNG_DB
+# (the maild_provision sentinel) are applied right after, by migrate.sh, and the MCP role
+# (MCP_DB_USER, only when MCP_DB_PASSWORD is set) is ensured last, by ensure_roles.sh. ADMINNG_DB
 # (AdminNG's own database) is created there too — kept separate from POSTGRES_EXTRA_DB
 # because mua reads that variable as a single database name (contacts DSN).
 
@@ -32,13 +33,17 @@ ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
     POSTGRES_EXTRA_DB=contacts \
-    ADMINNG_DB=adminng
+    ADMINNG_DB=adminng \
+    MCP_DB=mcp \
+    MCP_DB_USER=maild_mcp
 
 COPY ensure_databases.sh /usr/local/bin/ensure_databases.sh
 COPY migrate.sh /usr/local/bin/migrate.sh
+COPY ensure_roles.sh /usr/local/bin/ensure_roles.sh
 COPY migrations/ /usr/local/share/maild/migrations/
 COPY docker-entrypoint-wrapper.sh /usr/local/bin/docker-entrypoint-wrapper.sh
-RUN chmod +x /usr/local/bin/ensure_databases.sh /usr/local/bin/migrate.sh /usr/local/bin/docker-entrypoint-wrapper.sh
+RUN chmod +x /usr/local/bin/ensure_databases.sh /usr/local/bin/migrate.sh /usr/local/bin/ensure_roles.sh \
+             /usr/local/bin/docker-entrypoint-wrapper.sh
 
 # the wrapper starts the stock entrypoint, waits, ensures the DBs, then waits on postgres
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint-wrapper.sh"]
@@ -55,4 +60,4 @@ LABEL org.opencontainers.image.title="MailD PostgreSQL catalogue" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-17"
+      org.opencontainers.image.created="2026-10-29"

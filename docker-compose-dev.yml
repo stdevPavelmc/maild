@@ -34,6 +34,8 @@ services:
       # explicit on every DB consumer: compose interpolation does not read env_file
       # contents, and the guard makes a missing password fail at `compose config`.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
+      # MailD MCP role (db/ensure_roles.sh); empty = no MCP role, the stack still boots
+      MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:-}
     # operator env file (fake dev secrets); overrides any same-named image ENV default
     env_file:
       - env.dev
@@ -173,6 +175,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
       DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in env.dev}
       MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+      # MailD MCP Dovecot master user (IMAP only); empty = no master user
+      MCP_DOVECOT_MASTER_PASSWORD: ${MCP_DOVECOT_MASTER_PASSWORD:-}
     # DEFAULT_MAILBOX_SIZE (200M), the quota-report schedule and the self-signed
     # cert subject now default in the image; override them from env.dev when needed.
     # Operator env file; overrides any same-named image ENV default.
@@ -310,6 +314,61 @@ services:
       - ./ldata/amavis:/var/lib/amavis:ro
     depends_on:
       - db
+    networks:
+      - maild-dev
+
+  mcp:
+    image: pavelmc/maild-mcp:develop
+    build: ./mcp/
+    container_name: maild-dev-mcp
+    hostname: mcp
+    restart: unless-stopped
+    # NO env_file on purpose (mcp/progress.md P0, 2026-10-29): the operator file carries
+    # POSTGRES_PASSWORD and every other service's secrets, and the mcp connects to the db only
+    # as the restricted MCP_DB_USER role (D8). Allow-list: a new MCP_* tunable must be added here.
+    environment:
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in env.dev}
+      MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
+      MCP_SECRET_KEY: ${MCP_SECRET_KEY:?set MCP_SECRET_KEY in env.dev}
+      MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:?set MCP_DB_PASSWORD in env.dev}
+      MCP_DOVECOT_MASTER_PASSWORD: ${MCP_DOVECOT_MASTER_PASSWORD:?set MCP_DOVECOT_MASTER_PASSWORD in env.dev}
+      # optional tunables: bare keys pass the value from the operator file through and stay
+      # UNSET when it is absent, so the image ENV default applies
+      MCP_DB:
+      MCP_DB_USER:
+      MCP_HOSTNAME:
+      MCP_ADMIN_USER:
+      MCP_ADMIN_PASSWORD:
+      MCP_ADMIN_EMAIL:
+      MCP_SERVICE_EMAIL:
+      MCP_SERVICE_PASSWORD:
+      MCP_DOVECOT_MASTER_USER:
+      MCP_IMAP_HOST:
+      MCP_IMAP_PORT:
+      MCP_IMAP_CA_FILE:
+      MCP_WORKERS:
+      MCP_DEBUG:
+      POSTGRES_HOST:
+      POSTGRES_PORT:
+      POSTGRES_DB:
+      PROVISION_WAIT_TIMEOUT:
+    ports:
+      - "8085:8080"  # MCP HTTP (dev only; production goes through the ingress)
+    volumes:
+      - ./ldata/mcp_logs:/var/log/maild-mcp
+      # verifies the STARTTLS certificate of mda:143 (the mcp never mounts mail storage)
+      - ./ldata/certs:/certs:ro
+    depends_on:
+      - db
+      - mda
+      - amavis
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild-dev
 

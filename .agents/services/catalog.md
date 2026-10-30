@@ -19,11 +19,24 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `ADMINNG_DB` (AdminNG's own database, default `adminng`) on *every* boot. It never alters
   existing databases or the schema. `ADMINNG_DB` is a separate variable on purpose:
   `mua/config-setup.php` reads `POSTGRES_EXTRA_DB` as a single database name for the
-  SnappyMail contacts DSN, so the two lists must not be merged.
+  SnappyMail contacts DSN, so the two lists must not be merged. `MCP_DB` (default `mcp`) is
+  ensured the same way for the MailD MCP.
+- Boot chain: postgres ready → `ensure_databases.sh` → `migrate.sh` (catalogue migrations,
+  incl. `003_mcp_service_mailbox.sql`: the `SECURITY DEFINER` function
+  `maild_mcp_ensure_service_mailbox(address, hash, name)`, insert-only, Argon2id hashes only,
+  EXECUTE revoked from PUBLIC) → `ensure_roles.sh`. The last one runs only when
+  `MCP_DB_PASSWORD` is set: it creates/re-asserts the `MCP_DB_USER` role (default `maild_mcp`,
+  no superuser/createdb/createrole), makes it owner of `MCP_DB`, and **declaratively** revokes and
+  re-grants its catalogue rights on every boot — column `SELECT` on `domain(domain, active)` and
+  `mailbox(username, domain, local_part, name, active)` (never `password`), `SELECT` on
+  `maild_provision`, `EXECUTE` on the function. The password reaches psql as a stdin variable,
+  never on a command line. Rotation = change the env file + restart db (and recreate mcp).
 - Env (new schema): defaults baked in `db/Dockerfile` (`POSTGRES_HOST/DB/USER/EXTRA_DB`);
   the operator file (`env.dev`/`.env`) is the `env_file:` and overrides any of them. The
   password is passed explicitly with a `${POSTGRES_PASSWORD:?}` guard (compose does not
   interpolate `env_file:` contents; a missing one fails at `compose config`).
+  `MCP_DB_PASSWORD` is passed as `${MCP_DB_PASSWORD:-}` (empty = no MCP role; the stack still
+  boots); `MCP_DB`/`MCP_DB_USER` are baked (`mcp`/`maild_mcp`) and must match the mcp image.
 - Port 5432 published for local debugging.
 
 ## clamav — antivirus
@@ -100,6 +113,20 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   minimal environment) and logs to stderr at *Error* level only. The entrypoint also date-gates
   `auth_allow_weak_schemes` (yes before 2027-02-01, no from it) and warns with the remaining
   legacy count on every boot.
+- **MCP master user** (opt-in, proposal `mcp/technical-proposal.md` §5.3/§9.1): when
+  `MCP_DOVECOT_MASTER_PASSWORD` is set the entrypoint (every boot, `dovecot` branch) renders
+  `/etc/dovecot/master-users` (`<MCP_DOVECOT_MASTER_USER>:{ARGON2ID}…`, `0640 root:dovecot`; the
+  password goes to `doveadm pw` on stdin) and installs `conf.d/auth-master.conf.ext` from
+  `auth-master.conf.ext.in`, picked up by `!include_try` in `10-auth.conf`; unset, both are
+  removed. The master passdb lives inside `protocol imap { }` with `result_success = continue`,
+  so `user@domain*mcp` + the master password works over IMAP only (POP3, ManageSieve and the
+  mta's SASL refuse it) and the SQL userdb lookup (`active='1'`) still applies: inactive or
+  missing mailboxes cannot be opened. `rehash-password.sh` exits early when `MASTER_USER` is set
+  (userdb field `master_user = %{master_user}`), otherwise the first master login to a legacy
+  `$1$` row would store the *master* password as that user's (§5.4, reproduced and fixed
+  2026-10-29). `login_log_format_elements` adds `auth_user=<%{auth_user}>` (equals `user` on a
+  normal login, the master name on a master login) so every MCP access leaves a Dovecot trail.
+  `test.sh` J1–J6 cover it.
 - **Auth cache** (`mda/dovecot/conf.d/10-auth.conf`): MailD runs it short on purpose —
   `auth_cache_size = 10M` with `auth_cache_ttl = 1 minute` and `auth_cache_negative_ttl = 0`.
   A cached *success* keeps authenticating without asking the catalogue, so a longer TTL made a
@@ -110,7 +137,8 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - env: defaults baked in `mda/Dockerfile` (`PASSWORD_SCHEME`, `DEFAULT_MAILBOX_SIZE`,
   `QUOTA_REPORT_*`, the self-signed cert subject); the operator file is the `env_file:` and
   overrides any of them;
-  password + `DEFAULT_DOMAIN`/`MAIL_ADMIN_USER` passed explicitly at compose level.
+  password + `DEFAULT_DOMAIN`/`MAIL_ADMIN_USER` passed explicitly at compose level, plus
+  `MCP_DOVECOT_MASTER_PASSWORD` as `${…:-}` (empty = no master user).
 - Ports: 110, 143, 993, 995 (POP3/IMAP + TLS) and 4190 (ManageSieve), 12345 (SASL).
 - **Readiness is the auth socket, not the container state.** A cold first boot generates the
   self-signed cert and `openssl dhparam -5 2048` (a safe prime: seconds to minutes) *before* the
@@ -387,10 +415,12 @@ more. See `.agents/services/provisioning.md`.
   resolute it is ≥ the catalogue server, so the PGDG repository, keyring and `curl` the jammy image
   needed are gone. `backup_db.sh` still refuses to dump when the client is older than the server
   (it mails a CRITICAL with the `PG_CLIENT_MAJOR` remedy instead of keeping an empty archive).
-- `backup_db.sh` writes **two** archives per run: `maild_backup_*.sql.gz` (the catalogue) and
+- `backup_db.sh` writes **three** archives per run: `maild_backup_*.sql.gz` (the catalogue),
   `maild_adminng_*.sql.gz` (AdminNG: device approvals, sessions, TOTP seeds, audit trail —
-  `ADMINNG_DB`, defaulted in the script). Both get the same size/gzip/trailer validation and the
-  same 15-day retention; a failed AdminNG dump keeps the catalogue archive but marks the run FAILED.
+  `ADMINNG_DB`, defaulted in the script) and `maild_mcp_*.sql.gz` (the MailD MCP: accounts,
+  tokens, settings — `MCP_DB`, default `mcp`; SKIPPED when that database is missing or has no
+  table yet). All get the same size/gzip/trailer validation and the same 15-day retention; a
+  failed AdminNG or MCP dump keeps the catalogue archive but marks the run FAILED.
 - `pflogsumm` (1.1.14) lives in `/usr/bin` on resolute, so `resume.sh` resolves it from `PATH`;
   SpamAssassin 4.0.2 provides the `sa-learn` the Bayes job uses. The `cron/spamassassin/` file is a
   reference copy of Debian's `/etc/cron.daily/spamassassin` that the image never installs (the
@@ -408,6 +438,36 @@ more. See `.agents/services/provisioning.md`.
   entrypoint dumps the whole environment into `/etc/environment` **shell-quoted** (a raw `env`
   dump broke `source` as soon as a value had spaces: dev's `BANNER_TITLE=MailD Dev Override`
   printed "Dev: command not found" on every job), from where every cron job sources it.
+
+## mcp — MailD MCP server
+
+- Image `pavelmc/maild-mcp:develop` from `mcp/Dockerfile` (`python:3.14-slim-trixie`, uid 10001,
+  read-only rootfs + `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`). Design and decisions:
+  `mcp/technical-proposal.md`; delivery status: `mcp/progress.md`.
+- **P0 skeleton** (2026-10-29): Django 6.1 + uvicorn (`asgi.py` root app → Django), `/healthz`
+  (200 when the `mcp` DB, the catalogue and the mda IMAP greeting answer, else 503; the image
+  `HEALTHCHECK` polls it). MCP endpoint, REST mirror and web UI arrive in P1+.
+- Boot (`docker-entrypoint.sh` → `manage.py mcp_boot`): wait for the `maild_provision` sentinel
+  (bounded by `PROVISION_WAIT_TIMEOUT`) → `migrate` under a pg advisory lock → seed the admin on
+  first boot only (`MCP_ADMIN_USER/PASSWORD/EMAIL`; password generated and printed OTP-style when
+  unset; ignored once a row exists) → ensure the service mailbox `MCP_SERVICE_EMAIL` (default
+  `mcp@<DEFAULT_DOMAIN>`) through `maild_mcp_ensure_service_mailbox()`: created with an Argon2id
+  hash of `MCP_SERVICE_PASSWORD` or a generated password (printed once), never modified when it
+  exists (warning when inactive), boot fails on an unknown or inactive domain. Then `exec uvicorn`.
+- DB: connects **only** as `MCP_DB_USER` (`maild_mcp`): `default` alias = `MCP_DB` (Django
+  models), `catalogue` alias = `POSTGRES_DB` (raw read-only SQL through the column grants,
+  never migrated — `maild_mcp/routers.py`).
+- **No `env_file`** (decision 2026-10-29, `mcp/progress.md`): the operator file carries
+  `POSTGRES_PASSWORD` and every other service's secrets, so the compose files pass an explicit
+  allow-list — the three secrets with `:?` guards plus bare `MCP_*`/`POSTGRES_HOST/PORT/DB`/
+  `PROVISION_WAIT_TIMEOUT` keys (passed through when set, unset otherwise so the image default
+  applies). A new MCP tunable must be added to that list in all four compose files.
+- Mounts: the log volume (`/var/log/maild-mcp`; dev `ldata/mcp_logs`, prepared `10001:10001` by
+  `bootstrap-dev.sh`) and the certs read-only (`/certs/mail.crt` verifies mda's STARTTLS). Never
+  the mail storage.
+- Ports: dev publishes `8085:8080`; production has no published port, Traefik labels route
+  `${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}` to 8080 (TLS at the operator's ingress).
+- `test.sh` J7–J11 (role grants, service mailbox, healthz) and G4c (backup archive).
 
 ## dozzle — log viewer (dev only)
 

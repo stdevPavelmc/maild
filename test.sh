@@ -309,6 +309,9 @@ make_file() { dd if=/dev/zero of="$1" bs=1024 count=$(( $2 / 1024 )) status=none
 QUOTA_TOUCHED=0
 RES_SEEDED=0
 IMAPSIEVE_TOUCHED=0
+MCP_TOUCHED=0
+MCP_LEGACY_USER="mcp-legacy-probe@${DOMAIN}"
+MCP_INACTIVE_USER="mcp-inactive-probe@${DOMAIN}"
 cleanup() {
     if [ "$HAVE_DC" = 1 ]; then
         dcx mda rm -f "/home/vmail/${DOMAIN}/${ADMINMAIL%%@*}/dovecot.sieve" > /dev/null 2>&1 || true
@@ -323,6 +326,15 @@ cleanup() {
             expunge_mailbox "$QUOTA_USER" INBOX
             expunge_mailbox "$QUOTA_USER" Junk
             quota_set "$QUOTA_USER" 0
+        fi
+        # Phase J (MCP): the two throwaway mailboxes and their homes.
+        if [ "$MCP_TOUCHED" = 1 ]; then
+            dcx db psql -U maild -d mailddb -q -c \
+                "DELETE FROM mailbox WHERE username IN ('$MCP_LEGACY_USER','$MCP_INACTIVE_USER');" \
+                > /dev/null 2>&1 || true
+            dcx mda rm -rf "/home/vmail/${DOMAIN}/${MCP_LEGACY_USER%%@*}" "/home/vmail/${DOMAIN}/${MCP_INACTIVE_USER%%@*}" \
+                > /dev/null 2>&1 || true
+            dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
         fi
         # Phase I (AdminNG): test devices (sessions cascade) and the fixture domain.
         dcx api adminng.py --reset-ratelimit 'nobody@adminng-lockout.test' > /dev/null 2>&1 || true
@@ -1212,6 +1224,23 @@ else
         t_ok "the same run also dumps the AdminNG database (audit_event + trailer present)"
     else
         t_fail "the AdminNG archive carries the adminng schema (no audit_event / trailer)"
+    fi
+
+    # G4c — and the MailD MCP database (accounts, tokens, settings), when the MCP is deployed
+    if [ -z "$(env_value "$ENV_FILE" MCP_DB_PASSWORD || true)" ] ; then
+        t_skip "the MCP archive (MCP_DB_PASSWORD not set in $ENV_FILE: no MCP deployed)"
+    else
+        BK_MNEW="$(dcx cron sh -c 'ls -1t /backups/db/maild_mcp_*.sql.gz 2>/dev/null | head -n1' | tr -d '\r')"
+        if [ -z "$BK_MNEW" ] ; then
+            t_fail "the run also writes the MCP archive (maild_mcp_*.sql.gz)"
+        elif ! dcx cron gzip -t "$BK_MNEW" 2>/dev/null ; then
+            t_fail "the MCP archive passes 'gzip -t' ($BK_MNEW)"
+        elif dcx cron sh -c "zcat '$BK_MNEW' | grep -q 'CREATE TABLE public.admin_user'" &&
+             dcx cron sh -c "zcat '$BK_MNEW' | grep -q '^-- PostgreSQL database dump complete\$'" ; then
+            t_ok "the same run also dumps the MCP database (admin_user + trailer present)"
+        else
+            t_fail "the MCP archive carries the mcp schema (no admin_user / trailer)"
+        fi
     fi
 
     # G5 — the regression itself: a pg_dump that aborts writes nothing and exits non-zero, which
@@ -2127,6 +2156,166 @@ else
     else
         t_fail "I18 pending TTL purge (login=$I18_LOGIN state=$I18_STATE rows=$I18_N)"
     fi
+fi
+
+# ================================= J. MailD MCP (P0 foundations) ============
+# mcp/technical-proposal.md §5.3/§5.4/§9.1/§9.2/§7.4: the Dovecot master user (IMAP only, never
+# for inactive mailboxes, never rehashing a legacy hash with the master password), the
+# restricted maild_mcp db role, the service mailbox and the container healthcheck. Two
+# throwaway mailboxes (MCP_LEGACY_USER, MCP_INACTIVE_USER) are created here and removed by
+# cleanup().
+section "J. MailD MCP (master user, db role, service mailbox, /healthz)"
+
+MCP_MASTER_PW="$(env_value "$ENV_FILE" MCP_DOVECOT_MASTER_PASSWORD || true)"
+MCP_MASTER_NAME="$(env_value "$ENV_FILE" MCP_DOVECOT_MASTER_USER || true)"
+MCP_MASTER_NAME="${MCP_MASTER_NAME:-mcp}"
+MCP_DB_PW="$(env_value "$ENV_FILE" MCP_DB_PASSWORD || true)"
+MCP_DB_ROLE="$(env_value "$ENV_FILE" MCP_DB_USER || true)"
+MCP_DB_ROLE="${MCP_DB_ROLE:-maild_mcp}"
+MCP_SVC="$(env_value "$ENV_FILE" MCP_SERVICE_EMAIL || true)"
+MCP_SVC="${MCP_SVC:-mcp@${DEFAULT_DOMAIN}}"
+MCP_HTTP="${MCP_HTTP:-http://$SERVER:8085}"
+MCP_FIXTURE="${MCP_FIXTURE:-charlie@$DOMAIN}"
+
+mcp_imap() { # <user> <pass> [imap command] — IMAP STARTTLS on 143, as the mcp connects
+    timeout -k5 20 curl -s --insecure --ssl-reqd --user "$1:$2" \
+        --url "imap://$SERVER:143/INBOX" -X "${3:-SEARCH ALL}" 2>&1 | grep -q '\* SEARCH'
+}
+mcp_sql() { # <database> <sql> — as the restricted MCP role, over TCP like the container
+    dcx db env PGPASSWORD="$MCP_DB_PW" psql -h 127.0.0.1 -U "$MCP_DB_ROLE" -d "$1" -X -tAc "$2" 2>&1
+}
+mcp_hash() { dcx db psql -U maild -d mailddb -tAc "SELECT password FROM mailbox WHERE username='$1'" 2>/dev/null | tr -d '\r'; }
+
+if [ "$HAVE_DC" != 1 ] || [ -z "$MCP_MASTER_PW" ] || [ -z "$MCP_DB_PW" ] ; then
+    t_skip "MailD MCP checks (need docker plus MCP_DOVECOT_MASTER_PASSWORD and MCP_DB_PASSWORD in $ENV_FILE)"
+else
+    MCP_TOUCHED=1
+    MCP_PROBE_PW="$(chrono | cut -c1-24)"
+    MCP_MD5="$(dcx mda doveadm pw -s MD5-CRYPT -p "$MCP_PROBE_PW" 2>/dev/null | tr -d '\r' | sed 's/^{MD5-CRYPT}//')"
+    MCP_HOMES="/home/vmail/${DOMAIN}/${MCP_LEGACY_USER%%@*} /home/vmail/${DOMAIN}/${MCP_INACTIVE_USER%%@*}"
+    dcx mda sh -c "mkdir -p $MCP_HOMES && chown 5000:5000 $MCP_HOMES" > /dev/null 2>&1 || true
+    sql "INSERT INTO mailbox (username, password, name, maildir, quota, domain, local_part, active) VALUES
+           ('$MCP_LEGACY_USER',   '$MCP_MD5', 'mcp probe', '${DOMAIN}/${MCP_LEGACY_USER%%@*}/',   0, '$DOMAIN', '${MCP_LEGACY_USER%%@*}',   true),
+           ('$MCP_INACTIVE_USER', '$MCP_MD5', 'mcp probe', '${DOMAIN}/${MCP_INACTIVE_USER%%@*}/', 0, '$DOMAIN', '${MCP_INACTIVE_USER%%@*}', false)
+         ON CONFLICT (username) DO UPDATE SET password = EXCLUDED.password, active = EXCLUDED.active;" > /dev/null
+    dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+
+    # J1 — master login opens an active mailbox over IMAP (STARTTLS)
+    if mcp_imap "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" ; then
+        t_ok "J1 the MCP master user opens an active mailbox over IMAP STARTTLS (${MCP_FIXTURE}*${MCP_MASTER_NAME})"
+    else
+        t_fail "J1 master-user IMAP login to ${MCP_FIXTURE} (check 'docker compose logs mda' for the master passdb)"
+    fi
+
+    # J2 — ... and Dovecot logs who really authenticated (independent audit trail)
+    sleep 1
+    if "${DC[@]}" logs --no-log-prefix --since 2m mda 2>/dev/null |
+         grep -q "Logged in: user=<${MCP_FIXTURE}>, auth_user=<${MCP_MASTER_NAME}>" ; then
+        t_ok "J2 Dovecot logs the master name on a master login (auth_user=<${MCP_MASTER_NAME}>)"
+    else
+        t_fail "J2 the mda login line carries auth_user=<${MCP_MASTER_NAME}> for the master login"
+    fi
+
+    # J3 — the master user never opens an inactive mailbox
+    if mcp_imap "${MCP_INACTIVE_USER}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" ; then
+        t_fail "J3 the master user must NOT open an inactive mailbox (${MCP_INACTIVE_USER} logged in)"
+    else
+        t_ok "J3 the master user cannot open an inactive mailbox"
+    fi
+
+    # J4 — IMAP only: POP3, SMTP AUTH (the mta's SASL on mda's auth socket) and ManageSieve refuse it
+    MCP_POP="$(timeout -k5 20 curl -s --insecure --user "${MCP_FIXTURE}*${MCP_MASTER_NAME}:$MCP_MASTER_PW" \
+                 --url "pop3s://$SERVER:995/" > /dev/null 2>&1; echo $?)"
+    MCP_SMTP="$(timeout -k5 30 curl -s --insecure --ssl-reqd --user "${MCP_FIXTURE}*${MCP_MASTER_NAME}:$MCP_MASTER_PW" \
+                 --url "smtp://$SERVER:587" --mail-from "$MCP_FIXTURE" --mail-rcpt "$MCP_FIXTURE" -T /dev/null > /dev/null 2>&1; echo $?)"
+    MCP_SIEVE="$(dcx mda doveadm auth test -x service=sieve "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" 2>&1 | tr -d '\r')"
+    if [ "$MCP_POP" = 67 ] && [ "$MCP_SMTP" = 67 ] && printf '%s' "$MCP_SIEVE" | grep -q 'auth failed' ; then
+        t_ok "J4 the master user is IMAP only (POP3, SMTP AUTH and ManageSieve refuse it)"
+    else
+        t_fail "J4 master user outside IMAP (pop3 rc=$MCP_POP smtp rc=$MCP_SMTP sieve: $(printf '%s' "$MCP_SIEVE" | head -n1))"
+    fi
+
+    # J5 — §5.4: a master login must NOT rehash a legacy $1$ row (the plaintext it sees is the
+    # MASTER password: the user would be locked out and the master password would become theirs)
+    MCP_BEFORE="$(mcp_hash "$MCP_LEGACY_USER")"
+    mcp_imap "${MCP_LEGACY_USER}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" ; MCP_RC=$?
+    sleep 1
+    MCP_AFTER="$(mcp_hash "$MCP_LEGACY_USER")"
+    if [ "$MCP_RC" = 0 ] && [ -n "$MCP_BEFORE" ] && [ "$MCP_BEFORE" = "$MCP_AFTER" ] ; then
+        t_ok "J5 a master login leaves a legacy \$1\$ hash untouched (rehash-on-login skips master logins)"
+    else
+        t_fail "J5 legacy hash after a master login (login rc=$MCP_RC, before=${MCP_BEFORE:0:12}… after=${MCP_AFTER:0:12}…)"
+    fi
+
+    # J6 — control for J5: the user's OWN login still migrates the row, so J5 is not vacuous
+    dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+    mcp_imap "$MCP_LEGACY_USER" "$MCP_PROBE_PW" ; MCP_RC=$?
+    sleep 1
+    MCP_AFTER="$(mcp_hash "$MCP_LEGACY_USER")"
+    case "$MCP_AFTER" in
+        '{ARGON2ID}$argon2id$'*) [ "$MCP_RC" = 0 ] && t_ok "J6 the user's own login still rehashes the legacy row to Argon2id (control for J5)" \
+                                   || t_fail "J6 own login of the legacy probe failed (rc=$MCP_RC)" ;;
+        *) t_fail "J6 the user's own login did not rehash the legacy row (rc=$MCP_RC, now ${MCP_AFTER:0:12}…)" ;;
+    esac
+
+    # J7 — D8: the maild_mcp role reads only the granted columns, never mailbox.password
+    MCP_OUT_COLS="$(mcp_sql mailddb "SELECT count(*) FROM mailbox WHERE username='$MCP_FIXTURE' AND active")"
+    MCP_OUT_PW="$(mcp_sql mailddb "SELECT password FROM mailbox LIMIT 1")"
+    MCP_OUT_ALIAS="$(mcp_sql mailddb "SELECT count(*) FROM alias")"
+    if [ "$(printf '%s' "$MCP_OUT_COLS" | tail -n1 | tr -d '\r ')" = 1 ] &&
+       printf '%s' "$MCP_OUT_PW" | grep -q 'permission denied' &&
+       printf '%s' "$MCP_OUT_ALIAS" | grep -q 'permission denied' ; then
+        t_ok "J7 ${MCP_DB_ROLE} reads the granted catalogue columns and cannot read mailbox.password (nor alias)"
+    else
+        t_fail "J7 ${MCP_DB_ROLE} column grants (cols='$MCP_OUT_COLS' password='$(printf '%s' "$MCP_OUT_PW" | head -n1)')"
+    fi
+
+    # J8 — ... and cannot change the catalogue
+    MCP_OUT_UPD="$(mcp_sql mailddb "UPDATE mailbox SET name = name WHERE username='$MCP_FIXTURE'")"
+    MCP_OUT_INS="$(mcp_sql mailddb "INSERT INTO domain (domain) VALUES ('mcp-probe.invalid')")"
+    if printf '%s' "$MCP_OUT_UPD" | grep -q 'permission denied' &&
+       printf '%s' "$MCP_OUT_INS" | grep -q 'permission denied' ; then
+        t_ok "J8 ${MCP_DB_ROLE} cannot UPDATE or INSERT in the catalogue"
+    else
+        t_fail "J8 ${MCP_DB_ROLE} wrote to the catalogue (update='$(printf '%s' "$MCP_OUT_UPD" | head -n1)' insert='$(printf '%s' "$MCP_OUT_INS" | head -n1)')"
+    fi
+
+    # J9 — ... but can EXECUTE the service-mailbox function, which never touches an existing row
+    # and refuses anything that is not an {ARGON2ID} hash
+    MCP_SVC_BEFORE="$(dcx db psql -U maild -d mailddb -tAc "SELECT md5(password) || modified FROM mailbox WHERE username='$MCP_SVC'" 2>/dev/null | tr -d '\r')"
+    MCP_OUT_FN="$(mcp_sql mailddb "SELECT maild_mcp_ensure_service_mailbox('$MCP_SVC', '{ARGON2ID}\$argon2id\$v=19\$m=65536,t=4,p=1\$probe\$probe', 'probe')" | tail -n1 | tr -d '\r ')"
+    MCP_OUT_WEAK="$(mcp_sql mailddb "SELECT maild_mcp_ensure_service_mailbox('mcp-weak-probe@$DOMAIN', '$MCP_MD5', 'probe')")"
+    MCP_SVC_AFTER="$(dcx db psql -U maild -d mailddb -tAc "SELECT md5(password) || modified FROM mailbox WHERE username='$MCP_SVC'" 2>/dev/null | tr -d '\r')"
+    MCP_WEAK_ROWS="$(sql "SELECT count(*) FROM mailbox WHERE username='mcp-weak-probe@$DOMAIN'" | tr -d '\r ')"
+    if [ "$MCP_OUT_FN" = f ] && [ -n "$MCP_SVC_BEFORE" ] && [ "$MCP_SVC_BEFORE" = "$MCP_SVC_AFTER" ] &&
+       printf '%s' "$MCP_OUT_WEAK" | grep -q 'ARGON2ID' && [ "$MCP_WEAK_ROWS" = 0 ] ; then
+        t_ok "J9 ${MCP_DB_ROLE} can EXECUTE maild_mcp_ensure_service_mailbox(): no-op on an existing mailbox, refuses a weak hash"
+    else
+        t_fail "J9 service-mailbox function (existing → '$MCP_OUT_FN', row unchanged: $([ "$MCP_SVC_BEFORE" = "$MCP_SVC_AFTER" ] && echo yes || echo no), weak rows: $MCP_WEAK_ROWS)"
+    fi
+
+    # J10 — D9: the service mailbox was created once, active, and an mcp restart leaves it untouched
+    MCP_SVC_ROWS="$(sql "SELECT count(*) FROM mailbox WHERE username='$MCP_SVC' AND active AND password LIKE '{ARGON2ID}%'" | tr -d '\r ')"
+    timeout -k10 90 "${DC[@]}" restart mcp > /dev/null 2>&1
+    MCP_UP=0
+    for _ in $(seq 1 30); do
+        if timeout -k5 5 curl -s -o /dev/null -w '%{http_code}' "$MCP_HTTP/healthz" 2>/dev/null | grep -q 200 ; then MCP_UP=1; break; fi
+        sleep 2
+    done
+    MCP_SVC_RESTART="$(dcx db psql -U maild -d mailddb -tAc "SELECT md5(password) || modified FROM mailbox WHERE username='$MCP_SVC'" 2>/dev/null | tr -d '\r')"
+    if [ "$MCP_SVC_ROWS" = 1 ] && [ "$MCP_UP" = 1 ] && [ "$MCP_SVC_BEFORE" = "$MCP_SVC_RESTART" ] &&
+       "${DC[@]}" logs --no-log-prefix --since 2m mcp 2>/dev/null | grep -q "service mailbox $MCP_SVC present and active" ; then
+        t_ok "J10 the service mailbox $MCP_SVC exists once (active, Argon2id) and an mcp restart leaves it untouched"
+    else
+        t_fail "J10 service mailbox (rows=$MCP_SVC_ROWS up_after_restart=$MCP_UP unchanged=$([ "$MCP_SVC_BEFORE" = "$MCP_SVC_RESTART" ] && echo yes || echo no))"
+    fi
+
+    # J11 — the container healthcheck: db, catalogue and IMAP reachable
+    MCP_HZ="$(timeout -k5 10 curl -s -w ' %{http_code}' "$MCP_HTTP/healthz" 2>/dev/null)"
+    case "$MCP_HZ" in
+        *'"status": "ok"'*' 200') t_ok "J11 mcp /healthz answers 200 (db, catalogue and IMAP reachable)" ;;
+        *) t_fail "J11 mcp /healthz (got: $MCP_HZ)" ;;
+    esac
 fi
 
 section "summary"

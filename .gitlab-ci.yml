@@ -27,6 +27,7 @@ variables:
   IMG_CRON: "$CI_REGISTRY_IMAGE/maild-cron"
   IMG_API: "$CI_REGISTRY_IMAGE/maild-api"
   IMG_ADMINNG: "$CI_REGISTRY_IMAGE/maild-adminng"
+  IMG_MCP: "$CI_REGISTRY_IMAGE/maild-mcp"
 
   # default TAG is dev
   TAG: dev
@@ -50,13 +51,15 @@ stages:
     - echo "Registry Image:" $CI_REGISTRY_IMAGE
     # deploy env file (new schema): the images carry every default, so the env
     # file only needs the CI/CD-defined values. The mandatory ones (DEFAULT_DOMAIN,
-    # MAIL_ADMIN_USER, POSTGRES_PASSWORD, ADMINNG_SECRET_KEY) must be defined as
-    # (masked) CI/CD variables — compose aborts on a missing
-    # ADMINNG_SECRET_KEY/POSTGRES_PASSWORD; anything not defined simply stays
+    # MAIL_ADMIN_USER, POSTGRES_PASSWORD, ADMINNG_SECRET_KEY, MCP_DB_PASSWORD,
+    # MCP_SECRET_KEY, MCP_DOVECOT_MASTER_PASSWORD) must be defined as (masked)
+    # CI/CD variables — compose aborts on a missing one; any MCP_* variable is
+    # copied (the mcp itself reads them through compose interpolation, it gets no
+    # env_file); anything not defined simply stays
     # commented in the template and the image defaults apply. compose needs the file
     # present to resolve the env_file list, so the template is always dumped.
     - cat env.sample_gitlab > .env
-    - env | grep -E '^(DEFAULT_DOMAIN|MAIL_ADMIN_USER|POSTGRES_PASSWORD|ADMINNG_SECRET_KEY|MAIL_ADMIN_PASSWORD|MUA_ADMIN_USER|MUA_ADMIN_PASSWORD|AUTO_PROVISION|PROVISION_VERSION|PROVISION_WAIT_TIMEOUT|PROVISION_FORCE)=' >> .env || true
+    - env | grep -E '^(DEFAULT_DOMAIN|MAIL_ADMIN_USER|POSTGRES_PASSWORD|ADMINNG_SECRET_KEY|MAIL_ADMIN_PASSWORD|MUA_ADMIN_USER|MUA_ADMIN_PASSWORD|AUTO_PROVISION|PROVISION_VERSION|PROVISION_WAIT_TIMEOUT|PROVISION_FORCE|MCP_[A-Z_]+)=' >> .env || true
 
 ## Rules (defaults live in the Dockerfiles now, so no vars/*.env paths)
 .rule_db:
@@ -73,6 +76,11 @@ stages:
   rules:
     - changes:
         - adminng/pwa/**/*
+
+.rule_mcp:
+  rules:
+    - changes:
+        - mcp/**/*
 
 .rule_mta:
   rules:
@@ -141,6 +149,18 @@ build_adminng:
     - mails
   rules:
     !reference [.rule_adminng, rules]
+
+# mcp (MailD MCP server)
+build_mcp:
+  stage: build
+  <<: *before_script
+  script:
+    - docker compose build mcp --push
+  needs: []
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mcp, rules]
 
 # mta
 build_mta:
@@ -265,6 +285,22 @@ release_adminng:
     - mails
   rules:
     !reference [.rule_adminng, rules]
+
+# Release mcp (MailD MCP server)
+release_mcp:
+  stage: release
+  <<: *before_script
+  script:
+    - docker compose pull mcp
+    - docker tag ${IMG_MCP}:${TAG} ${IMG_MCP}:latest
+    - export TAG=latest
+    - docker compose push mcp
+  needs:
+    - build_mcp
+  tags:
+    - mails
+  rules:
+    !reference [.rule_mcp, rules]
 
 # Release mta
 release_mta:
@@ -393,6 +429,8 @@ deploy:
     - job: release_api
       optional: true
     - job: release_adminng
+      optional: true
+    - job: release_mcp
       optional: true
   tags:
     - mails

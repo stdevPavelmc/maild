@@ -8,6 +8,10 @@ Debian-specific feature is required — then **Debian `trixie`**. The db is spec
 `php:<branch>-apache` images — **`mua` on `php:8.5-apache`**, **`admin` on
 `php:8.1-apache-bookworm`** (see the web UI table below).
 
+The two Python services use the official **`python:3.14-slim-trixie`** image instead: `api`
+(AdminNG) and `mcp` (MailD MCP, chosen in `mcp/technical-proposal.md` §12 to match `api`).
+Both run non-root; `mcp` also runs on a read-only rootfs.
+
 ### Web UI base images (current state + pending work)
 
 The two web UIs follow PHP's own release cadence, not the Ubuntu LTS rollover. Both are Debian

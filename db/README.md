@@ -10,10 +10,11 @@ sessions, TOTP seeds, audit logs).
 - **Data storage:** Uses `PGDATA=/var/lib/postgresql/data` pinned in `db/Dockerfile`.
 - **Boot process:** `db/docker-entrypoint-wrapper.sh` wraps the upstream PostgreSQL entrypoint:
   1. Boots the server and waits for socket readiness.
-  2. Runs `db/ensure_databases.sh` to create any missing databases (`POSTGRES_DB`, `POSTGRES_EXTRA_DB`, and `ADMINNG_DB`).
-  3. Executes `db/migrate.sh` to apply pending SQL migrations in `db/migrations/` (`001_maild_provision.sql`, `002_postfixadmin_catalogue.sql`).
+  2. Runs `db/ensure_databases.sh` to create any missing databases (`POSTGRES_DB`, `POSTGRES_EXTRA_DB`, `ADMINNG_DB` and `MCP_DB`).
+  3. Executes `db/migrate.sh` to apply pending SQL migrations in `db/migrations/` (`001_maild_provision.sql`, `002_postfixadmin_catalogue.sql`, `003_mcp_service_mailbox.sql`).
+  4. Runs `db/ensure_roles.sh` (only when `MCP_DB_PASSWORD` is set): creates or re-asserts the restricted `MCP_DB_USER` role (default `maild_mcp`), owner of `MCP_DB`, with column-level read-only grants on the catalogue (never `mailbox.password`) and `EXECUTE` on `maild_mcp_ensure_service_mailbox()` — its only write path. Grants are revoked and re-applied on every boot.
 - **Idempotency:** Never alters existing data or schema destructively on restart.
-- **Consumer services:** Postfix (`mta`), Dovecot (`mda`), Amavis (`amavis`), AdminNG API (`api`), Webmail (`mua`), and maintenance jobs (`cron`) all connect to this container.
+- **Consumer services:** Postfix (`mta`), Dovecot (`mda`), Amavis (`amavis`), AdminNG API (`api`), Webmail (`mua`), and maintenance jobs (`cron`) all connect to this container; the MailD MCP (`mcp`) connects only as the restricted `maild_mcp` role.
 
 ## Ports
 
@@ -41,6 +42,11 @@ production, `env.dev` in development) overrides any value.
 - `POSTGRES_USER=maild`: Primary database user.
 - `POSTGRES_EXTRA_DB=contacts`: Extra databases created at boot (used by SnappyMail for contacts DSN).
 - `ADMINNG_DB=adminng`: AdminNG database for device approvals, audit trails, and 2FA credentials.
+- `MCP_DB=mcp`: the MailD MCP database (must match the mcp image).
+- `MCP_DB_USER=maild_mcp`: the MCP role (must match the mcp image).
+
+### Optional
+- `MCP_DB_PASSWORD`: password of the MCP role; unset means no MCP role is created (passed by the compose files as `${MCP_DB_PASSWORD:-}`). Rotation: change it in the env file, restart `db`, recreate `mcp`.
 
 ## Major version upgrades
 
