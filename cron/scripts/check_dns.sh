@@ -1532,7 +1532,7 @@ send_report() {
     server="$(host amavis 2>/dev/null | awk '/has address/ { print $4 }' | head -n 1)"
     [ -n "$server" ] || server="amavis"
     err="$RUN_TMP/swaks.err"
-    swaks --server "$server" --port 10024 --protocol SMTP \
+    swaks --server "$server" --port "${AMAVIS_SUBMIT_PORT:-10026}" --protocol SMTP \
         --to "$REPORT_TO" --from "$REPORT_TO" \
         --header "Subject: $subject" --body @"$REPORT_FILE" > /dev/null 2> "$err"
     local rc=$?

@@ -118,10 +118,10 @@ MCP_SERVICE_EMAIL = env("MCP_SERVICE_EMAIL", f"mcp@{DEFAULT_DOMAIN}").lower()
 MCP_SERVICE_PASSWORD = env("MCP_SERVICE_PASSWORD")
 PROVISION_WAIT_TIMEOUT = int(env("PROVISION_WAIT_TIMEOUT", "180"))
 
-# Service mail (magic links, notices): plain SMTP to amavis, no auth (D2). P1 submits to the
-# existing 10024 listener; P1b moves the default to 10026 (D13).
+# Service mail (magic links, notices): plain SMTP to amavis, no auth (D2), on the INTERNAL
+# listener 10026 (D13: 10024 only admits the mta).
 MCP_SMTP_HOST = env("MCP_SMTP_HOST", "amavis")
-MCP_SMTP_PORT = int(env("MCP_SMTP_PORT", "10024"))
+MCP_SMTP_PORT = int(env("MCP_SMTP_PORT", "10026"))
 
 # web sessions (proposal §7.1): short access JWT + rotating refresh cookie
 MCP_ACCESS_TTL = env_duration("MCP_ACCESS_TTL", "15m")

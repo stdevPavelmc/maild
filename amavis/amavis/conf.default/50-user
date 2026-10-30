@@ -11,14 +11,27 @@ use strict;
 $notify_method  = 'smtp:_MTA_:10025';
 $forward_method  = $notify_method;
 
-# apply policy bank MTA
+# Two listeners (D13, mcp/technical-proposal.md §9.6 option B):
+#   10024  policy bank MTA       — Postfix's content_filter only
+#   10026  policy bank INTERNAL  — the stack's own submitters: cron jobs and the MailD MCP
+# Both are "originating" (DKIM-signed, forwarded to mta:10025). Who may connect is decided by
+# each bank's inet_acl, rendered from the live peer addresses into 52-maild-acl by the
+# entrypoint at boot and by its peer-IP watchdog afterwards. Until 2026-10 10024 accepted any
+# source ('0.0.0.0/0'): every container on the shared network could send DKIM-signed mail as
+# any hosted address.
+$inet_socket_port = [10024, 10026];
 $interface_policy{'10024'} = 'MTA';
+$interface_policy{'10026'} = 'INTERNAL';
 
 $policy_bank{'MTA'} = {
-  #inet_acl => [qw( 127.0.0.1 [::1] _MTAIP_ _CRONIP_ )],  # restrict access to these IP addresses
-  inet_acl => ['0.0.0.0/0', '::/0'],
+  inet_acl => [qw( 127.0.0.1 [::1] )],   # + the mta address (52-maild-acl)
   originating => 1,
   # auth_required_release => 0,  # don't require secret_id for amavisd-release
+};
+
+$policy_bank{'INTERNAL'} = {
+  inet_acl => [qw( 127.0.0.1 [::1] )],   # + the cron and mcp addresses (52-maild-acl)
+  originating => 1,
 };
 
 # --- MailD overrides for the resolute (26.04 LTS) base ----------------------

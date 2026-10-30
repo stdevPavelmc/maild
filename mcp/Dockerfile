@@ -27,7 +27,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # operator env file (dev: env.dev, prod: .env — see env.sample). MCP_HOSTNAME, MCP_PUBLIC_URL,
 # MCP_ADMIN_EMAIL and MCP_SERVICE_EMAIL default from DEFAULT_DOMAIN at runtime
 # (maild_mcp/settings.py); MCP_TRUSTED_PROXIES defaults to empty (the TCP peer is the client).
-# MCP_SMTP_PORT is 10024 until P1b adds amavis's 10026 listener (D13).
+# MCP_SMTP_PORT=10026 is amavis's INTERNAL listener (D13: 10024 only admits the mta).
 # Full variable matrix: .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \
     POSTGRES_PORT=5432 \
@@ -42,7 +42,7 @@ ENV POSTGRES_HOST=db \
     MCP_IMAP_CA_FILE=/certs/mail.crt \
     MCP_DOVECOT_MASTER_USER=mcp \
     MCP_SMTP_HOST=amavis \
-    MCP_SMTP_PORT=10024 \
+    MCP_SMTP_PORT=10026 \
     MCP_ACCESS_TTL=15m \
     MCP_USER_SESSION_TTL=24h \
     MCP_LOG_DIR=/var/log/maild-mcp \

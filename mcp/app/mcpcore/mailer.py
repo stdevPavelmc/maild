@@ -1,7 +1,8 @@
 """Service mail (proposal §7.4): magic links and notices, sent as MCP_SERVICE_EMAIL.
 
-Plain SMTP to amavis without auth (D2): amavis scans, DKIM-signs (originating) and hands the
-message to the mta. P1 submits to amavis:10024; P1b moves MCP_SMTP_PORT to 10026 (D13).
+Plain SMTP to amavis without auth (D2) on its INTERNAL listener (amavis:10026, D13): amavis
+scans, DKIM-signs (originating) and hands the message to the mta. The listener's ACL admits
+only cron and mcp.
 External SMTP (admin setting) arrives in P3.
 """
 

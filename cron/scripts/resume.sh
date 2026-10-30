@@ -67,7 +67,7 @@ fi
 # email
 swaks \
     --server ${SERVER} \
-    --port 10024 \
+    --port ${AMAVIS_SUBMIT_PORT:-10026} \
     --protocol SMTP \
     --to $TO \
     --from $TO \

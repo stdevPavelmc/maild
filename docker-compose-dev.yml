@@ -274,8 +274,8 @@ services:
     # them from env.dev. Operator env file; overrides any same-named image ENV default.
     env_file:
       - env.dev
-    ports:
-      - "10024:10024"  # Amavis content filter - exposed for debugging
+    # No published port (D13): 10024 admits only the mta and 10026 only cron/mcp, by source
+    # address, so a host-side connection (docker gateway IP) would be refused anyway.
     volumes:
       - ./ldata/amavis:/var/lib/amavis
       - ./ldata/spamassassin:/var/lib/spamassassin

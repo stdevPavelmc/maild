@@ -7,6 +7,11 @@ Amavisd-new, SpamAssassin, ClamAV antivirus integration, and automated DKIM sign
 
 - **Mail flow:** Receives SMTP mail from Postfix (`mta:25` or `:587/:465`) on port 10024,
   performs content analysis, and reinjects clean or tagged mail back into Postfix on port 10025.
+  The stack's own submitters (cron report mails, the MailD MCP's service mail) use port 10026.
+- **Listener access control:** 10024 admits only the `mta` container, 10026 only `cron` and
+  `mcp` (plus loopback), by source address (`conf.d/52-maild-acl`). A watchdog re-resolves those
+  peers every `PEER_WATCH_INTERVAL` seconds and reloads amavis when one was recreated with a new
+  address; refused clients are logged as `DENIED ACCESS from IP …`.
 - **Catalogue synchronization:** Queries PostgreSQL (`db`) for active hosted domains so
   Amavis knows which recipients are local vs. relay.
 - **Antivirus scanning:** Integrates with the `clamav` container over TCP port 3310 (`CONTSCAN`),
@@ -30,7 +35,10 @@ Amavisd-new, SpamAssassin, ClamAV antivirus integration, and automated DKIM sign
 
 | Port  | Protocol | Description |
 |-------|----------|-------------|
-| 10024 | SMTP     | Amavis content filter listener (fed by Postfix) |
+| 10024 | SMTP     | Content filter listener for Postfix (policy bank `MTA`, admits only `mta`) |
+| 10026 | SMTP     | Internal submitters: cron jobs and the MailD MCP (policy bank `INTERNAL`, admits only `cron`/`mcp`) |
+
+Neither port is published by any compose file.
 
 ## Volumes
 
@@ -52,6 +60,8 @@ production, `env.dev` in development) overrides any value.
 - `POSTGRES_HOST=db`: Database service hostname.
 - `POSTGRES_DB=mailddb`: Catalogue database name.
 - `POSTGRES_USER=maild`: Catalogue database user.
+- `MCP=mcp`: hostname of the optional MailD MCP, admitted on 10026 when it resolves.
+- `PEER_WATCH_INTERVAL=30`: seconds between peer-IP checks of the listener ACLs (`0` disables the watchdog; the same variable drives the mta's watchdog).
 - `MTA=mta`: MTA container hostname for reinjection.
 - `CLAMAV=clamav`: ClamAV container hostname for AV scanning.
 - `CRON=cron`: Cron maintenance container hostname.

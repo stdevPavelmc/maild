@@ -31,7 +31,7 @@ Rules:
 |-------|----------------------|--------|---------|------|----------|
 | P0 | mda master user + rehash fix; `MCP_DB` + `ensure_roles.sh` + migration 003; compose chain; empty `mcp` container with `/healthz` + service mailbox | verified | 2026-10-29 | 2026-10-29 | 2026-10-29 |
 | P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | done | 2026-10-29 | 2026-10-30 | |
-| P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | — | | | |
+| P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | done | 2026-10-30 | 2026-10-30 | |
 | P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | — | | | |
 | P3 | Admin panel (all groups), master tokens, external SMTP + test | — | | | |
 | P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | — | | | |
@@ -169,22 +169,32 @@ Next steps:
 
 ## P1b — amavis 10024/10026 split (D13)
 
-Status: —
+Status: done (clean-stack verification pending, together with P1's)
 
 Checklist
-- [ ] `50-user`: `$inet_socket_port = [10024, 10026]`, bank `MTA` ACL = localhost + mta, bank `INTERNAL` ACL = localhost + cron + mcp (mcp optional)
-- [ ] amavis IP watchdog (`PEER_WATCH_INTERVAL`) re-renders ACLs + `amavisd reload` (verify reload re-reads `inet_acl`)
-- [ ] `check.sh` checks both ports
-- [ ] cron: `AMAVIS_SUBMIT_PORT=10026` in the five scripts
-- [ ] Dev compose: drop or loopback-bind `10024`
-- [ ] Tests: cron→10026 OK, cron→10024 refused, api→10024/10026 refused, mta flows unchanged, recreate cron → accepted again within one interval
-- [ ] Docs (`.agents/`, env.sample, Changelog)
-- [ ] Full `./test.sh` green
+- [x] `50-user`: `$inet_socket_port = [10024, 10026]`, bank `MTA` ACL = localhost + mta, bank `INTERNAL` ACL = localhost + cron + mcp (mcp optional)
+- [x] amavis IP watchdog (`PEER_WATCH_INTERVAL`) re-renders ACLs + `amavisd reload` (verify reload re-reads `inet_acl` — verified: mcp, absent from the boot ACL, admitted after the watchdog's HUP)
+- [x] `check.sh` checks both ports
+- [x] cron: `AMAVIS_SUBMIT_PORT=10026` in the five scripts
+- [x] Dev compose: drop or loopback-bind `10024` — dropped
+- [x] Tests: cron→10026 OK, cron→10024 refused, api→10024/10026 refused, mta flows unchanged, recreate cron → accepted again within one interval — L1–L6 (+ mcp→10026 / mcp→10024 refused)
+- [x] Docs (`.agents/`, env.sample, Changelog)
+- [x] Full `./test.sh` green — 133 passed / 0 failed / 0 skipped, 5m20s
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-30 | action | Baseline inherited from P1's full pass (127/0/0). P1b started after the P1 commit `0904907`. |
+| 2026-10-30 | decision | ACLs in their own rendered file `conf.d/52-maild-acl` (`$policy_bank{'MTA'}{inet_acl}`, `$policy_bank{'INTERNAL'}{inet_acl}`), rewritten wholesale by the boot and by the watchdog, instead of sed-patching addresses inside the distro files. Loopback always in (check.sh). `50-user` declares `$inet_socket_port = [10024, 10026]`, both banks `originating => 1`. |
+| 2026-10-30 | decision | Watchdog mirrors the mta's: same variable `PEER_WATCH_INTERVAL` (default 30 s, 0 = off — one operator setting now drives both), re-resolves mta/cron/mcp, keeps the old address when a lookup fails (never an ACL without the mta or cron), lets mcp come and go (optional, starts after amavis), re-renders + `kill -HUP` (same reload path as `sa-update-loop.sh`) and updates `/tmp/{MTA,CRON,MCP}IP` so `check.sh` stays healthy. New image defaults: `MCP=mcp`, `PEER_WATCH_INTERVAL=30`; `EXPOSE 10024 10026`. |
+| 2026-10-30 | finding | Behaviour measured on the dev stack: refused clients get their connection closed after accept (`SMTPServerDisconnected` / no 220) and amavis logs `DENIED ACCESS from IP <x>, policy bank '<bank>'`. Probe matrix: mcp 10024 ✗ / 10026 ✓, cron ✗ / ✓, api ✗ / ✗. |
+| 2026-10-30 | decision | cron: new image default `AMAVIS_SUBMIT_PORT=10026`, used by the five mailing scripts (`resume`, `outbound_watch`, `check_maildirs`, `backup_db`, `check_dns`). mcp: `MCP_SMTP_PORT` default → 10026. Dev compose: `10024:10024` dropped (checklist option; a host-side connection arrives from the docker gateway and would be refused by the ACL anyway). |
+| 2026-10-30 | action | `test.sh` section L (L1–L6) written and run alone: **6 passed** — L6 moved cron 172.23.0.6 → 172.23.0.12 (stop, placeholder container takes a free address, start) and 10026 admitted it again after 6 s with amavis healthy. |
+| 2026-10-30 | action | Docs: `.agents/services/{catalog,configuration}.md` (amavis listeners + watchdog, cron submit port, mcp port), `.agents/architecture/overview.md` (internal submitters, service map), `.agents/devops/workflows.md` (section L, 133 checks), `AGENTS.md`, `env.sample` (`PEER_WATCH_INTERVAL` scope, `AMAVIS_SUBMIT_PORT`, `MCP_SMTP_PORT`), `amavis/README.md`, `cron/README.md`, `Changelog.md`. |
+| 2026-10-30 | finding | First full run: 132 passed / 0 failed / **1 skipped** — L6 could not move cron: the free-address placeholder got another IP and cron got its old one back (IPAM-dependent, flaky). Fixed: the placeholder is pinned to cron's released address (`docker run --ip`, accepted on the compose network `172.23.0.0/16`), so cron must come back elsewhere. Section L alone twice: 6/6 both (re-admitted after 32 s and 13 s, bound 2 × 30 + 15 s). |
+| 2026-10-30 | action | Full `./test.sh`: **133 passed / 0 failed / 0 skipped, 5m20s** (127 + L1–L6; sections A–G prove the mta path on 10024 and the cron jobs on 10026, K the mcp service mail on 10026). P1b → **done**. Nothing committed yet. |
+| 2026-10-30 | action | P1b committed on branch `mcp`. |
 
 ---
 

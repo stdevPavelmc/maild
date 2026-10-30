@@ -74,10 +74,33 @@ if [ -z "${CRONIP}" ] ; then
     exit 1
 fi
 
+# the MailD MCP is optional and starts after amavis: an unresolved name just leaves it out of
+# the 10026 ACL until the watchdog sees it
+MCPIP=`host ${MCP:-mcp} 2>/dev/null | awk '/has address/ { print $4; exit }'`
+
 # IP data for the checks
 echo $CLAMAVIP > /tmp/CLAMAVIP
 echo $MTAIP > /tmp/MTAIP
 echo $CRONIP > /tmp/CRONIP
+echo $MCPIP > /tmp/MCPIP
+
+# --- listener ACLs (D13) -------------------------------------------------------
+# 10024 (bank MTA) admits only the mta, 10026 (bank INTERNAL) only cron and mcp; loopback is
+# always in (check.sh). Rendered into its own file so the peer-IP watchdog can rewrite it
+# wholesale and reload amavisd, instead of patching addresses inside the distro files.
+ACL_FILE=/etc/amavis/conf.d/52-maild-acl
+render_acl() { # <mta ip> <cron ip> <mcp ip or empty>
+    {
+        echo "# MailD: rendered by docker-entrypoint.sh (boot + peer-IP watchdog) — do not edit"
+        echo "\$policy_bank{'MTA'}{inet_acl} = [qw( 127.0.0.1 [::1] ${1} )];"
+        echo "\$policy_bank{'INTERNAL'}{inet_acl} = [qw( 127.0.0.1 [::1] ${2} ${3} )];"
+        echo "1;"
+    } > "${ACL_FILE}.new"
+    chmod 0644 "${ACL_FILE}.new"
+    mv -f "${ACL_FILE}.new" "${ACL_FILE}"
+}
+render_acl "${MTAIP}" "${CRONIP}" "${MCPIP}"
+echo "amavis: listener ACLs 10024=[mta ${MTAIP}] 10026=[cron ${CRONIP}${MCPIP:+, mcp ${MCPIP}}]"
 
 # config dump
 if [ "${AMAVIS_DEBUG}" ] ; then
@@ -350,6 +373,40 @@ echo "Starting amavis"
 # keep the SpamAssassin rules fresh in the background (daily sa-update
 # + amavisd reload after new rules are installed)
 /sa-update-loop.sh &
+
+# --- peer-IP watchdog (same idea as the mta's) ------------------------------------
+# A peer recreated after amavis started comes back with a new address that the ACLs do not
+# know: its mail would be refused until amavis restarts. Every PEER_WATCH_INTERVAL seconds,
+# re-resolve mta/cron/mcp; on any change re-render 52-maild-acl and HUP amavisd (a reload
+# re-reads the whole configuration, inet_acl included). A lookup that fails right now keeps the
+# previous address (never an ACL without the mta or cron); mcp may disappear. 0 = disabled.
+acl_watchdog() {
+    while : ; do
+        sleep "${PEER_WATCH_INTERVAL}"
+        W_MTA=`host ${MTA} 2>/dev/null | awk '/has address/ { print $4; exit }'`
+        W_CRON=`host ${CRON} 2>/dev/null | awk '/has address/ { print $4; exit }'`
+        W_MCP=`host ${MCP:-mcp} 2>/dev/null | awk '/has address/ { print $4; exit }'`
+        [ -n "${W_MTA}" ] || W_MTA="${MTAIP}"
+        [ -n "${W_CRON}" ] || W_CRON="${CRONIP}"
+        if [ "${W_MTA}" != "${MTAIP}" ] || [ "${W_CRON}" != "${CRONIP}" ] || [ "${W_MCP}" != "${MCPIP}" ] ; then
+            echo "amavis: peers moved (mta ${MTAIP}->${W_MTA} cron ${CRONIP}->${W_CRON} mcp ${MCPIP:-none}->${W_MCP:-none}), re-rendering the listener ACLs"
+            MTAIP="${W_MTA}" ; CRONIP="${W_CRON}" ; MCPIP="${W_MCP}"
+            render_acl "${MTAIP}" "${CRONIP}" "${MCPIP}"
+            echo "${MTAIP}" > /tmp/MTAIP ; echo "${CRONIP}" > /tmp/CRONIP ; echo "${MCPIP}" > /tmp/MCPIP
+            if [ -f /var/run/amavis/amavisd.pid ] ; then
+                kill -HUP "$(cat /var/run/amavis/amavisd.pid)" && echo "amavis: reloaded with the new ACLs"
+            else
+                echo "amavis: WARNING - pid file not found, ACLs rendered but amavisd NOT reloaded"
+            fi
+        fi
+    done
+}
+if [ "${PEER_WATCH_INTERVAL:-30}" -gt 0 ] 2>/dev/null ; then
+    acl_watchdog &
+    echo "amavis: peer-IP watchdog started (every ${PEER_WATCH_INTERVAL}s)"
+else
+    echo "amavis: peer-IP watchdog disabled (PEER_WATCH_INTERVAL=${PEER_WATCH_INTERVAL})"
+fi
 
 /usr/sbin/amavisd -u amavis -g amavis -i docker foreground
 if [ $? -ne 0 ] ; then

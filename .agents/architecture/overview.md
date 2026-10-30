@@ -25,6 +25,9 @@ compose network.
   `user@alias-domain` is rewritten to `user@target-domain` before mailbox delivery; inactive
   alias-domain rows are not eligible recipients. AdminNG requires both domains to exist and
   the caller to manage both of them.
+- **Internal submitters:** cron's report mails and the MCP's service mail go straight to
+  amavis:10026 (bank INTERNAL, DKIM-signed, then mta:10025); amavis admits only the mta on 10024
+  and only cron/mcp on 10026, by source address, following moved peers with its watchdog.
 - **Outbound:** submission on :587 (auth) → SPF/DNSBL checks → amavis (DKIM signing,
   `DKIM_SIGNING=yes`) → internet. `RELAY` and `ALWAYS_BCC` are optional mta knobs.
 - **Content filter:** EICAR and banned attachments (`$banned_filename_re`, e.g. `.exe`)
@@ -42,14 +45,14 @@ compose network.
 |---------|-------|------|-------------|--------------|
 | `db` | `pavelmc/maild-db:develop` | PostgreSQL catalogue | 5432 | — |
 | `clamav` | `pavelmc/maild-clamav:develop` | clamd antivirus | 3310 | — |
-| `amavis` | `pavelmc/maild-amavis:develop` | content filter (spam/AV/DKIM) | 10024 | db |
+| `amavis` | `pavelmc/maild-amavis:develop` | content filter (spam/AV/DKIM); 10024 ← mta, 10026 ← cron/mcp | — (internal) | db |
 | `mda` | `pavelmc/maild-mda:develop` | Dovecot IMAP/POP3/Sieve | 110, 143, 993, 995, 4190, 12345 | db |
 | `mta` | `pavelmc/maild-mta:develop` | Postfix SMTP | 25, 465, 587 | db, mda, amavis, clamav |
 | `adminng` | `pavelmc/maild-adminng:develop` | AdminNG PWA + `/api/v1/` proxy | 8083 (HTTP), 8084 (HTTPS, dev) | api |
 | `api` | `pavelmc/maild-api:develop` | AdminNG API + first-boot seeder | — (internal) | db |
 | `mua` | `pavelmc/maild-mua:develop` | SnappyMail webmail | 8081 | mda |
 | `cron` | `pavelmc/maild-cron:develop` | maintenance jobs | — | db |
-| `mcp` | `pavelmc/maild-mcp:develop` | MailD MCP: AI-assistant access to the mailboxes (IMAP master user); P0 skeleton | 8085 | db, mda, amavis |
+| `mcp` | `pavelmc/maild-mcp:develop` | MailD MCP: AI-assistant access to the mailboxes (IMAP master user, user page, read tools; service mail via amavis:10026) | 8085 | db, mda, amavis |
 | `dozzle` | `amir20/dozzle:latest` | live log viewer (dev only) | 8082 | — |
 | `pwa-test` | `pavelmc/maild-pwa-test:develop` | Playwright + Lighthouse harness (dev only, one-shot) | — | api, adminng |
 

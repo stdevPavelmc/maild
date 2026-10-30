@@ -66,6 +66,7 @@ these variables shell-quoted into `/etc/environment` for cron jobs to source.
 - `POSTGRES_USER=maild`: Database user.
 - `ADMINNG_DB=adminng`: AdminNG database name to back up.
 - `MTA=mta`: MTA hostname used by `swaks` for mail report delivery.
+- `AMAVIS_SUBMIT_PORT=10026`: amavis listener the report mails are submitted to (bank INTERNAL; 10024 only admits the mta).
 - `JUNK_RETENTION_DAYS=7`: Days before Junk messages are purged (`0` disables purge).
 - `SA_HAM_SAMPLE_PER_USER=25`: Random ham messages sampled per mailbox during daily training.
 - `SA_HAM_SAMPLE_MAX=400`: Maximum ham messages sampled globally per training run.

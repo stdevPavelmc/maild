@@ -18,7 +18,7 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## Unreleased — MailD MCP (P0 foundations, `mcp/progress.md`)
+## Unreleased — MailD MCP (P0, P1, P1b — `mcp/progress.md`)
 - Added: new `mcp` service (image `maild-mcp`, hostname `mcp`) — P0 skeleton: Django + uvicorn,
   `/healthz`, first-boot admin seed and the service mailbox `MCP_SERVICE_EMAIL` (default
   `mcp@<DEFAULT_DOMAIN>`, created when missing, never modified; generated passwords printed once
@@ -43,6 +43,13 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 - Security: `rehash-password.sh` skips master-user logins — without it the first MCP access to
   a mailbox still on a legacy `$1$` hash would have replaced that user's password with the
   master password.
+- Security (P1b, D13): amavis's 10024 listener accepted SMTP from **any** source (`inet_acl
+  0.0.0.0/0`), so every container on the shared `maild` network (the ingress included) could
+  send DKIM-signed mail as any hosted address. 10024 now admits only the mta; a new listener
+  10026 (policy bank INTERNAL, also DKIM-signing) admits only cron and the MCP. A peer-IP
+  watchdog (`PEER_WATCH_INTERVAL`, shared with the mta) re-renders the ACLs and reloads amavis
+  when a peer is recreated. Cron jobs submit to `AMAVIS_SUBMIT_PORT` (default 10026), the MCP
+  to `MCP_SMTP_PORT` (default 10026). The dev compose no longer publishes 10024.
 - Fixed: `bootstrap-dev.sh` left `ldata/vmail/<domain>` root-owned, so Dovecot could not create
   the home of any mailbox added later to a fixture domain.
 

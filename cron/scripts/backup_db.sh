@@ -432,7 +432,7 @@ EOF
     # the mail IS the alert: a swaks failure must not be logged as a delivered notification
     if swaks \
         --server ${SERVER} \
-        --port 10024 \
+        --port ${AMAVIS_SUBMIT_PORT:-10026} \
         --protocol SMTP \
         --to ${TO} \
         --from ${TO} \

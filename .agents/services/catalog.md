@@ -57,6 +57,17 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Postfix hands mail to amavis:10024 and takes it back; amavis queries the catalogue for
   the domain list (that is why it needs `POSTGRES_PASSWORD`), scans with SpamAssassin +
   ClamAV, signs DKIM (`DKIM_SIGNING`), and bounces the result to `MTA=mta`.
+- **Two listeners (D13, since P1b of the MCP work)**: `10024` = policy bank `MTA` (Postfix's
+  `content_filter`), `10026` = bank `INTERNAL` (the stack's own submitters: cron's swaks jobs on
+  `AMAVIS_SUBMIT_PORT` and the MailD MCP's service mail). Both banks are `originating` (DKIM,
+  forward to `mta:10025`). Access is by source address: `conf.d/52-maild-acl` sets each bank's
+  `inet_acl` to `127.0.0.1 [::1]` + the mta (10024) / cron + mcp (10026), rendered at boot and
+  by a **peer-IP watchdog** (`PEER_WATCH_INTERVAL`, default 30 s, 0 = off; same variable as the
+  mta's) that re-resolves mta/cron/mcp and HUPs amavisd when one moved (a reload re-reads
+  `inet_acl` — verified by `test.sh` L6). mcp is optional and may join late. Refusals are logged
+  as `DENIED ACCESS from IP <x>, policy bank '<bank>'`. Before this, 10024 accepted any source
+  (`0.0.0.0/0`): every container on the shared network could send DKIM-signed mail as any hosted
+  address. `check.sh` reads both banners; a moved mta/cron is only transiently unhealthy now.
 - Dev toggles `AV_ENABLED` / `SPAM_FILTER_ENABLED` come from compose interpolation
   (`env.dev`); quarantine lands in `ldata/amavis/virusmails/`.
 - SpamAssassin config: shared `saconf` volume seeded on first boot; MailD tuning written to
@@ -69,8 +80,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   those attachment types are extracted and scanned instead of being flagged **UNCHECKED**.
 - Waits (bounded) on the `maild_provision` sentinel before the DKIM section, so a fresh
   deploy comes up signed with no restart (`AUTO_PROVISION`).
-- Env: defaults baked in `amavis/Dockerfile` (filter toggles, `SA_*`, peer hostnames); the
-  operator file is the `env_file:` and overrides any of them.
+- Env: defaults baked in `amavis/Dockerfile` (filter toggles, `SA_*`, peer hostnames
+  `MTA`/`CLAMAV`/`CRON`/`MCP`, `PEER_WATCH_INTERVAL=30`); the operator file is the `env_file:`
+  and overrides any of them. No published port in any compose file (dev dropped `10024:10024`).
 
 ## mda — Dovecot
 
@@ -375,6 +387,9 @@ more. See `.agents/services/provisioning.md`.
 
 ## cron — maintenance
 
+- Every job that mails (resume, backup, maildir check, outbound watch, DNS check) submits with
+  `swaks` to `amavis:${AMAVIS_SUBMIT_PORT}` (default **10026**, bank INTERNAL — D13); 10024 only
+  admits the mta.
 - Runs `cron -f`; jobs in `cron/crontab` (UTC): traffic resume 01:10, maildir check
   02:13 monthly, Junk purge 03:00, Bayes learning 03:30, outbound volume watch
   hourly (:23), DNS health check 04:20, db backup 08:00 (scripts in `cron/scripts/`).
@@ -402,7 +417,7 @@ more. See `.agents/services/provisioning.md`.
 - `outbound_watch.sh` (audit F-12, alerting half): parses the production syslog for the
   day's per-user submission volume (`sasl_username=` on queue-id `from=` lines) and the
   mta's `maild-ratelimit: throttled` lines, and mails an `[ALERT]` to the admin via
-  `swaks` → amavis:10024 when a user crosses `OUTBOUND_ALERT_MESSAGES` (default
+  `swaks` → amavis:10026 when a user crosses `OUTBOUND_ALERT_MESSAGES` (default
   150/day, `0` = off) or tripped the throttle. `OUTBOUND_ALERT_IGNORE_USERS` is the
   alert-side twin of the mta's `OUTBOUND_RATE_EXEMPT_USERS`; one alert per user per day
   (marker in `/tmp`), a failed delivery is retried next run. Skips cleanly when no
@@ -475,8 +490,8 @@ more. See `.agents/services/provisioning.md`.
   notice per claimer/address/day), owner wins over a pending claim, a disabled secondary's own
   login is refused. PATs `mdmcp_pat_…` (HMAC-stored, scopes, optional address subset, 30 d /
   n days / forever, idle 30 d → disabled, re-enable only from the page).
-- **Service mail** (magic links, notices) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10024 until
-  P1b) as `MCP_SERVICE_EMAIL`, EN/ES, `Auto-Submitted: auto-generated`.
+- **Service mail** (magic links, notices) to `MCP_SMTP_HOST:MCP_SMTP_PORT` (amavis:10026, bank
+  INTERNAL) as `MCP_SERVICE_EMAIL`, EN/ES, `Auto-Submitted: auto-generated`.
 - **Logs**: JSON Lines `audit-/access-/errors-YYYY-MM-DD.log` in `MCP_LOG_DIR` (O_APPEND, 90 files
   kept); never passwords, tokens, codes, bodies or subjects.
 - Domain allow-list (D6): `manage.py mcp_domains list|allow|deny <domain>` (audited) until the

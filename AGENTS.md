@@ -12,7 +12,7 @@ for maintenance jobs.
 | `db`     | PostgreSQL catalogue (domains, users, aliases…)   | 5432                      |
 | `mta`    | Postfix — SMTP in/out                             | 25, 465, 587              |
 | `mda`    | Dovecot — IMAP/POP3/Sieve, mail delivery          | 110, 143, 993, 995, 4190  |
-| `amavis` | Content filter (spam + AV relay, DKIM signing)    | 10024                     |
+| `amavis` | Content filter (spam + AV relay, DKIM signing); 10024 ← mta, 10026 ← cron/mcp | — (internal) |
 | `clamav` | ClamAV antivirus engine                           | 3310                      |
 | `mua`    | SnappyMail webmail                                | 8081                      |
 | `api`    | AdminNG API — FastAPI over the catalogue; first-boot provisioning leader (internal only) | —  |
@@ -73,7 +73,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (127 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (133 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```

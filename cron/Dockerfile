@@ -54,11 +54,13 @@ RUN chmod +x /scripts/*.sh
 # Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
 # (dev: env.dev, prod: .env — see env.sample). The entrypoint dumps the whole
 # environment into /etc/environment, from where the cron jobs source it.
+# AMAVIS_SUBMIT_PORT: the amavis listener the jobs mail through (10026, bank INTERNAL — D13).
 # Full variable matrix: .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
     MTA=mta \
+    AMAVIS_SUBMIT_PORT=10026 \
     JUNK_RETENTION_DAYS=7 \
     SA_HAM_SAMPLE_PER_USER=25 \
     SA_HAM_SAMPLE_MAX=400 \
@@ -97,4 +99,4 @@ LABEL org.opencontainers.image.title="MailD maintenance jobs" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-29"
+      org.opencontainers.image.created="2026-10-30"

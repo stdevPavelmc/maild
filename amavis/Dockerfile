@@ -56,8 +56,9 @@ RUN chmod +x /*.sh
 # in the operator's env file (docker compose env_file / environment / docker run -e)
 # overrides these at runtime — never rebuild the image to deploy a different value.
 # Secrets are NEVER baked: POSTGRES_PASSWORD must come from the operator env file
-# (dev: env.dev, prod: .env — see env.sample). MTA/CLAMAV/CRON are the fixed service
-# hostnames (never rename them). SA_BAYES_PATH and the debug switches are deliberately
+# (dev: env.dev, prod: .env — see env.sample). MTA/CLAMAV/CRON/MCP are the fixed service
+# hostnames (never rename them); MCP is optional (the stack runs without it).
+# PEER_WATCH_INTERVAL: seconds between peer-IP checks of the listener ACLs (0 = off). SA_BAYES_PATH and the debug switches are deliberately
 # unset (the entrypoint carries their fallbacks). Full variable matrix:
 # .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \
@@ -66,6 +67,8 @@ ENV POSTGRES_HOST=db \
     MTA=mta \
     CLAMAV=clamav \
     CRON=cron \
+    MCP=mcp \
+    PEER_WATCH_INTERVAL=30 \
     SPAM_FILTER_ENABLED=yes \
     AV_ENABLED=yes \
     DKIM_SIGNING=yes \
@@ -86,7 +89,7 @@ RUN if [ "$DEBUG" ]; then \
 
 VOLUME ["/var/lib/amavis", "/var/lib/spamassassin", "/etc/spamassassin"]
 
-EXPOSE 10024
+EXPOSE 10024 10026
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 
@@ -103,4 +106,4 @@ LABEL org.opencontainers.image.title="MailD content filter (Amavis + SpamAssassi
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-24"
+      org.opencontainers.image.created="2026-10-30"

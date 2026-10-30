@@ -337,6 +337,9 @@ cleanup() {
                 > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
         fi
+        # Phase L (amavis listeners): the 10026 probe mail and, if L6 was interrupted, its placeholder.
+        dcx mda doveadm expunge -u "$DEPLOY_ADMIN" mailbox INBOX subject "maild-p1b-internal-" > /dev/null 2>&1 || true
+        [ -n "${L_PLACEHOLDER:-}" ] && docker rm -f "$L_PLACEHOLDER" > /dev/null 2>&1 || true
         # Phase K (MCP user side): fixture accounts with their tokens and addresses (children first:
         # the ORM's CASCADE is not a database ON DELETE), their sessions and
         # lockouts, the example.net policy as found, the service mails the phase caused.
@@ -2630,6 +2633,117 @@ print(f.group(1) if f else "")' 2>/dev/null)"
     else
         t_fail "K22 audit log content"
     fi
+fi
+
+# ================================= L. amavis listeners (P1b, D13) =========
+# mcp/technical-proposal.md §9.6 option B: 10024 (policy bank MTA) admits only the mta, the new
+# 10026 (bank INTERNAL) only cron and mcp; both DKIM-sign. The ACLs follow moved peers through
+# amavis's peer-IP watchdog (52-maild-acl + amavisd reload). The mail path itself (Postfix →
+# 10024 → 10025) is covered by sections A–F, the cron jobs on 10026 by section G and the mcp
+# service mail on 10026 by K15. Self-cleaning: the probe mail is expunged and the placeholder
+# container that forces cron onto a new address is removed by cleanup().
+section "L. amavis listeners 10024 (mta) / 10026 (cron, mcp)"
+
+L_SUBJ="maild-p1b-internal-$(chrono | cut -c1-12)"
+l_peer_ip() { docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1" 2>/dev/null | tr -d '\r'; }
+l_py_probe() { # <service> <port> → "open" when amavis greets and accepts MAIL FROM, else the error
+    dcx "$1" python -c "import smtplib
+try:
+    s=smtplib.SMTP('amavis',$2,timeout=10); s.ehlo('probe'); c,_=s.mail('probe@$DEFAULT_DOMAIN'); s.quit(); print('open' if c==250 else 'code %s'%c)
+except Exception as e: print(type(e).__name__)" 2>/dev/null | tr -d '\r'
+}
+l_cron_probe() { # <port> → "open" when amavis accepts MAIL FROM from the cron container
+    dcx cron sh -c "swaks --server amavis --port $1 --quit-after MAIL --from probe@$DEFAULT_DOMAIN --to $DEPLOY_ADMIN 2>&1" |
+        grep -q '250 2.1.0 Sender' && echo open || echo refused
+}
+
+if [ "$HAVE_DC" != 1 ] ; then
+    t_skip "amavis listener checks (need docker)"
+else
+    L_MTA_IP="$(l_peer_ip maild-dev-mta)"; L_CRON_IP="$(l_peer_ip maild-dev-cron)"
+    L_ACL="$(dcx amavis cat /etc/amavis/conf.d/52-maild-acl 2>/dev/null | tr -d '\r')"
+
+    # L1 — two listeners, and the ACL file names the right peer in the right bank
+    L1_24="$(dcx amavis sh -c 'nc localhost 10024 -w2 </dev/null | head -n1' 2>/dev/null | tr -d '\r')"
+    L1_26="$(dcx amavis sh -c 'nc localhost 10026 -w2 </dev/null | head -n1' 2>/dev/null | tr -d '\r')"
+    if [[ "$L1_24" == 220* ]] && [[ "$L1_26" == 220* ]] &&
+       printf '%s' "$L_ACL" | grep -q "{'MTA'}{inet_acl} = \[qw( 127.0.0.1 \[::1\] $L_MTA_IP )\]" &&
+       printf '%s' "$L_ACL" | grep "{'INTERNAL'}" | grep -q " $L_CRON_IP " &&
+       ! printf '%s' "$L_ACL" | grep "{'MTA'}" | grep -q " $L_CRON_IP " ; then
+        t_ok "L1 amavis listens on 10024 (ACL: mta $L_MTA_IP) and 10026 (ACL: cron $L_CRON_IP + mcp)"
+    else
+        t_fail "L1 listeners/ACL (10024='$L1_24' 10026='$L1_26' acl: $(printf '%s' "$L_ACL" | grep -c inet_acl) lines)"
+    fi
+
+    # L2 — cron → 10026 delivers, DKIM-signed (bank INTERNAL is originating)
+    dcx cron sh -c "swaks --server amavis --port 10026 --from postmaster@$DEFAULT_DOMAIN --to $DEPLOY_ADMIN \
+        --header 'Subject: $L_SUBJ' --body 'P1b INTERNAL bank probe' >/dev/null 2>&1"
+    L2_OK=1; wait_msg "$DEPLOY_ADMIN" INBOX "$L_SUBJ" 60 || L2_OK=0
+    L2_UID="$(msg_newest_uid "$DEPLOY_ADMIN" INBOX "$L_SUBJ")"
+    if [ "$L2_OK" = 1 ] && msg_text "$DEPLOY_ADMIN" INBOX "$L2_UID" | grep -qi '^DKIM-Signature:' ; then
+        t_ok "L2 cron → amavis:10026 is accepted, DKIM-signed and delivered"
+    else
+        t_fail "L2 cron → 10026 (delivered=$L2_OK, DKIM header $( [ -n "$L2_UID" ] && msg_text "$DEPLOY_ADMIN" INBOX "$L2_UID" | grep -ci '^DKIM-Signature:' || echo n/a))"
+    fi
+
+    # L3 — cron → 10024 is refused (and amavis says so)
+    L3="$(l_cron_probe 10024)"
+    sleep 1
+    if [ "$L3" = refused ] && "${DC[@]}" logs --no-log-prefix --since 2m amavis 2>/dev/null |
+         grep -q "DENIED ACCESS from IP $L_CRON_IP, policy bank 'MTA'" ; then
+        t_ok "L3 cron → amavis:10024 is refused (DENIED ACCESS, policy bank MTA)"
+    else
+        t_fail "L3 cron → 10024 should be refused (got $L3)"
+    fi
+
+    # L4 — any other container (api) is refused on both
+    L4_24="$(l_py_probe api 10024)"; L4_26="$(l_py_probe api 10026)"
+    if [ "$L4_24" != open ] && [ "$L4_26" != open ] ; then
+        t_ok "L4 another container (api) is refused on 10024 and 10026"
+    else
+        t_fail "L4 api must not submit to amavis (10024=$L4_24 10026=$L4_26)"
+    fi
+
+    # L5 — mcp: 10026 yes, 10024 no
+    if [ -n "$(env_value "$ENV_FILE" MCP_DB_PASSWORD || true)" ] ; then
+        L5_26="$(l_py_probe mcp 10026)"; L5_24="$(l_py_probe mcp 10024)"
+        if [ "$L5_26" = open ] && [ "$L5_24" != open ] ; then
+            t_ok "L5 mcp → amavis:10026 is accepted, mcp → 10024 refused"
+        else
+            t_fail "L5 mcp listener access (10026=$L5_26 10024=$L5_24)"
+        fi
+    else
+        t_skip "L5 mcp listener access (no MCP deployed)"
+    fi
+
+    # L6 — the watchdog: cron on a NEW address is admitted again within two intervals
+    L_WATCH="$(container_env PEER_WATCH_INTERVAL)"; L_WATCH="${L_WATCH:-30}"
+    L_NET="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' maild-dev-cron 2>/dev/null)"
+    timeout -k10 120 "${DC[@]}" stop cron > /dev/null 2>&1
+    # a placeholder pinned to the address cron just released, so cron must come back elsewhere
+    # (a free-address placeholder made this depend on the IPAM's choice: flaky)
+    L_PLACEHOLDER="$(docker run -d --rm --network "$L_NET" --ip "$L_CRON_IP" --entrypoint sleep pavelmc/maild-cron:develop 600 2>/dev/null)"
+    timeout -k10 120 "${DC[@]}" start cron > /dev/null 2>&1
+    L6_NEW="$(l_peer_ip maild-dev-cron)"
+    if [ "$L6_NEW" = "$L_CRON_IP" ] || [ -z "$L6_NEW" ] ; then
+        t_skip "L6 could not move cron to a new address (still ${L6_NEW:-none}); watchdog not exercised"
+    else
+        L6_START=$SECONDS; L6="refused"
+        while [ $((SECONDS - L6_START)) -le $((2 * L_WATCH + 15)) ] ; do
+            L6="$(l_cron_probe 10026)"; [ "$L6" = open ] && break
+            sleep 3
+        done
+        L6_SECS=$((SECONDS - L6_START))
+        L6_HEALTH="$(docker inspect -f '{{.State.Health.Status}}' maild-dev-amavis 2>/dev/null)"
+        if [ "$L6" = open ] && [ "$L6_HEALTH" = healthy ] &&
+           "${DC[@]}" logs --no-log-prefix --since 5m amavis 2>/dev/null | grep -q "cron $L_CRON_IP->$L6_NEW" ; then
+            t_ok "L6 cron moved $L_CRON_IP → $L6_NEW: the watchdog re-rendered the ACL and 10026 admits it again after ${L6_SECS}s (amavis stays healthy)"
+        else
+            t_fail "L6 watchdog (cron $L_CRON_IP → $L6_NEW: 10026=$L6 after ${L6_SECS}s, amavis $L6_HEALTH)"
+        fi
+    fi
+    [ -n "$L_PLACEHOLDER" ] && docker rm -f "$L_PLACEHOLDER" > /dev/null 2>&1
+    L_PLACEHOLDER=""
 fi
 
 section "summary"

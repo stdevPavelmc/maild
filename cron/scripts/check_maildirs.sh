@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # This script is part of MailD
-# Copyright 2020-2023 Pavel Milanes Costa <pavelmc@gmail.com>
+# Copyright 2020-2026 Pavel Milanes Costa <pavelmc@gmail.com>
 #
 # Goal:
 #   - Cycle trough the list of maildirs in the mail storage and check
@@ -251,7 +251,7 @@ if [ $mail -ne 0 -o -s $domainlist ] ; then
     # send the email
     cat $mail | swaks \
         --server ${SERVER} \
-        --port 10024 \
+        --port ${AMAVIS_SUBMIT_PORT:-10026} \
         --protocol SMTP \
         --to $TO \
         --from $TO \

@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 127 checks
+./test.sh                 # 133 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -129,7 +129,12 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   idle → 401 `token_idle`, revoke) and the read tools through the official SDK client (search
   never sets `\Seen`, `get_email` does), plus the audit logs; it deletes the `example.net` MCP
   accounts and restores the domain policy on exit. Browser flows for the MCP user page:
-  `./adminng/pwa-test/run.sh mcp`. It creates two throwaway mailboxes
+  `./adminng/pwa-test/run.sh mcp`.
+- Section L covers the amavis listeners (D13): 10024 admits only the mta and 10026 only
+  cron/mcp (cron and api probes, the `DENIED ACCESS` log line), a DKIM-signed delivery through
+  10026, and the peer-IP watchdog (cron is stopped, a placeholder container takes a free
+  address, cron restarts elsewhere and must be admitted again within two
+  `PEER_WATCH_INTERVAL`s). The placeholder and the probe mail are removed on exit. It creates two throwaway mailboxes
   (`mcp-*-probe@example.net`) and removes them on exit; it skips when `env.dev` carries no
   MCP secrets.
 - The F-12 outbound throttle is covered end to end: the `submission`/`smtps` policy wiring
