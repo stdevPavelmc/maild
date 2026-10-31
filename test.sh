@@ -3188,6 +3188,59 @@ print(f.group(1) if f else "")' 2>/dev/null)"
     else
         t_fail "N10 logs/bundles (items=$N10_LOGS filtered=$N10_ONLY user-page-admin-refs=$N10_USER admin-bundle=$N10_ADM)"
     fi
+
+    # N11 — a refresh cookie only rotates its own kind of session: the admin's, presented to the
+    # user endpoint, is unknown there (401) and the admin session keeps working (no rotation, no reuse revoke)
+    N11_RT="$(awk '$6 == "mdmcp_admin_refresh" {print $7}' "$N_JAR" | tail -n1)"
+    N11_USER="$(curl -s -o /dev/null -w '%{http_code}' -X POST "$MCP_HTTP/webapi/user/refresh" -H "Cookie: mdmcp_refresh=$N11_RT")"
+    n_api POST /refresh "" "" "$N_JAR"; N11_ADMIN="$K_CODE"; N11_AT="$(k_json "d.get('access_token','')")"
+    [ -n "$N11_AT" ] && N_AT="$N11_AT"
+    if [ -n "$N11_RT" ] && [ "$N11_USER" = 401 ] && [ "$N11_ADMIN" = 200 ] ; then
+        t_ok "N11 the admin refresh cookie is refused by the user refresh endpoint (401) and the admin session still rotates"
+    else
+        t_fail "N11 refresh kinds (cookie=${N11_RT:+yes} user-endpoint=$N11_USER admin-after=$N11_ADMIN)"
+    fi
+
+    # N12 — §7.2: alias domains stay out of the Domains dual list (their mail lands in the target domain)
+    N12_ALIAS="mcpalias-$DOMAIN"
+    sql "INSERT INTO domain (domain, description, aliases, mailboxes, maxquota, quota, transport, backupmx, active)
+            VALUES ('$N12_ALIAS', 'test.sh N12 alias domain', 0, 0, 0, 0, 'virtual', false, true) ON CONFLICT (domain) DO NOTHING;
+         INSERT INTO alias_domain (alias_domain, target_domain, active) VALUES ('$N12_ALIAS', '$DOMAIN', true)
+            ON CONFLICT (alias_domain) DO NOTHING;" > /dev/null 2>&1
+    n_api GET /domains "" "$N_AT"; N12_LIST="$(k_json "' '.join(x['domain'] for x in d['domains'])")"
+    n_api PUT /domains "{\"allowed\":[\"$DOMAIN\",\"$N12_ALIAS\"]}" "$N_AT"; N12_PUT="$K_CODE"
+    n_api PUT /domains "{\"allowed\":[\"$DOMAIN\"]}" "$N_AT"
+    sql "DELETE FROM alias_domain WHERE alias_domain = '$N12_ALIAS'; DELETE FROM domain WHERE domain = '$N12_ALIAS';" > /dev/null 2>&1
+    if printf ' %s ' "$N12_LIST" | grep -q " $DOMAIN " && ! printf ' %s ' "$N12_LIST" | grep -q " $N12_ALIAS " && [ "$N12_PUT" = 400 ] ; then
+        t_ok "N12 alias domains are left out of the Domains dual list and cannot be allowed"
+    else
+        t_fail "N12 alias domain (listed='$N12_LIST' allow-alias=$N12_PUT)"
+    fi
+
+    # N13 — §7.2 retention defaults follow the rotation (90 days / 26 weeks / 12 months); a hand-set value stays
+    n_settings logging '{"rotation":"week","retention":90}'; n_api GET /settings/logging "" "$N_AT"; N13_W="$(k_json "d['retention']")"
+    n_settings logging '{"rotation":"month","retention":26}'; n_api GET /settings/logging "" "$N_AT"; N13_M="$(k_json "d['retention']")"
+    n_settings logging '{"rotation":"day","retention":40}'; n_api GET /settings/logging "" "$N_AT"; N13_KEEP="$(k_json "d['retention']")"
+    n_settings logging '{"rotation":"day","retention":90}'
+    if [ "$N13_W" = 26 ] && [ "$N13_M" = 12 ] && [ "$N13_KEEP" = 40 ] ; then
+        t_ok "N13 log retention follows the rotation's default (90 days → 26 weeks → 12 months) unless set by hand"
+    else
+        t_fail "N13 retention defaults (week=$N13_W month=$N13_M hand-set=$N13_KEEP)"
+    fi
+
+    # N14 — §9.5: X-Forwarded-For is believed from the networks mcp is attached to (the default when
+    # MCP_TRUSTED_PROXIES is unset), so logs/lockouts see the client behind the ingress, not the proxy
+    N14_UA="maild-n14-$(chrono)"
+    n_settings logging '{"enabled":true}'
+    curl -s -o /dev/null -A "$N14_UA" -H 'X-Forwarded-For: 198.51.100.77' "$MCP_HTTP/api/v1/skill.md"
+    sleep 1
+    N14_LINE="$(dcx mcp sh -c "cat /var/log/maild-mcp/access-*.log" 2>/dev/null | grep -F "$N14_UA" | tail -n1)"
+    N14_BOOT="$("${DC[@]}" logs mcp 2>/dev/null | grep -c 'X-Forwarded-For trusted from: [0-9a-f]')"
+    if printf '%s' "$N14_LINE" | grep -q '"ip": *"198.51.100.77"' && [ "${N14_BOOT:-0}" -ge 1 ] ; then
+        t_ok "N14 with MCP_TRUSTED_PROXIES unset, X-Forwarded-For from the stack's own subnets is believed (access log shows the forwarded client)"
+    else
+        t_fail "N14 trusted proxies (boot-log=$N14_BOOT access='${N14_LINE:-none}')"
+    fi
 fi
 
 # ================================= O. MailD MCP OAuth 2.1 (P4) ================

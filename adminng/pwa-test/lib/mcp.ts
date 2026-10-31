@@ -142,3 +142,17 @@ export function dropOAuthClients(name: string): void {
       `DELETE FROM oauth_client WHERE metadata->>'client_name' = '${name}';`,
   )
 }
+
+/** Merge `patch` into the admin's user-policy settings group; restoreUserPolicy() puts the row back. */
+export function patchUserPolicy(patch: Record<string, unknown>): void {
+  const json = JSON.stringify(patch).replace(/'/g, "''")
+  mcpSql('DROP TABLE IF EXISTS e2e_bak_upolicy; ' +
+    "CREATE TABLE e2e_bak_upolicy AS SELECT * FROM setting WHERE key='user_policy'; " +
+    `INSERT INTO setting (key, value, updated_by, updated_at) VALUES ('user_policy', '${json}'::jsonb, 'e2e', now()) ` +
+    'ON CONFLICT (key) DO UPDATE SET value = setting.value::jsonb || EXCLUDED.value::jsonb;')
+}
+
+export function restoreUserPolicy(): void {
+  mcpSql("DELETE FROM setting WHERE key='user_policy'; INSERT INTO setting SELECT * FROM e2e_bak_upolicy; " +
+    'DROP TABLE IF EXISTS e2e_bak_upolicy;')
+}

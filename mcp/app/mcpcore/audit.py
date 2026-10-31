@@ -98,13 +98,24 @@ def error(where: str, message: str, **extra) -> None:
     log.error("%s: %s", where, message)
 
 
+def _by_age(paths) -> list[Path]:
+    """Oldest first, by last write: after a rotation change day, week and month names mix, and
+    their text order is not their age (2026-10 < 2026-10-30 < 2026-W44)."""
+    def mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+    return sorted(paths, key=lambda p: (mtime(p), p.name))
+
+
 def prune() -> int:
     """Retention: keep the newest `retention` files per kind. Returns how many were deleted."""
     retention = int(_config().get("retention", 90))
     removed = 0
     base = Path(settings.MCP_LOG_DIR)
     for kind in KINDS:
-        files = sorted(base.glob(f"{kind}-*.log"))
+        files = _by_age(base.glob(f"{kind}-*.log"))
         for old in files[:-retention] if len(files) > retention else []:
             try:
                 old.unlink()
@@ -119,7 +130,7 @@ def recent(category_prefix: str, *, account_id: int | None = None, limit: int = 
     """Newest audit records (newest file first), optionally for one account, skipping the
     categories in `exclude`."""
     out: list[dict] = []
-    for path in sorted(Path(settings.MCP_LOG_DIR).glob("audit-*.log"), reverse=True):
+    for path in reversed(_by_age(Path(settings.MCP_LOG_DIR).glob("audit-*.log"))):
         try:
             lines = path.read_text().splitlines()
         except OSError:

@@ -105,7 +105,7 @@ def login(request, data: LoginIn):
 
 @api.post("/user/refresh")
 def refresh(request):
-    rotated = webauth.rotate(request.COOKIES.get(webauth.REFRESH_COOKIE, ""))
+    rotated = webauth.rotate(request.COOKIES.get(webauth.REFRESH_COOKIE, ""), "user")
     if rotated is None:
         resp = JsonResponse({"error": "session_expired", "message": "Please sign in again."}, status=401)
         resp.delete_cookie(webauth.REFRESH_COOKIE, path=webauth.REFRESH_PATH)
@@ -140,7 +140,9 @@ def _account(account: Account) -> dict:
             "lang": prefs_mod.get(account)["lang"],
             "prefs": prefs_mod.get(account), "confirm_modes": list(policy.CONFIRM_MODES),
             "addresses": [_address(a) for a in account.addresses.order_by("-is_main", "email")],
-            "mcp_url": settings.MCP_RESOURCE_URL}
+            "mcp_url": settings.MCP_RESOURCE_URL,
+            "token_policy": {"forever_allowed": policy.PAT_FOREVER_ALLOWED,
+                             "default_days": policy.PAT_DEFAULT_LIFETIME // policy.DAY}}
 
 
 @api.get("/user/me", auth=user_auth)

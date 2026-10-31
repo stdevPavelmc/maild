@@ -103,8 +103,8 @@ def login_verify(request, data: CodeIn):
 
 @router.post("/refresh")
 def refresh(request):
-    rotated = webauth.rotate(request.COOKIES.get(webauth.ADMIN_REFRESH_COOKIE, ""))
-    if rotated is None or rotated[2].kind != "admin":
+    rotated = webauth.rotate(request.COOKIES.get(webauth.ADMIN_REFRESH_COOKIE, ""), "admin")
+    if rotated is None:
         resp = JsonResponse({"error": "session_expired", "message": "Please sign in again."}, status=401)
         resp.delete_cookie(webauth.ADMIN_REFRESH_COOKIE, path=webauth.ADMIN_REFRESH_PATH)
         return resp

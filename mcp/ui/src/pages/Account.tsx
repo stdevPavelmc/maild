@@ -217,7 +217,7 @@ export default function Account({
         </form>
       </Card>
 
-      <Tokens addresses={usableForTokens} onError={(text) => setNotice({ kind: 'error', text })} />
+      <Tokens addresses={usableForTokens} policy={account.token_policy} onError={(text) => setNotice({ kind: 'error', text })} />
 
       <Connect />
 

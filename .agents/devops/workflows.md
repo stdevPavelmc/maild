@@ -105,7 +105,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 175 checks
+./test.sh                 # 179 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -142,7 +142,9 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   the domains dual list, master tokens (TTL cap, `X-MailD-Act-As`, CIDR, denied domain, revoke,
   always audited with logging off, opt-in owner notice), user notifications, and the external
   service SMTP through `mta:587` (strict verification refuses the dev self-signed cert, the
-  `verify_tls` opt-out passes). It snapshots the admin row, the settings, the domain policy and the
+  `verify_tls` opt-out passes); N11–N14 (final review) cover the refresh-cookie kind check, alias
+  domains kept out of the dual list, the rotation-driven retention defaults and the trusted-proxy
+  default (X-Forwarded-For believed from the container's own subnets). It snapshots the admin row, the settings, the domain policy and the
   service mailbox hash and restores them on exit. Admin browser flows run in the same
   `./adminng/pwa-test/run.sh mcp` mode.
 - Section O covers P4 OAuth 2.1: the metadata documents, a DCR and a CIMD client end to end

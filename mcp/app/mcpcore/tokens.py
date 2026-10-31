@@ -209,7 +209,7 @@ def create_master(admin, name: str, ttl_hours: float | None, scopes: list[str], 
     if not scopes or any(s not in policy.SCOPES for s in scopes):
         raise AccountError("invalid_scopes", f"Scopes must be a non-empty subset of {', '.join(policy.SCOPES)}.")
     ttl = int(float(ttl_hours) * 3600) if ttl_hours else policy.MASTER_TOKEN_DEFAULT_TTL
-    if ttl <= 0 or ttl > settings.MCP_MASTER_TOKEN_MAX_TTL:
+    if ttl < 60 or ttl > settings.MCP_MASTER_TOKEN_MAX_TTL:
         raise AccountError("invalid_lifetime",
                            f"A master token lives between 1 minute and {settings.MCP_MASTER_TOKEN_MAX_TTL // 3600} hours; never forever.")
     clean = None

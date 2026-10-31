@@ -101,3 +101,16 @@ test('service email: the internal Test reports a transcript; the logs viewer lis
   await page.getByLabel('Filter').fill('service_email.test')
   await expect(page.getByTestId('logs-list')).toContainText('service_email.test')
 })
+
+test('service email: external SMTP without encryption warns that the credentials travel in clear text', async ({ page }) => {
+  await signIn(page)
+  const card = page.getByTestId('service-card')
+  await card.getByLabel('External SMTP server').check()
+  await card.getByLabel('Encryption').selectOption('none')
+  await expect(page.getByTestId('smtp-cleartext')).toHaveCount(0)   // no credentials, nothing to leak
+  await card.getByLabel('Username (optional)').fill('relay-user')
+  await expect(page.getByTestId('smtp-cleartext')).toContainText('clear text')
+  await card.getByLabel('Encryption').selectOption('starttls')
+  await expect(page.getByTestId('smtp-cleartext')).toHaveCount(0)
+  await page.getByTestId('service-card-restore').click()             // nothing saved
+})

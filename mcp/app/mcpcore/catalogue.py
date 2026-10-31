@@ -49,9 +49,11 @@ def ensure_service_mailbox(address: str, dovecot_hash: str, name: str) -> bool:
 
 
 def domains() -> list[tuple[str, bool]]:
-    """Every catalogue domain with its active flag (alias domains are a separate table)."""
+    """Every catalogue domain with its active flag, alias domains left out (§7.2: PostfixAdmin
+    keeps them in `domain` too, but their mail lands in the target domain's mailboxes)."""
     with _cursor() as cur:
-        cur.execute("SELECT domain, active FROM domain ORDER BY domain")
+        cur.execute("SELECT domain, active FROM domain"
+                    " WHERE domain NOT IN (SELECT alias_domain FROM alias_domain) ORDER BY domain")
         return [(row[0], bool(row[1])) for row in cur.fetchall()]
 
 

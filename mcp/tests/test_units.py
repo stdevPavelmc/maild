@@ -307,3 +307,71 @@ def test_rest_error_mapping(monkeypatch):
     except UnexpectedToolError as exc:
         status, body = _failure(exc)
     assert status == 500 and "secret" not in json.dumps(body)
+
+
+# ------------------------------------------------------------- final review ---
+def test_attached_subnets_reads_connected_routes(tmp_path):
+    from maild_mcp.settings import attached_subnets
+
+    r4 = tmp_path / "route"
+    r4.write_text("Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\n"
+                  "eth0\t00000000\t010017AC\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"     # default route: skipped
+                  "eth0\t000017AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n"     # 172.23.0.0/16
+                  "eth1\t0012A8C0\t00000000\t0001\t0\t0\t0\t00FFFFFF\t0\t0\t0\n"     # 192.168.18.0/24
+                  "lo\t0000007F\t00000000\t0001\t0\t0\t0\t000000FF\t0\t0\t0\n")
+    r6 = tmp_path / "ipv6_route"
+    z = "0" * 32
+    r6.write_text(f"fd00000000000000000000000000abcd 40 {z} 00 {z} 00000100 0 0 00000001 eth0\n"   # fd00::/64
+                  f"fe800000000000000000000000000000 40 {z} 00 {z} 00000100 0 0 00000001 eth0\n"   # link-local
+                  f"{z} 00 {z} 00 fd000000000000000000000000000001 00000400 0 0 00000003 eth0\n"   # default via gw
+                  f"{z} 80 {z} 00 {z} 00000000 0 0 00000001 lo\n")
+    assert attached_subnets(str(r4), str(r6)) == ["172.23.0.0/16", "192.168.18.0/24", "fd00::/64"]
+    assert attached_subnets(str(tmp_path / "missing"), str(tmp_path / "missing6")) == []
+
+
+def test_retention_default_follows_rotation():
+    from mcpcore.settings_store import _validate, defaults
+
+    day = defaults("logging")
+    assert day["retention"] == 90
+    week = _validate("logging", {"rotation": "week"}, day)
+    assert week["retention"] == 26
+    assert _validate("logging", {"rotation": "month"}, week)["retention"] == 12
+    assert _validate("logging", {"rotation": "week", "retention": 40}, day)["retention"] == 40   # hand-set stays
+    assert _validate("logging", {"retention": 40}, day)["retention"] == 40
+
+
+def test_log_files_by_age_not_name(tmp_path):
+    import os
+
+    from mcpcore.audit import _by_age
+
+    names = ["audit-2026-W44.log", "audit-2026-10.log", "audit-2026-10-30.log"]   # oldest → newest by write
+    for i, n in enumerate(names):
+        (tmp_path / n).write_text("x")
+        os.utime(tmp_path / n, (1_000_000 + i, 1_000_000 + i))
+    assert [p.name for p in _by_age(tmp_path.glob("audit-*.log"))] == names
+
+
+def test_tool_runner_rechecks_the_scope(monkeypatch):
+    import asyncio
+    from types import SimpleNamespace
+
+    from mcpcore import audit
+    from mcpserver import server
+
+    events = []
+    monkeypatch.setattr(audit, "event", lambda *a, **k: events.append((a, k)))
+    p = SimpleNamespace(scopes={"mail.read"}, ip="", audit_actor=lambda: {}, audit_token=lambda: {})
+    marker = server.REST_PRINCIPAL.set(p)
+    try:
+        called = []
+        with pytest.raises(server.CodedToolError) as exc:
+            asyncio.run(server._run(None, "trash_emails", {}, lambda pr: called.append(1)))
+        assert exc.value.status == 403 and exc.value.code == "insufficient_scope" and not called
+        with pytest.raises(server.CodedToolError):
+            asyncio.run(server._run(None, "not_a_tool", {}, lambda pr: called.append(1)))
+        assert not called and len(events) == 2 and events[0][0][:2] == ("security", "scope_denied")
+        assert asyncio.run(server._run(None, "list_accounts", {}, lambda pr: {"ok": 1})) == {"ok": 1}
+    finally:
+        server.REST_PRINCIPAL.reset(marker)

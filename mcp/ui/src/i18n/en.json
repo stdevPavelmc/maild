@@ -123,7 +123,7 @@
     "name": "Token name",
     "lifetime": "Lifetime",
     "lifetimes": {
-      "default": "30 days (default)",
+      "default": "{{days}} days (default)",
       "7d": "7 days",
       "90d": "90 days",
       "365d": "1 year",
@@ -336,6 +336,7 @@
       "testOk": "The test message was accepted.",
       "testFail": "The test failed.",
       "verifyTls": "Verify the server certificate",
+      "cleartext": "No encryption: the user name and password cross the network in clear text. Use STARTTLS or implicit TLS unless the server is on a network you trust.",
       "verifyOff": "Certificate verification is off: the connection is encrypted but the server is not authenticated (anyone in the path could impersonate it). Use only for a self-signed or private-CA server you control."
     },
     "logs": {

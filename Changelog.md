@@ -19,6 +19,17 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Security (final review): the MCP now believes `X-Forwarded-For` from the networks its
+  container is attached to when `MCP_TRUSTED_PROXIES` is unset (it used to trust nobody, so
+  behind the ingress every client looked like the proxy: login lockouts, the client registration
+  limit and master-token address lists keyed on the proxy, and logs showed only its address).
+  `MCP_TRUSTED_PROXIES=none` restores the old behaviour. Tools re-check the token's scope
+  themselves, and a refresh cookie only renews its own kind of session (user or admin).
+- Fixed (final review): alias domains no longer appear in the admin's Domains list; the log
+  retention default follows the rotation (90 days, 26 weeks, 12 months) and old log files are
+  pruned by age; the token lifetime list hides "never expires" when the admin forbids it and shows
+  the real default length; the master-token 1-minute minimum is enforced; external service SMTP
+  without encryption warns that the credentials travel in clear text.
 - Added (P5): a REST mirror of the 21 MCP tools — `POST /api/v1/mail/<tool>` with the tool's
   arguments as JSON, the same results, checks and audit as over MCP — for scripts and
   skill-based agents, with personal access or master tokens. Generated `/api/v1/openapi.json`

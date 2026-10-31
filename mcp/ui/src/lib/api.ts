@@ -39,6 +39,7 @@ export interface Account {
   login_email?: string
   prefs: Prefs
   confirm_modes: Prefs['confirm_send'][]
+  token_policy: { forever_allowed: boolean; default_days: number }
 }
 
 export interface ActivityItem {

@@ -8,7 +8,11 @@ import { errorText } from './Login'
 const SCOPES = ['mail.read', 'mail.modify', 'mail.trash', 'mail.send'] as const
 const LIFETIMES = ['default', '7d', '90d', '365d', 'forever'] as const
 
-export default function Tokens({ addresses, onError }: { addresses: string[]; onError: (text: string) => void }) {
+export default function Tokens({ addresses, policy, onError }: {
+  addresses: string[]
+  policy: { forever_allowed: boolean; default_days: number }
+  onError: (text: string) => void
+}) {
   const { t, i18n } = useTranslation()
   const [tokens, setTokens] = useState<Token[]>([])
   const [name, setName] = useState('')
@@ -93,9 +97,9 @@ export default function Tokens({ addresses, onError }: { addresses: string[]; on
             onChange={(e) => setLifetime(e.target.value as (typeof LIFETIMES)[number])}
             className="min-h-[44px] rounded-md border border-slate-700 bg-slate-900 px-2 text-sm"
           >
-            {LIFETIMES.map((l) => (
+            {LIFETIMES.filter((l) => l !== 'forever' || policy.forever_allowed).map((l) => (
               <option key={l} value={l}>
-                {t(`tokens.lifetimes.${l}`)}
+                {t(`tokens.lifetimes.${l}`, { days: policy.default_days })}
               </option>
             ))}
           </select>

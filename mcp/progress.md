@@ -30,13 +30,13 @@ Rules:
 | Phase | Scope (proposal §13) | Status | Started | Done | Verified |
 |-------|----------------------|--------|---------|------|----------|
 | P0 | mda master user + rehash fix; `MCP_DB` + `ensure_roles.sh` + migration 003; compose chain; empty `mcp` container with `/healthz` + service mailbox | verified | 2026-10-29 | 2026-10-29 | 2026-10-29 |
-| P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | done | 2026-10-29 | 2026-10-30 | |
-| P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | done | 2026-10-30 | 2026-10-30 | |
-| P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | done | 2026-10-30 | 2026-10-30 | |
-| P3 | Admin panel (all groups), master tokens, external SMTP + test | done | 2026-10-30 | 2026-10-30 | |
-| P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | done | 2026-10-30 | 2026-10-30 | connector test in Claude/ChatGPT pending (needs a public host) |
-| P5 | REST mirror, OpenAPI, SKILL.md, docs | done | 2026-10-30 | 2026-10-30 | |
-| Final | All phases `verified` + goal review against `Idea.md` and the proposal | — | | | |
+| P1 | User login (IMAP), accounts/addresses/magic links, PATs, read tools, audit logs | verified | 2026-10-29 | 2026-10-30 | 2026-10-30 |
+| P1b | amavis `10026` + ACLs on both ports + IP watchdog; cron jobs to `10026` (D13) | verified | 2026-10-30 | 2026-10-30 | 2026-10-30 |
+| P2 | Modify/trash/spam tools, send/reply/forward via `amavis:10026`, confirmations, rate limit | verified | 2026-10-30 | 2026-10-30 | 2026-10-30 |
+| P3 | Admin panel (all groups), master tokens, external SMTP + test | verified | 2026-10-30 | 2026-10-30 | 2026-10-30 |
+| P4 | OAuth 2.1 AS (CIMD + DCR), consent UI | verified | 2026-10-30 | 2026-10-30 | 2026-10-30; connector test in Claude/ChatGPT pending (needs a public host) |
+| P5 | REST mirror, OpenAPI, SKILL.md, docs | verified | 2026-10-30 | 2026-10-30 | 2026-10-30 |
+| Final | All phases `verified` + goal review against `Idea.md` and the proposal | done | 2026-10-30 | 2026-10-30 | hosted connector check pending (P4) |
 
 ---
 
@@ -94,7 +94,7 @@ Log
 
 ## P1 — User side + read access
 
-Status: done (clean-stack verification pending)
+Status: verified
 
 Checklist
 - [x] User login via IMAP LOGIN (STARTTLS) + ALTCHA + lockout; domain allow-list (catalogue, deny by default)
@@ -169,7 +169,7 @@ Next steps:
 
 ## P1b — amavis 10024/10026 split (D13)
 
-Status: done (clean-stack verification pending, together with P1's)
+Status: verified
 
 Checklist
 - [x] `50-user`: `$inet_socket_port = [10024, 10026]`, bank `MTA` ACL = localhost + mta, bank `INTERNAL` ACL = localhost + cron + mcp (mcp optional)
@@ -202,7 +202,7 @@ Log
 
 ## P2 — Write access + sending
 
-Status: done (clean-stack verification pending, with P1/P1b)
+Status: verified
 
 Checklist
 - [x] `mark_emails`, `move_emails`, `create_folder`, `rename_folder`, `save_draft`
@@ -239,7 +239,7 @@ Log
 
 ## P3 — Admin panel
 
-Status: done (clean-stack verification pending, with P1–P2)
+Status: verified
 
 Checklist
 - [x] Admin login + ALTCHA + lockout + mailed code, 72 h session, recovery link, CLI reset
@@ -279,7 +279,7 @@ Log
 
 ## P4 — OAuth 2.1
 
-Status: done (one item pending: the hosted-connector check)
+Status: verified (one item pending: the hosted-connector check, needs a public host)
 
 Checklist
 - [x] Protected resource metadata, AS metadata, `401` + `resource_metadata`
@@ -313,7 +313,7 @@ Log
 
 ## P5 — REST mirror, skill, docs
 
-Status: done
+Status: verified
 
 Checklist
 - [x] `/api/v1/mail/*` mirror, `/api/v1/openapi.json`, `/api/v1/skill.md`
@@ -341,35 +341,46 @@ Log
 
 ## Final review
 
-Status: —
+Status: done (one item pending: the hosted Claude / ChatGPT connector check, needs a public host)
 
-- [ ] Every phase `verified` from a clean dev stack
-- [ ] `Idea.md` goals, one by one:
-  - [ ] Own container on the MailD network, Traefik route on a configurable host, valid TLS (operator ingress)
-  - [ ] Python 3.14 + Django + dedicated API lib; Postgres with own DB/credentials from compose vars
-  - [ ] `/adminmcp`, `/`, `/api/v1/` endpoints
-  - [ ] Admin: seed from env (ignored once set), captcha, recovery link, 72 h JWT, settings groups with Update/Restore, responsive
-  - [ ] Admin user: email change with two codes, password change with code
-  - [ ] Domains: list, allow/deny dual list, logging toggles, per-action categories, rotation day/week/month
-  - [ ] User policy settings
-  - [ ] Master tokens: name, active/disabled/revoked, due time (default 24 h, never forever), tabs
-  - [ ] Service email internal/external + test button
-  - [ ] User page: IMAP login, main account, multiple addresses, captcha, 24 h JWT
-  - [ ] Main account: MCP master switch, secondary addresses with magic link, 2^n resend, disable/remove with confirmation + notice
-  - [ ] MCP access tokens: names, monthly default / forever with warning, enable/disable/revoke, due date shown, multiple per user (+ D12 idle rule)
-  - [ ] 2FA/notifications sent through the service email
-  - [ ] Mailbox access choice argued (proposal §5) and implemented
-  - [ ] Sending only as owned, enabled addresses; master switch obeyed; Sent copy
-  - [ ] Actions: search (no read flag), new arrivals hint, fetch marks read, mark read/unread, spam (confirm), trash never wipe (confirm), send, reply with recipient-as-sender default, extra tools
-  - [ ] Compatibility: MCP spec revisions via SDK v2, Claude / ChatGPT / Gemini CLI / skill
-- [ ] Proposal decisions D1–D13 implemented as written, or deviations logged with reason
-- [ ] Security items: rehash fix (§5.4), role grants (D8), amavis ACLs (D13), SSRF controls, no secrets in logs
-- [ ] Scratch dirs in `/tmp/maild-mcp-*` removed
+- [x] Every phase `verified` from a clean dev stack
+- [x] `Idea.md` goals, one by one:
+  - [x] Own container on the MailD network, Traefik route on a configurable host, valid TLS (operator ingress)
+  - [x] Python 3.14 + Django + dedicated API lib; Postgres with own DB/credentials from compose vars
+  - [x] `/adminmcp`, `/`, `/api/v1/` endpoints
+  - [x] Admin: seed from env (ignored once set), captcha, recovery link, 72 h JWT, settings groups with Update/Restore, responsive
+  - [x] Admin user: email change with two codes, password change with code
+  - [x] Domains: list, allow/deny dual list, logging toggles, per-action categories, rotation day/week/month
+  - [x] User policy settings
+  - [x] Master tokens: name, active/disabled/revoked, due time (default 24 h, never forever), tabs
+  - [x] Service email internal/external + test button
+  - [x] User page: IMAP login, main account, multiple addresses, captcha, 24 h JWT
+  - [x] Main account: MCP master switch, secondary addresses with magic link, 2^n resend, disable/remove with confirmation + notice
+  - [x] MCP access tokens: names, monthly default / forever with warning, enable/disable/revoke, due date shown, multiple per user (+ D12 idle rule)
+  - [x] 2FA/notifications sent through the service email
+  - [x] Mailbox access choice argued (proposal §5) and implemented
+  - [x] Sending only as owned, enabled addresses; master switch obeyed; Sent copy
+  - [x] Actions: search (no read flag), new arrivals hint, fetch marks read, mark read/unread, spam (confirm), trash never wipe (confirm), send, reply with recipient-as-sender default, extra tools
+  - [x] Compatibility: MCP spec revisions via SDK v2, Claude / ChatGPT / Gemini CLI / skill — locally (SDK client, Claude Code, REST + SKILL.md); the hosted Claude / ChatGPT connector check waits for a public host
+- [x] Proposal decisions D1–D13 implemented as written, or deviations logged with reason (the unlogged `MCP_TRUSTED_PROXIES` default fixed; optional §8.3 resources/prompts not built)
+- [x] Security items: rehash fix (§5.4), role grants (D8), amavis ACLs (D13), SSRF controls, no secrets in logs
+- [x] Scratch dirs in `/tmp/maild-mcp-*` removed
 
 Log
 
 | Date | Type | Entry |
 |------|------|-------|
+| 2026-10-30 | action | Final review started. Final → Initiated. |
+| 2026-10-30 | decision | **Asked Pavel** — clean-stack run vs the PAT his Claude Code uses: **move `ldata/` aside** (to the git-ignored `.local/ldata.pre-final/` and `.local/test.creds.pre-final`), verify on a fresh stack, then restore the old data (env.dev secrets unchanged, so the old volume still matches). |
+| 2026-10-30 | action | Clean stack: `down` → `ldata/` and `test.creds` moved to `.local/` → `docker compose build` + `./bootstrap-dev.sh`: OK in 1m19s, every service healthy except amavis `starting` (the P0 race: bootstrap restarts amavis last); the full run waits for amavis `healthy` first. |
+| 2026-10-30 | action | Clean-stack full `./test.sh` (code as committed in `61298e1`): **175 passed / 0 failed / 0 skipped, 8m04s**. |
+| 2026-10-30 | review | Goal review against `Idea.md`, the proposal and D1–D13 (independent read-only audit, findings re-checked in the code): every `Idea.md` item has its code path; the logged deviations stand. Gaps found: (1) **`MCP_TRUSTED_PROXIES` defaults to empty**, not "stack subnet" (§9.5), unlogged — behind Traefik every client IP is the proxy's (per-user login lockout = lockout DoS, global DCR limit, master-token CIDRs unusable, useless audit IPs); (2) `/webapi/user/refresh` does not check the session kind (the admin one does); (3) alias domains are listed in the allow/deny list (§7.2 says not); (4) retention always defaults to 90 (§7.2: 90/26/12 by rotation) and pruning sorts mixed day/week/month names as text; (5) scope enforced only in the JSON-RPC wrapper; (6) small UI/server gaps: "forever" offered when the admin disabled it, master-token TTL below the stated 1-minute minimum, no warning for external SMTP with `tls=none`. Optional §8.3 resources/prompts not implemented (optional in the proposal). Also fixed: the bootstrap summary still labelled mcp "P0" and pointed at `/healthz`. |
+| 2026-10-30 | decision | **Asked Pavel** — trusted-proxy default: **the subnets of the networks the mcp container is attached to**, read at boot (= "stack subnet"); an explicit `MCP_TRUSTED_PROXIES` wins, `none` disables. Fix scope: all of (2)–(6). |
+| 2026-10-30 | action | Fixes: (1) `MCP_TRUSTED_PROXIES` unset → `attached_subnets()` reads the connected routes from `/proc/net/route` + `/proc/net/ipv6_route` at boot (no loopback/link-local/multicast), logged at startup (dev: `172.23.0.0/16`); `none` disables. (2) `webauth.rotate(refresh, kind)`: a token of the other kind is unknown (no rotation, no reuse revoke) — both refresh endpoints. (3) `catalogue.domains()` skips `alias_domain` rows (§7.2). (4) retention default 90/26/12 follows a rotation change unless set by hand (server + admin form); prune/recent order log files by mtime. (5) `_run` re-checks the tool's scope in the worker thread (unmapped tool = closed), 403 `insufficient_scope`. (6) `/webapi/user/me` carries `token_policy` (forever allowed, default days): the lifetime list hides "never expires" and shows the real default; master-token TTL < 60 s refused; cleartext warning for external SMTP with `tls=none` and a username. Not changed: the service-email Test uses the saved settings (the hint says so). |
+| 2026-10-30 | action | Tests: `test.sh` N11–N14 (refresh kinds, alias domain, retention defaults, XFF from the stack subnet), pytest +4 (route parsing, retention rule, age ordering, runner scope check), pwa +2 (lifetime list follows the policy, cleartext warning). mcp rebuilt on the clean stack: pytest **32/32**, `run.sh mcp` **17/17**, full `./test.sh` **179 passed / 0 failed / 0 skipped, 8m22s**. Nothing left behind (0 OAuth clients, master tokens, accounts, backup tables, alias fixtures). |
+| 2026-10-30 | finding | Restored the pre-review `ldata/` + `test.creds`; stack healthy. The restored mcp DB has **0 accounts and 0 tokens**: Pavel's Claude Code PAT was already gone before the review — `test.sh`'s cleanup deletes every MCP account in the fixture domain, so an earlier full run (P1–P5) removed it. A new PAT is needed; using a non-fixture mailbox avoids it in future. |
+| 2026-10-30 | action | Scratch dirs `/tmp/maild-mcp-final` and `/tmp/maild-mcp-p1` removed. P1–P5 → **verified**; Final → **done** (hosted connector check pending). |
+| 2026-10-30 | action | Final-review fixes committed on `mcp` (user request; `.env-prod` and `SECURITY-AUDIT.md` left out). |
 
 ---
 

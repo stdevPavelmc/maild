@@ -44,7 +44,7 @@ CATEGORIES = ("web_login", "bearer_access", "mail_actions", "token_lifecycle", "
 
 def defaults(group: str) -> dict:
     if group == "logging":
-        return {"enabled": True, "categories": {c: True for c in CATEGORIES}, "rotation": "day", "retention": 90}
+        return {"enabled": True, "categories": {c: True for c in CATEGORIES}, "rotation": "day", "retention": RETENTION_DEFAULTS["day"]}
     if group == "user_policy":
         return {
             "max_tokens": 10, "pat_default_days": 30, "pat_forever_allowed": True, "pat_idle_days": 30,
@@ -92,6 +92,11 @@ def _validate(group: str, data: dict, current: dict) -> dict:
             raise SettingsError("rotation", "rotation must be day, week or month")
         out["rotation"] = merged["rotation"]
         out["retention"] = _int(merged, "retention", 1, 3650)
+        # a rotation change carries a retention left at the old rotation's default over to the
+        # new one's (90 days / 26 weeks / 12 months, §7.2); a hand-set retention stays
+        if (out["rotation"] != current.get("rotation")
+                and out["retention"] == RETENTION_DEFAULTS.get(current.get("rotation"))):
+            out["retention"] = RETENTION_DEFAULTS[out["rotation"]]
         return out
     if group == "user_policy":
         return {

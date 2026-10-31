@@ -117,17 +117,19 @@ def open_session(kind: str, subject_id: int, login_email: str, ip: str, ua: str)
     return _access_token(sess), refresh, sess
 
 
-def rotate(refresh: str) -> tuple[str, str, WebSession] | None:
-    """New (access, refresh) for a valid refresh token. Presenting the token that the last
+def rotate(refresh: str, kind: str) -> tuple[str, str, WebSession] | None:
+    """New (access, refresh) for a valid refresh token of a `kind` session (a token of the other
+    kind is unknown here: it neither rotates nor revokes anything). Presenting the token that the last
     rotation superseded (a stolen copy racing the browser, or the other way round) revokes the
     session: both sides must log in again."""
     if not refresh:
         return None
     digest = token_hash(refresh)
     with transaction.atomic():
-        sess = WebSession.objects.select_for_update().filter(refresh_hash=digest).first()
+        sess = WebSession.objects.select_for_update().filter(refresh_hash=digest, kind=kind).first()
         if sess is None:
-            reused = WebSession.objects.select_for_update().filter(prev_refresh_hash=digest, revoked_at__isnull=True).first()
+            reused = WebSession.objects.select_for_update().filter(prev_refresh_hash=digest, kind=kind,
+                                                                    revoked_at__isnull=True).first()
             if reused:
                 reused.revoked_at = timezone.now()
                 reused.save(update_fields=["revoked_at"])

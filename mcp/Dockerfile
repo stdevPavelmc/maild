@@ -28,7 +28,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # NEVER baked: MCP_SECRET_KEY, MCP_DB_PASSWORD and MCP_DOVECOT_MASTER_PASSWORD come from the
 # operator env file (dev: env.dev, prod: .env — see env.sample). MCP_HOSTNAME, MCP_PUBLIC_URL,
 # MCP_ADMIN_EMAIL and MCP_SERVICE_EMAIL default from DEFAULT_DOMAIN at runtime
-# (maild_mcp/settings.py); MCP_TRUSTED_PROXIES defaults to empty (the TCP peer is the client).
+# (maild_mcp/settings.py); MCP_TRUSTED_PROXIES unset = the subnets of the networks the container
+# is attached to, read at boot (`none` = the TCP peer is always the client).
 # MCP_SMTP_PORT=10026 is amavis's INTERNAL listener (D13: 10024 only admits the mta).
 # Full variable matrix: .agents/services/configuration.md.
 ENV POSTGRES_HOST=db \

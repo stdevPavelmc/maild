@@ -78,6 +78,12 @@ async def _run(ctx: Context, tool: str, target: dict, fn):
     category = authz.TOOL_SCOPES.get(tool, "mail.read")   # audit category = the tool's scope
 
     def work():
+        # the transports check the scope before the call; this second check keeps a tool closed
+        # even if a request ever reaches it past them (an unmapped tool is closed to everyone)
+        if tool not in authz.TOOL_SCOPES or authz.TOOL_SCOPES[tool] not in p.scopes:
+            audit.event("security", "scope_denied", result="denied", actor=p.audit_actor(), token=p.audit_token(),
+                        target={"tool": tool}, ip=p.ip, level="warning", detail={"scope": category, "where": "tool"})
+            raise CodedToolError(f"this token lacks the {category} scope", 403, "insufficient_scope")
         try:
             result = fn(p)
         except authz.Denied as exc:

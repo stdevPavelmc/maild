@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test'
 
 import { password } from '../../lib/env'
-import { allowDomain, domainPolicy, dropAccounts, expungeServiceMail, magicToken, restoreDomain } from '../../lib/mcp'
+import { allowDomain, domainPolicy, dropAccounts, expungeServiceMail, magicToken, restoreDomain, patchUserPolicy, restoreUserPolicy } from '../../lib/mcp'
 
 /**
  * MailD MCP user page (mcp/technical-proposal.md §7.3), against the live dev stack on
@@ -89,6 +89,18 @@ test('a forever token needs the blocking warning first', async ({ page }) => {
   await page.getByTestId('forever-confirm').click()
   await expect(page.getByTestId('token-value')).toBeVisible()
   await expect(page.getByTestId('token-list').locator('li', { hasText: 'e2e-forever' })).toContainText('Expires: never')
+})
+
+test('the lifetime list follows the admin policy: no "never expires" when forbidden, the real default length', async ({ page }) => {
+  patchUserPolicy({ pat_forever_allowed: false, pat_default_days: 14 })
+  try {
+    await page.waitForTimeout(2_500)   // the settings cache lives 2 s per worker
+    await signIn(page, ALICE)
+    const lifetime = page.getByLabel('Lifetime')
+    await expect(lifetime.locator('option')).toHaveText(['14 days (default)', '7 days', '90 days', '1 year'])
+  } finally {
+    restoreUserPolicy()
+  }
 })
 
 test('secondary address: magic link, confirm page, then disable with type-to-confirm', async ({ page }) => {

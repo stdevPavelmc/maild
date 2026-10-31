@@ -42,6 +42,7 @@ mcp_app = http_app()
 MCP_PATH = "/api/v1/mcp"
 MAX_BODY = 4 * 1024 * 1024
 _trusted = [ipaddress.ip_network(c, strict=False) for c in settings.MCP_TRUSTED_PROXIES]
+log.info("X-Forwarded-For trusted from: %s", ", ".join(settings.MCP_TRUSTED_PROXIES) or "nobody (the TCP peer is the client)")
 
 
 def client_ip(scope) -> str:

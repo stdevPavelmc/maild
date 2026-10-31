@@ -55,9 +55,52 @@ MCP_HOSTNAME = env("MCP_HOSTNAME", f"mcp.{DEFAULT_DOMAIN}").lower()
 # from request headers
 MCP_PUBLIC_URL = env("MCP_PUBLIC_URL", f"https://{MCP_HOSTNAME}").rstrip("/")
 MCP_RESOURCE_URL = f"{MCP_PUBLIC_URL}/api/v1/mcp"
-# Proxies whose X-Forwarded-For is believed (comma-separated CIDRs, e.g. the `maild` network the
-# ingress shares). Empty = the TCP peer is the client.
-MCP_TRUSTED_PROXIES = [c.strip() for c in env("MCP_TRUSTED_PROXIES").split(",") if c.strip()]
+
+
+def attached_subnets(route4: str = "/proc/net/route", route6: str = "/proc/net/ipv6_route") -> list[str]:
+    """The subnets of the networks this container is attached to: the directly connected routes
+    (no gateway), IPv4 and IPv6, minus loopback, link-local and multicast."""
+    import ipaddress
+    import socket
+    import struct
+
+    nets: list[str] = []
+    try:
+        with open(route4) as fh:
+            for line in fh.readlines()[1:]:
+                f = line.split()
+                if len(f) < 8 or f[0] == "lo" or int(f[2], 16) or not int(f[1], 16):
+                    continue
+                dest = socket.inet_ntoa(struct.pack("<I", int(f[1], 16)))
+                mask = socket.inet_ntoa(struct.pack("<I", int(f[7], 16)))
+                nets.append(str(ipaddress.ip_network(f"{dest}/{mask}", strict=False)))
+    except OSError:
+        pass
+    try:
+        with open(route6) as fh:
+            for line in fh:
+                f = line.split()
+                if len(f) < 10 or f[9] == "lo":
+                    continue
+                try:
+                    if int(f[4], 16):
+                        continue
+                    net = ipaddress.IPv6Network((ipaddress.IPv6Address(int(f[0], 16)), int(f[1], 16)), strict=False)
+                except ValueError:
+                    continue
+                if net.prefixlen and not (net.is_link_local or net.is_multicast or net.is_loopback):
+                    nets.append(str(net))
+    except OSError:
+        pass
+    return sorted(set(nets))
+
+
+# Proxies whose X-Forwarded-For is believed (comma-separated CIDRs). Unset = the subnets of the
+# networks the container is attached to (the stack's own and the `maild` network the ingress
+# shares; proposal §9.5 "stack subnet"); `none` = the TCP peer is always the client.
+_proxies = env("MCP_TRUSTED_PROXIES")
+MCP_TRUSTED_PROXIES = ([] if _proxies.lower() == "none" else
+                       [c.strip() for c in _proxies.split(",") if c.strip()] if _proxies else attached_subnets())
 # `mcp` is the stack hostname, localhost/127.0.0.1 serve the in-image healthcheck and the
 # dev port mapping
 ALLOWED_HOSTS = [MCP_HOSTNAME, "mcp", "localhost", "127.0.0.1"]

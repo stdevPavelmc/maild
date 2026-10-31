@@ -223,6 +223,7 @@ function DomainsCard() {
 
 // ---------------------------------------------------------------- logging ---
 type Logging = { enabled: boolean; categories: Record<string, boolean>; rotation: 'day' | 'week' | 'month'; retention: number }
+const RETENTION_DEFAULTS: Record<Logging['rotation'], number> = { day: 90, week: 26, month: 12 }
 const CATS = ['web_login', 'bearer_access', 'mail_actions', 'token_lifecycle', 'admin_changes', 'errors', 'security']
 
 function LoggingCard() {
@@ -249,7 +250,11 @@ function LoggingCard() {
           <p className="text-xs text-slate-400">{t('admin.logging.masterAlways')}</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Row label={t('admin.logging.rotation')}>
-              <select className={inputCls} value={v.rotation} onChange={(e) => set({ rotation: e.target.value as Logging['rotation'] })}>
+              <select className={inputCls} value={v.rotation} onChange={(e) => {
+                const rotation = e.target.value as Logging['rotation']
+                // a retention left at the old rotation's default follows the new one (server rule too)
+                set(v.retention === RETENTION_DEFAULTS[v.rotation] ? { rotation, retention: RETENTION_DEFAULTS[rotation] } : { rotation })
+              }}>
                 {(['day', 'week', 'month'] as const).map((r) => (
                   <option key={r} value={r}>
                     {t(`admin.logging.rotations.${r}`)}
@@ -353,6 +358,9 @@ function ServiceEmailCard({ me }: { me: AdminMe }) {
                     <input type="checkbox" checked={v.verify_tls} onChange={(e) => set({ verify_tls: e.target.checked })} />
                     {t('admin.service.verifyTls')}
                   </label>
+                )}
+                {v.tls === 'none' && v.user && (
+                  <div className="sm:col-span-2" data-testid="smtp-cleartext"><Alert kind="warning">{t('admin.service.cleartext')}</Alert></div>
                 )}
                 {v.tls !== 'none' && !v.verify_tls && (
                   <div className="sm:col-span-2"><Alert kind="warning">{t('admin.service.verifyOff')}</Alert></div>

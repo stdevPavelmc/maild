@@ -123,7 +123,7 @@
     "name": "Nombre del token",
     "lifetime": "Duración",
     "lifetimes": {
-      "default": "30 días (predeterminado)",
+      "default": "{{days}} días (predeterminado)",
       "7d": "7 días",
       "90d": "90 días",
       "365d": "1 año",
@@ -336,6 +336,7 @@
       "testOk": "El mensaje de prueba fue aceptado.",
       "testFail": "La prueba falló.",
       "verifyTls": "Verificar el certificado del servidor",
+      "cleartext": "Sin cifrado: el usuario y la contraseña viajan por la red en texto claro. Use STARTTLS o TLS implícito salvo que el servidor esté en una red de confianza.",
       "verifyOff": "La verificación del certificado está desactivada: la conexión va cifrada pero el servidor no se autentica (cualquiera en el camino podría suplantarlo). Úselo solo con un servidor autofirmado o de CA privada que usted controle."
     },
     "logs": {
