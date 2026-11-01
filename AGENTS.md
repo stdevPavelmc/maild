@@ -33,7 +33,7 @@ for maintenance jobs.
   `env.dev` (dev) / `.env` (prod) → compose interpolation + `env_file:` → image `ENV`
   defaults → container templates. Every tunable defaults **inside each image**; a
   same-named var in the operator file always wins over the image default.
-- **Never commit secrets.** `.env`, `test.creds`, `ldata/`, `*.log` and `.local/` are
+- **Never commit secrets.** `.env*` (every operator env file; the `.pre-commit` hook refuses them), `test.creds`, `ldata/`, `*.log` and `.local/` are
   git-ignored; `env.dev` carries *fake* committed dev secrets on purpose. Warn the user if
   real passwords/certs are about to be committed.
 - **First-boot provisioning is sentinel-driven.** `db/migrations/002_postfixadmin_catalogue.sql`

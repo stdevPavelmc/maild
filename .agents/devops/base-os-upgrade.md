@@ -28,7 +28,7 @@ Env chain (`env.dev`/`.env` → compose → image `ENV` defaults → `_<VAR>_` t
 3. **Immutable identifiers:** service hostnames (`db`, `mta`, `mda`,
    `amavis`, `clamav`, `admin`, `mua`, `cron`), env var names, volume mount
    points. See `AGENTS.md → Core principles`.
-4. **Never commit secrets.** `.env`, `test.creds`, `ldata/`, `*.log`,
+4. **Never commit secrets.** `.env*`, `test.creds`, `ldata/`, `*.log`,
    `.local/` are git-ignored. Warn loudly if any are staged.
 5. **Feature branch per service** (e.g. `upgrade/mta-resolute`). Keep the
    pristine-extract commit separate from the ported-customizations commit so

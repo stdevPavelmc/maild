@@ -19,6 +19,11 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Security (audit M-04): `.gitignore` ignored only the exact name `.env`, so an operator
+  file such as `.env-prod` was one `git add -A` away from a public commit. It now ignores
+  `.env*` (`env.dev`/`env.sample` have no leading dot and stay tracked), and the
+  `.pre-commit` hook refuses any staged `.env*` file. Reinstall the hook:
+  `cp .pre-commit .git/hooks/pre-commit`.
 - Security (audit H-02): the AdminNG login lockout was defeatable by rotating the
   `X-Forwarded-For` header — `client_ip()` trusted its left-most (client-controlled)
   value. It now returns the right-most hop that is not a trusted proxy (the MCP rule,

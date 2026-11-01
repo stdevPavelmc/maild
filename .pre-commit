@@ -1,6 +1,15 @@
 #!/bin/bash
 # Pre commit hook
 
+# Refuse any operator env file (.env, .env-prod, ...): they carry the real production
+# secrets (2026-10 audit M-04). env.dev / env.sample have no leading dot and pass.
+ENVFILES=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '(^|/)\.env' | xargs)
+if [ "$ENVFILES" ] ; then
+    echo "ERROR: refusing to commit operator env file(s): $ENVFILES"
+    echo "       they hold real secrets; unstage them (git restore --staged <file>)"
+    exit 1
+fi
+
 # Update the OCI created label on Dockerfiles
 DOCKERFILE=$(git status | grep modified | grep Dockerfile | awk '{print $2}' | xargs)
 if [ "$DOCKERFILE" ] ; then

@@ -94,7 +94,7 @@ purpose; the AdminNG API verifies legacy hashes until the 2027-02-01 removal).
    `ldata/vmail/<domain>` stops Dovecot from creating any new mailbox home in it),
    `ldata/mua_web` by `www-data`, `ldata/mcp_logs` by 10001 — bootstrap repairs all of them;
    `sudo chown -R 5000:5000 ldata/vmail` if you create them by hand.
-4. Never commit secrets/certs (`.env`, `test.creds`, `ldata/`, `*.log`, `.local/` are
+4. Never commit secrets/certs (`.env*`, `test.creds`, `ldata/`, `*.log`, `.local/` are
    git-ignored). Warn loudly if any are staged.
 
 ## Reset everything

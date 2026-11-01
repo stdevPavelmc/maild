@@ -82,6 +82,8 @@ LABEL org.opencontainers.image.title="MailD <short purpose>" \
 
 ## Pre-commit hook
 
-`.pre-commit` (copy to `.git/hooks/pre-commit`, `chmod +x`) rewrites
+`.pre-commit` (copy to `.git/hooks/pre-commit`, `chmod +x`) first refuses the commit if any
+operator env file (`.env`, `.env-prod`, … — anything whose name starts with `.env`) is staged
+(2026-10 audit M-04; `env.dev`/`env.sample` have no leading dot and pass), then rewrites
 `org.opencontainers.image.created` with today's date on every modified Dockerfile and
 refreshes the `# Copyright … Pavel Milanes` line on modified executable scripts.
