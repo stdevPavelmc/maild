@@ -391,3 +391,4 @@ Log
 | 2026-10-29 | decision | Technical proposal accepted with decisions D1–D13 (`mcp/technical-proposal.md`). |
 | 2026-10-29 | action | `mcp/progress.md` created. |
 | 2026-10-29 | blocker | No dev stack can run from this session yet: the linked computer exposes file transfer only (no shell), and the cloud workspace's Docker cannot pull images (`registry-1.docker.io`, `deb.debian.org`, `dl-cdn.alpinelinux.org`, `mcr.microsoft.com`, `database.clamav.net`… are refused by the egress policy). P0 baseline not taken. |
+| 2026-11-01 | action | Audit M-02 fixed: async `/oauth/authorize` with the CIMD fetch off the shared sync thread, per-IP and concurrency caps, failed-URL memory in `notice_throttle`, generic browser error. pytest 34 passed; `test.sh` O4b added (180/180 fast subset). |

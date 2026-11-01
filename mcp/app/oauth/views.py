@@ -11,10 +11,12 @@ Errors before the redirect URI is trusted are shown to the user (never redirecte
 unverified URI); afterwards they go back to the client with `state` and `iss` (RFC 9207).
 """
 
+import asyncio
 import datetime as dt
 import json
 from urllib.parse import urlencode
 
+from asgiref.sync import sync_to_async
 from django.conf import settings
 from django.http import HttpResponse, HttpResponseRedirect, JsonResponse
 from django.utils import timezone
@@ -93,12 +95,29 @@ def redirect_with(redirect_uri: str, params: dict) -> str:
 
 
 @require_http_methods(["GET"])
-def authorize(request):
-    q = request.GET
+async def authorize(request):
+    """Async on purpose (2026-10 audit M-02): an uncached CIMD client_id means a network fetch
+    to a URL the anonymous caller chose. Run on Django's shared sync thread it froze every sync
+    view of the worker for its whole duration; here it runs in a worker thread, gated by
+    `clients.admit` (per-IP budget, fail-fast concurrency cap); a failed URL is remembered in the
+    shared notice_throttle table, so `clients.cached` short-circuits its repeats on any worker."""
+    client_id = request.GET.get("client_id", "")
     try:
-        client = clients.resolve(q.get("client_id", ""))
+        client = await sync_to_async(clients.cached)(client_id)
+        if client is None:
+            try:
+                meta, ttl = await asyncio.to_thread(clients.fetch_validated, client_id, _ip(request))
+            except clients.FetchFailed:
+                await sync_to_async(clients.remember_failure)(client_id)
+                raise
+            client = await sync_to_async(clients.store)(client_id, meta, ttl)
     except OAuthError as exc:
-        return _error_page(exc.message)
+        return _error_page(exc.message, exc.status)
+    return await sync_to_async(_authorize_request)(request, client)
+
+
+def _authorize_request(request, client):
+    q = request.GET
     redirect_uri = q.get("redirect_uri", "")
     if not redirect_uri or not clients.redirect_matches(client, redirect_uri):
         return _error_page("The redirect URI is not registered for this client.")

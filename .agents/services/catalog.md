@@ -564,7 +564,12 @@ more. See `.agents/services/provisioning.md`.
   every authorization response (RFC 9207), access tokens audience-bound to `MCP_RESOURCE_URL`
   (RFC 8707). Clients: **CIMD** (the `client_id` is an https URL of a metadata document; fetch
   https-only, every resolved address must be public — loopback/private/link-local/CGNAT/mapped
-  refused —, connects to the checked IP, 5 s, 64 KB, no redirects, cached 5 min–24 h) or
+  refused —, connects to the checked IP, 2 s connect + 3 s read, 64 KB, no redirects, cached
+  5 min–24 h; audit M-02: `/oauth/authorize` is async and runs the fetch off Django's shared
+  sync thread, at most 10 uncached fetches per source IP per 10 min and 4 at once per worker
+  (fail fast: 429/503), a failed URL is remembered 5 min in `notice_throttle` (kind
+  `cimd_failed`, shared by the workers) and every fetch failure shows one generic message — the
+  cause goes to the `mcp.oauth` log) or
   **DCR** (RFC 7591, `mdmcp_dcr_…`, 20 per source IP per hour, shown as "unverified"). Redirect
   URIs: https, loopback http (any port at use, RFC 8252) or a private-use scheme; an unregistered
   one gets an error page, never a redirect. `/consent#<request>` (SPA) signs the user in, shows

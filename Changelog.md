@@ -19,6 +19,15 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Security (audit M-02): the anonymous `GET /oauth/authorize` fetched any uncached CIMD
+  `client_id` URL synchronously — on Django's single shared sync thread, so one slow or
+  blackholed URL froze every sync view of the worker for up to 5 s per request — and echoed
+  the upstream status/connection error (a liveness oracle). The view is now async and runs the
+  fetch in a worker thread; uncached fetches are capped per source IP (10 per 10 min) and at 4
+  concurrent per worker (fail fast, 429/503); a failed URL is remembered for 5 min in
+  `notice_throttle` (shared by the workers, no schema change); timeouts are split (2 s connect,
+  3 s read); every fetch failure shows one generic message, the cause is logged
+  (`mcp.oauth`). pytest +2, `test.sh` O4b.
 - Security (audit M-01): SMTP AUTH had no brute-force limit and was offered on the MX port
   (25) after STARTTLS — the "no AUTH on 25" filters were dead (`auth_filter.pcre` unreferenced,
   `command_filter.pcre` only seen by postscreen before the TLS handoff, and matching

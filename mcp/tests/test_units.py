@@ -375,3 +375,70 @@ def test_tool_runner_rechecks_the_scope(monkeypatch):
         assert asyncio.run(server._run(None, "list_accounts", {}, lambda pr: {"ok": 1})) == {"ok": 1}
     finally:
         server.REST_PRINCIPAL.reset(marker)
+
+
+def test_cimd_fetch_admission_and_generic_errors(monkeypatch):
+    """Audit M-02: the unauthenticated CIMD fetch is budgeted per IP, only MAX_CONCURRENT_FETCHES
+    run at once (the rest fail fast), and the browser only ever sees one generic message — never
+    the upstream status or connection error. (The failed-URL memory is a notice_throttle row,
+    shared by the workers: test.sh O4b checks it live.)"""
+    from oauth import clients
+    from oauth.errors import OAuthError
+
+    clients._reset_guards()
+    calls = []
+
+    def upstream_500(url):
+        calls.append(url)
+        raise OAuthError("invalid_client", "client metadata document answered HTTP 500")
+
+    monkeypatch.setattr(clients, "fetch_document", upstream_500)
+    with pytest.raises(clients.FetchFailed) as exc:
+        clients.fetch_validated("https://c.example/m.json", "198.51.100.1")
+    assert exc.value.message == clients.GENERIC_FETCH_ERROR and "500" not in exc.value.message
+
+    def crash(url):
+        raise RuntimeError("socket exploded at 203.0.113.7")
+
+    monkeypatch.setattr(clients, "fetch_document", crash)
+    with pytest.raises(clients.FetchFailed) as exc:
+        clients.fetch_validated("https://crash.example/m.json", "198.51.100.1")
+    assert "203.0.113.7" not in exc.value.message
+    monkeypatch.setattr(clients, "fetch_document", upstream_500)
+
+    clients._reset_guards()                          # per-IP budget (distinct URLs, one IP)
+    calls.clear()
+    for n in range(clients.FETCH_PER_IP):
+        with pytest.raises(clients.FetchFailed):
+            clients.fetch_validated(f"https://c{n}.example/m.json", "198.51.100.2")
+    with pytest.raises(OAuthError) as exc:
+        clients.fetch_validated("https://last.example/m.json", "198.51.100.2")
+    assert exc.value.status == 429 and not isinstance(exc.value, clients.FetchFailed)
+    assert len(calls) == clients.FETCH_PER_IP        # the refused one never reached upstream
+    with pytest.raises(clients.FetchFailed):         # another IP is unaffected
+        clients.fetch_validated("https://other.example/m.json", "198.51.100.3")
+
+    clients._reset_guards()                          # fail-fast concurrency cap; slots come back
+    for n in range(clients.MAX_CONCURRENT_FETCHES):
+        clients.admit(f"203.0.113.{n}")
+    with pytest.raises(OAuthError) as exc:
+        clients.admit("203.0.113.200")
+    assert exc.value.status == 503
+    for _ in range(clients.MAX_CONCURRENT_FETCHES):
+        clients.release()
+    clients.admit("203.0.113.201")
+    clients.release()
+    clients._reset_guards()
+
+
+def test_cimd_success_path_validates_and_releases(monkeypatch):
+    from oauth import clients
+
+    clients._reset_guards()
+    url = "https://ok.example/m.json"
+    monkeypatch.setattr(clients, "fetch_document", lambda u: (
+        {"client_id": u, "client_name": "OK", "redirect_uris": ["https://ok.example/cb"]}, 600))
+    for n in range(clients.MAX_CONCURRENT_FETCHES + 1):   # a slot leak would 503 here
+        meta, ttl = clients.fetch_validated(url, f"198.51.100.{20 + n}")
+        assert meta["client_name"] == "OK" and ttl == 600
+    clients._reset_guards()

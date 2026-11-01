@@ -354,7 +354,7 @@ Bearer token in `Authorization`. Never accepted in the URL.
 OAuth 2.1 authorization server (D1):
 - Authorization code + PKCE S256 only; public clients (`token_endpoint_auth_methods_supported` includes `none`).
 - Client registration: **CIMD** (`client_id_metadata_document_supported: true`) preferred; **DCR** (`/oauth/register`) kept because the spec still allows it as fallback and some clients use it.
-- CIMD fetch is an outbound HTTPS request to a URL chosen by the client → SSRF controls: https only, public IPs only (block RFC1918/loopback/link-local, resolve-then-connect), 5 s timeout, 64 KB cap, cache by `Cache-Control`.
+- CIMD fetch is an outbound HTTPS request to a URL chosen by the client → SSRF controls: https only, public IPs only (block RFC1918/loopback/link-local, resolve-then-connect), 2 s connect + 3 s read timeouts, 64 KB cap, cache by `Cache-Control`. Being reachable anonymously, the fetch is also budgeted (2026-10 audit M-02): per-IP cap, fail-fast concurrency cap, failed-URL memory, off the shared sync thread, one generic error to the browser.
 - `resource` (RFC 8707) must equal `https://<MCP_HOSTNAME>/api/v1/mcp`; tokens are audience-bound.
 - `iss` returned in the authorization response (RFC 9207).
 - Redirect URIs: exact match, plus port-agnostic loopback match for `127.0.0.1` and `localhost` (native clients).

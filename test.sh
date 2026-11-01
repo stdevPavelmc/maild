@@ -3458,6 +3458,24 @@ else
         t_fail "O4 CIMD SSRF guard (statuses:$O4, want 400 ×4)"
     fi
 
+    # O4b — audit M-02: a refused/failed fetch shows ONE generic message (no upstream status,
+    # address or connection detail to probe with), and the URL is remembered: the repeat is
+    # answered without a second fetch attempt (no new "CIMD fetch refused" log line)
+    O4B_CID="https://127.0.0.2/o4b-$(chrono).json"
+    O4B_Q="$(o_q "client_id=$O4B_CID" "redirect_uri=$O_REDIRECT" response_type=code code_challenge=x code_challenge_method=S256)"
+    O4B_1="$(o_loc "$O4B_Q" | cut -d' ' -f1)"
+    O4B_BODY="$(cat "$K_OUT" 2>/dev/null)"
+    O4B_2="$(o_loc "$O4B_Q" | cut -d' ' -f1)"
+    O4B_LOGGED="$("${DC[@]}" logs --no-log-prefix mcp 2>/dev/null | grep -c "CIMD fetch refused: client_id=$O4B_CID")"
+    if [ "$O4B_1" = 400 ] && [ "$O4B_2" = 400 ] &&
+       printf '%s' "$O4B_BODY" | grep -q 'unknown or unreachable client' &&
+       ! printf '%s' "$O4B_BODY" | grep -qiE 'non-public|HTTP [0-9]|resolve|127\.0\.0\.2' &&
+       [ "$O4B_LOGGED" = 1 ] ; then
+        t_ok "O4b a failed CIMD fetch shows only a generic message (cause logged server-side) and is not re-fetched"
+    else
+        t_fail "O4b CIMD generic error / failed-URL memory (statuses $O4B_1/$O4B_2, fetch attempts logged=$O4B_LOGGED, body: $(printf '%s' "$O4B_BODY" | sed 's/<[^>]*>/ /g' | tr -s ' ' | head -c 160))"
+    fi
+
     # O5 — redirect URI, PKCE and resource rules (a registered DCR client)
     O_CLIENT="$(curl -s -X POST "$MCP_HTTP/oauth/register" -H 'Content-Type: application/json' \
         --data "{\"client_name\":\"o-rules\",\"redirect_uris\":[\"$O_REDIRECT\"]}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["client_id"])' 2>/dev/null)"
