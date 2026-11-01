@@ -25,6 +25,10 @@ services:
     container_name: maild-db
     hostname: db
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     environment:
       # explicit on every DB consumer: compose interpolation does not read env_file
       # contents, and the guard makes a missing password fail at `compose config`.
@@ -45,6 +49,10 @@ services:
     container_name: maild-api
     hostname: api
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     # No published port: only the `adminng` frontend talks to the API, over the
     # compose network (/api/v1/ proxy).
     environment:
@@ -88,9 +96,9 @@ services:
       options:
         syslog-address: "unixgram:///dev/log"
     labels:
-      # Ingress (Traefik) — https://adminng.${DEFAULT_DOMAIN}
+      # Ingress (Traefik) — https://admin.${DEFAULT_DOMAIN}
       - "traefik.enable=true"
-      - "traefik.http.routers.adminng.rule=Host(`adminng.${DEFAULT_DOMAIN}`)"
+      - "traefik.http.routers.adminng.rule=Host(`admin.${DEFAULT_DOMAIN}`)"
       - "traefik.http.routers.adminng.entrypoints=websecure"
       - "traefik.http.routers.adminng.tls=true"
       # custom service (non default port)
@@ -138,6 +146,10 @@ services:
     container_name: maild-mda
     hostname: mda
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
@@ -172,6 +184,10 @@ services:
     domainname: ${DEFAULT_DOMAIN}
     hostname: mta
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     environment:
       MAILADMIN: ${MAIL_ADMIN_USER:-sysadmin}@${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
       DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
@@ -210,6 +226,10 @@ services:
     container_name: maild-clamav
     hostname: clamav
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     # no env_file on purpose: clamav needs no catalogue access (variable separation).
     # Its only knobs default unset in the image and are passed as explicit entries:
     # an empty value behaves exactly like unset for both (the entrypoint tests
@@ -234,6 +254,10 @@ services:
     container_name: maild-amavis
     hostname: amavis
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     environment:
       # explicit on every DB consumer (see the note on the db service): the entrypoint
       # queries the catalogue for the domain list
@@ -262,17 +286,44 @@ services:
     container_name: maild-cron
     hostname: cron
     restart: always
+    labels:
+      # internal service: never routed by the ingress, even when Traefik runs with
+      # exposedByDefault=true (2026-10 audit M-05)
+      - "traefik.enable=false"
     environment:
-      # explicit on every DB consumer (see the note on the db service): the cron
-      # scripts talk to the catalogue with psql; the resume/report jobs also need
-      # the deployment coordinates (the entrypoint dumps the environment into
-      # /etc/environment, from where every cron job sources it).
+      # NO env_file on purpose (2026-10 audit M-06): the operator file carries every
+      # service's secrets and the entrypoint writes this environment to /etc/environment
+      # (mode 600), from where every cron job sources it. Allow-list, the mcp pattern:
+      # a new cron tunable must be added here.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
       DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in .env}
       MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
-    # operator env file (from env.sample); overrides any same-named image ENV default
-    env_file:
-      - .env
+      # optional tunables: bare keys pass the value from the operator file through and stay
+      # UNSET when it is absent, so the image ENV default applies
+      POSTGRES_HOST:
+      POSTGRES_PORT:
+      POSTGRES_DB:
+      POSTGRES_USER:
+      ADMINNG_DB:
+      MCP_DB:
+      MTA:
+      AMAVIS_SUBMIT_PORT:
+      MX_HOSTNAME:
+      BACKUP_MIN_BYTES:
+      JUNK_RETENTION_DAYS:
+      SA_HAM_SAMPLE_PER_USER:
+      SA_HAM_SAMPLE_MAX:
+      OUTBOUND_ALERT_MESSAGES:
+      OUTBOUND_ALERT_IGNORE_USERS:
+      DNS_CHECK_DOMAINS:
+      DNS_CHECK_TO:
+      DNS_CHECK_ALERT_LEVEL:
+      DNS_CHECK_RESOLVER:
+      DNS_CHECK_BLOCKLISTS:
+      DNS_CHECK_IP_BLOCKLISTS:
+      DNS_CHECK_DKIM:
+      DNS_CHECK_SPF_MX_COVERAGE:
+      DNS_CHECK_TIMEOUT:
     volumes:
       - /var/log:/var/log
       - vmail:/home/vmail

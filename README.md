@@ -31,7 +31,7 @@ TL;DR:
    log in to AdminNG as `MAIL_ADMIN_USER@DEFAULT_DOMAIN`, approve the browser server-side and
    enroll TOTP, then create your users.
 
-The webmail (`webmail.<DEFAULT_DOMAIN>`), AdminNG (`adminng.<DEFAULT_DOMAIN>`) and MailD MCP
+The webmail (`webmail.<DEFAULT_DOMAIN>`), AdminNG (`admin.<DEFAULT_DOMAIN>`) and MailD MCP
 (`mcp.<DEFAULT_DOMAIN>`) UIs are **not** published directly on production: front them with a reverse proxy / ingress
 controller that terminates TLS (Traefik, Nginx, …) on the external `maild` network. The
 stack ships **no** TLS for the web UIs.
@@ -226,7 +226,7 @@ alias domains, administrators, devices and audit logs) with a zero-trust device 
 mandatory TOTP for superadmins, device-scoped WebAuthn (biometric) sign-in, and a full
 audit trail:
 
-- **Dev:** <http://localhost:8083> · **Production:** `https://adminng.<DEFAULT_DOMAIN>`
+- **Dev:** <http://localhost:8083> · **Production:** `https://admin.<DEFAULT_DOMAIN>`
   through your ingress (Traefik labels are already in the production compose files).
 - **LAN/phone (dev):** `https://<lan-ip>:8084` with the local CA — install
   `ldata/certs/adminng-ca.der` on the device first (see

@@ -388,6 +388,12 @@ more. See `.agents/services/provisioning.md`.
 
 ## cron — maintenance
 
+- **Environment (2026-10 audit M-06):** no `env_file` — the compose `environment:` block is an
+  allow-list (`POSTGRES_PASSWORD`, `DEFAULT_DOMAIN`, `MAIL_ADMIN_USER` + bare tunable keys), so
+  the operator file's other secrets never reach cron. The entrypoint restores the image ENV
+  defaults that bare keys unset (snapshot `/etc/maild-image.env`, taken at build) and rewrites
+  `/etc/environment` with mode 600. A `docker exec` shell does not see those restored
+  defaults: source `/etc/environment` first (every job script that needs them does).
 - Every job that mails (resume, backup, maildir check, outbound watch, DNS check) submits with
   `swaks` to `amavis:${AMAVIS_SUBMIT_PORT}` (default **10026**, bank INTERNAL — D13); 10024 only
   admits the mta.

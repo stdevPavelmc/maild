@@ -76,6 +76,13 @@ ENV POSTGRES_HOST=db \
     DNS_CHECK_SPF_MX_COVERAGE=warning \
     DNS_CHECK_TIMEOUT=10
 
+# Snapshot of the ENV defaults above (2026-10 audit M-06). Compose hands cron an allow-list
+# of bare keys; a key the operator file does not set reaches the container as "KEY" with no
+# value, which REMOVES the image default. The entrypoint restores every default that is
+# unset at runtime from this file, so the image stays the single source of defaults.
+RUN env | grep -E '^[A-Z][A-Z0-9_]*=' | grep -vE '^(HOSTNAME|HOME|PATH|PWD|SHLVL|TERM)=' \
+        > /etc/maild-image.env
+
 # the daemon stays in the foreground (CMD) and every job appends to /proc/1/fd/1; the healthcheck
 # just proves cron is alive: it is the pidfile Debian's cron writes at start-up
 HEALTHCHECK --interval=1m --timeout=5s --start-period=10s --retries=2 \
@@ -99,4 +106,4 @@ LABEL org.opencontainers.image.title="MailD maintenance jobs" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-30"
+      org.opencontainers.image.created="2026-11-01"

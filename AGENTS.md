@@ -57,8 +57,11 @@ for maintenance jobs.
   Docker Hub file. Images are always named `maild-<svc>:<tag>`; `dozzle` and `pwa-test`
   are dev-only.
 - **Production HTTP is proxied.** `mua` (`webmail.${DEFAULT_DOMAIN}`), `adminng`
-  (`adminng.${DEFAULT_DOMAIN}`) and `mcp` (`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`) carry
-  Traefik labels on every production compose file, and the stack terminates **no** TLS for them. The operator must supply an ingress controller
+  (`admin.${DEFAULT_DOMAIN}` — the app/service/router stay `adminng`, only the public DNS
+  name is `admin`) and `mcp` (`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`) carry
+  `traefik.enable=true` on every production compose file; **every other service carries
+  `traefik.enable=false`** (keep it on any new internal service). The stack terminates **no**
+  TLS for them. The operator must supply an ingress controller
   that terminates TLS (Traefik, Nginx, …) and joins the external `maild` network.
 - **MTA & MDA ports** all MTA ports [25, 465, 587] are exposed to the production
   dockerfiles; in the case of the MDA only the 993 & 995 ports are exposed, no
@@ -73,7 +76,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (183 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (185 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```

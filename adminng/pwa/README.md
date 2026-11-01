@@ -29,7 +29,7 @@ cd adminng/pwa
 ./keystore-generate.sh                      # once — keep the printed passwords
 
 DOCKER_NETWORK=host JAVA_TOOL_OPTIONS='-Djava.net.preferIPv6Addresses=true' \
-APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \
+APP_URL=https://admin.example.com APP_PKG=cu.maild.adminng \
 KEYSTORE=$PWD/android.keystore KEY_ALIAS=maild-apk \
 KEY_PASSWORD='…' STORE_PASSWORD='…' ./app-generate.sh
 ```
@@ -111,7 +111,7 @@ Notes:
 
 ```bash
 cd adminng/pwa
-APP_URL=https://adminng.example.com \
+APP_URL=https://admin.example.com \
 APP_PKG=cu.maild.adminng \
 KEYSTORE=$PWD/android.keystore \
 KEY_ALIAS=maild-apk \
@@ -233,7 +233,7 @@ Fix: give the build containers the host network stack **and** make every JVM pre
 ```bash
 DOCKER_NETWORK=host \
 JAVA_TOOL_OPTIONS='-Djava.net.preferIPv6Addresses=true' \
-APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \
+APP_URL=https://admin.example.com APP_PKG=cu.maild.adminng \
 KEYSTORE=$PWD/android.keystore KEY_ALIAS=maild-apk \
 KEY_PASSWORD='…' STORE_PASSWORD='…' \
 ./app-generate.sh

@@ -512,6 +512,42 @@ else
     t_skip "env schema checks (docker compose is needed to read the container environment)"
 fi
 
+# M-05 (2026-10 audit) — static: in every production compose file only the three ingress
+# services may be routed by Traefik; every other service is labelled traefik.enable=false
+# (a stock Traefik has exposedByDefault=true and would publish the raw api otherwise).
+TRAEFIK_WHY=""
+for PF in docker-compose.yml compose-github.yml compose-gitlab.yml ; do
+    TRAEFIK_WHY="$TRAEFIK_WHY$(awk -v f="$PF" '
+        /^services:/ { s = 1; next }
+        s && /^  [a-z-]+:$/ { if (svc != "") chk(); svc = $1; sub(":", "", svc); en = "" ; next }
+        s && /traefik\.enable=/ { en = ($0 ~ /enable=true/) ? "true" : "false" }
+        function chk() {
+            want = (svc == "adminng" || svc == "mua" || svc == "mcp") ? "true" : "false"
+            if (en != want) printf " %s:%s=%s", f, svc, (en == "" ? "unset" : en)
+        }
+        END { if (svc != "") chk() }' "$SCRIPT_DIR/$PF")"
+done
+if [ -z "$TRAEFIK_WHY" ] ; then
+    t_ok "production compose files: only adminng/mua/mcp are Traefik-routed, every other service traefik.enable=false"
+else
+    t_fail "production compose Traefik labels:$TRAEFIK_WHY"
+fi
+
+# M-06 (2026-10 audit) — cron gets an allow-list, never the whole operator env file, and
+# the /etc/environment its jobs source is root-only (it holds POSTGRES_PASSWORD)
+if [ "$HAVE_DC" = 1 ] ; then
+    CRON_ENV_MODE="$(dcx cron stat -c %a /etc/environment 2>/dev/null | tr -d '\r\n')"
+    CRON_LEAK="$(dcx cron sh -c 'grep -oE "^(ADMINNG_SECRET_KEY|MCP_SECRET_KEY|MCP_DB_PASSWORD|MCP_DOVECOT_MASTER_PASSWORD|POSTFIXADMIN_SETUP_PASSWORD)=" /etc/environment; env | grep -oE "^(ADMINNG_SECRET_KEY|MCP_SECRET_KEY|MCP_DB_PASSWORD|MCP_DOVECOT_MASTER_PASSWORD|POSTFIXADMIN_SETUP_PASSWORD)="' 2>/dev/null | tr -d '\r' | sort -u | xargs)"
+    CRON_PW_COPIES="$(dcx cron grep -c '^POSTGRES_PASSWORD=' /etc/environment 2>/dev/null | tr -d '\r\n')"
+    CRON_MX="$(dcx cron printenv MX_HOSTNAME 2>/dev/null | tr -d '\r\n')"
+    if [ "$CRON_ENV_MODE" = 600 ] && [ -z "$CRON_LEAK" ] && [ "$CRON_PW_COPIES" = 1 ] &&
+       [ -n "$CRON_MX" ] ; then
+        t_ok "cron: allow-listed env only (no foreign secrets), /etc/environment mode 600 with one copy, operator tunables pass through (MX_HOSTNAME)"
+    else
+        t_fail "cron env (mode=$CRON_ENV_MODE leaks='$CRON_LEAK' pw_copies=$CRON_PW_COPIES MX_HOSTNAME='$CRON_MX')"
+    fi
+fi
+
 if [ -z "$PASS" ] ; then
     echo "ERROR: no password for $ADMINMAIL in $CREDS_FILE (run ./bootstrap-dev.sh first, or export PASS)" >&2
     exit 1
@@ -1609,7 +1645,9 @@ else
         t_ok "G15 the DNS health check is scheduled daily at 04:20 in the cron crontab"
     fi
 
-    DNS_GATE="$(dcx cron printenv DNS_CHECK_ALERT_LEVEL 2>/dev/null | tr -d '\r')"
+    # read the environment the jobs source (the entrypoint restores the image defaults there;
+    # a bare `docker exec printenv` sees the compose allow-list, which unsets them — M-06)
+    DNS_GATE="$(dcx cron sh -c '. /etc/environment; printf %s "$DNS_CHECK_ALERT_LEVEL"' 2>/dev/null | tr -d '\r')"
     if dcx cron test -r /var/lib/amavis/dkim/db.txt && [ -n "$DNS_GATE" ] ; then
         t_ok "G16 the cron container reads the amavis DKIM keys (read-only mount) and carries the DNS_CHECK_* defaults (gate=$DNS_GATE)"
     else

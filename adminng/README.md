@@ -159,7 +159,7 @@ For a **production** release, run the same command on a trusted machine with you
 
 ```bash
 cd adminng/pwa
-APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \
+APP_URL=https://admin.example.com APP_PKG=cu.maild.adminng \
 KEYSTORE=/path/to/android.keystore KEY_ALIAS=maild-apk \
 KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh
 # -> dist/android/cu.maild.adminng-<version>.apk
@@ -305,7 +305,7 @@ of the requester first.
 
 - **Dev:** `http://localhost:8083` (`adminng`; it proxies `/api/v1/` to
   `api` — the web app is same-origin, no configuration needed).
-- **Production:** `https://adminng.${DEFAULT_DOMAIN}` through the operator's
+- **Production:** `https://admin.${DEFAULT_DOMAIN}` through the operator's
   Traefik/ingress (TLS terminated by your proxy, like `webmail.`; the stack
   itself terminates no TLS).
 - **Android:** signed APK produced by `adminng/pwa/app-generate.sh` and attached

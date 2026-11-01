@@ -229,7 +229,7 @@ cd adminng/pwa && npm run i18n:check    # en/es parity; also inside `npm run bui
 ```bash
 cd adminng/pwa
 ./keystore-generate.sh                               # dev/test key -> android.keystore + .b64
-APP_URL=https://adminng.example.com APP_PKG=cu.maild.adminng \
+APP_URL=https://admin.example.com APP_PKG=cu.maild.adminng \
 KEYSTORE=/path/android.keystore KEY_ALIAS=maild-apk \
 KEY_PASSWORD=… STORE_PASSWORD=… ./app-generate.sh   # -> dist/android/<pkg>-<version>.apk
 ```

@@ -162,7 +162,7 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
 
 ## First login
 
-- **Admin UI (AdminNG):** open `https://adminng.<DEFAULT_DOMAIN>` (or `http://host:8083` in
+- **Admin UI (AdminNG):** open `https://admin.<DEFAULT_DOMAIN>` (or `http://host:8083` in
   dev) and log in as `sysadmin@<DEFAULT_DOMAIN>` with `MAIL_ADMIN_PASSWORD` (or the generated
   password from `docker compose logs api`). The first browser must be approved server-side
   (`docker compose exec api adminng.py --approve-device '<uuid>'`), then the superadmin
@@ -295,15 +295,22 @@ defaults), `PROVISION_WAIT_TIMEOUT`, `PROVISION_FORCE` (re-write the admin passw
 
 MailD does **not** terminate TLS for the web UIs; every production compose file ships
 Traefik labels that route `webmail.<DEFAULT_DOMAIN>` (webmail) and
-`adminng.<DEFAULT_DOMAIN>` (AdminNG). You **must** front the stack with a reverse proxy /
+`admin.<DEFAULT_DOMAIN>` (AdminNG). You **must** front the stack with a reverse proxy /
 ingress controller that terminates TLS (Traefik, Nginx, …) — it is **not** provided. Attach
 the ingress to the external `maild` network (create it once with
 `docker network create maild`) so it can reach the `adminng` and `mua` containers, both
 listening on port 80 inside the stack.
 
+Only `adminng`, `mua` and `mcp` carry `traefik.enable=true`; every other service is
+labelled `traefik.enable=false`. Still run Traefik with
+`--providers.docker.exposedbydefault=false`: with the stock default (`true`) any container on
+the `maild` network that lacks the label — a service added later, a sidecar — gets a router
+on `Host(<container-name>)`, and the internal `api` reached that way would bypass the
+`adminng` proxy entirely (2026-10 audit M-05).
+
 The host must carry the same name as the mail server (see Requirements) for Let's Encrypt,
 and the certs must live in the standard `/etc/letsencrypt` location. The two UI hostnames
-(`webmail.<DEFAULT_DOMAIN>` and `adminng.<DEFAULT_DOMAIN>`) must resolve to the ingress and be
+(`webmail.<DEFAULT_DOMAIN>` and `admin.<DEFAULT_DOMAIN>`) must resolve to the ingress and be
 covered by its certificate; if you serve them under other names, also override
 `ADMINNG_WEBAUTHN_RP_ID`/`ADMINNG_WEBAUTHN_ORIGINS` (see
 [AdminNG](#adminng-optional-but-recommended)). Before the ingress exists, check the containers
@@ -402,7 +409,7 @@ were retired in 2026-10 (see `Changelog.md`).
    encrypts the TOTP seeds; the stack refuses to start without the *variable*, and the API
    logs a warning for as long as the placeholder is still in place. Rotating it invalidates
    sessions and enrolled authenticators.
-2. `docker compose up -d` exposes it at `https://adminng.<DEFAULT_DOMAIN>` (Traefik) — or the
+2. `docker compose up -d` exposes it at `https://admin.<DEFAULT_DOMAIN>` (Traefik) — or the
    dev stack at <http://localhost:8083>.
 3. **Approve the first browser from the server side** (there is no silent auto-approval):
    `docker compose exec api adminng.py --list-devices` then
@@ -420,8 +427,8 @@ were retired in 2026-10 (see `Changelog.md`).
    `.env` and re-run `docker compose up -d`:
 
    ```sh
-   ADMINNG_WEBAUTHN_RP_ID=adminng.maild.cu
-   ADMINNG_WEBAUTHN_ORIGINS=https://adminng.maild.cu
+   ADMINNG_WEBAUTHN_RP_ID=admin.maild.cu
+   ADMINNG_WEBAUTHN_ORIGINS=https://admin.maild.cu
    ```
 
    List every public origin (comma-separated, no spaces, include a non-default port); they

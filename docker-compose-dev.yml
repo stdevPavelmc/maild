@@ -16,8 +16,9 @@
 # just the deployment values (domain, admin user, fake secrets) and any deviation
 # from an image default: a same-named var in the env file always wins over the
 # image default (never leave one empty — comment it out instead).
-# The env file is injected ONLY into the 7 DB-consumer services; clamav needs no
-# catalogue access (its two knobs are explicit environment entries below).
+# The env file is injected ONLY into 6 DB-consumer services; clamav needs no
+# catalogue access (its two knobs are explicit environment entries below), and cron
+# and mcp get an explicit allow-list instead (2026-10 audit M-06).
 
 networks:
   maild-dev:
@@ -293,16 +294,39 @@ services:
     hostname: cron
     restart: unless-stopped
     environment:
-      # explicit on every DB consumer (see the note on the db service): the cron
-      # scripts talk to the catalogue with psql; the resume/report jobs also need
-      # the deployment coordinates (the entrypoint dumps the environment into
-      # /etc/environment, from where every cron job sources it).
+      # NO env_file on purpose (2026-10 audit M-06): the operator file carries every
+      # service's secrets and the entrypoint writes this environment to /etc/environment
+      # (mode 600), from where every cron job sources it. Allow-list, the mcp pattern:
+      # a new cron tunable must be added here.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
       DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in env.dev}
       MAIL_ADMIN_USER: ${MAIL_ADMIN_USER:-sysadmin}
-    # operator env file (fake dev secrets); overrides any same-named image ENV default
-    env_file:
-      - env.dev
+      # optional tunables: bare keys pass the value from the operator file through and stay
+      # UNSET when it is absent, so the image ENV default applies
+      POSTGRES_HOST:
+      POSTGRES_PORT:
+      POSTGRES_DB:
+      POSTGRES_USER:
+      ADMINNG_DB:
+      MCP_DB:
+      MTA:
+      AMAVIS_SUBMIT_PORT:
+      MX_HOSTNAME:
+      BACKUP_MIN_BYTES:
+      JUNK_RETENTION_DAYS:
+      SA_HAM_SAMPLE_PER_USER:
+      SA_HAM_SAMPLE_MAX:
+      OUTBOUND_ALERT_MESSAGES:
+      OUTBOUND_ALERT_IGNORE_USERS:
+      DNS_CHECK_DOMAINS:
+      DNS_CHECK_TO:
+      DNS_CHECK_ALERT_LEVEL:
+      DNS_CHECK_RESOLVER:
+      DNS_CHECK_BLOCKLISTS:
+      DNS_CHECK_IP_BLOCKLISTS:
+      DNS_CHECK_DKIM:
+      DNS_CHECK_SPF_MX_COVERAGE:
+      DNS_CHECK_TIMEOUT:
     volumes:
       - ./ldata/logs:/var/log
       - ./ldata/vmail:/home/vmail

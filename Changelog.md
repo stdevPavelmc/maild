@@ -19,6 +19,30 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- **Breaking (production ingress):** the AdminNG public hostname is now
+  `admin.${DEFAULT_DOMAIN}` in every production compose file (`compose-github.yml` already
+  used it; `docker-compose.yml`/`compose-gitlab.yml` said `adminng.`). The app, service and
+  Traefik router keep the name `adminng`. Docker Hub / GitLab deployments must add the DNS
+  record and certificate for `admin.<domain>` and, if set, move `ADMINNG_WEBAUTHN_RP_ID` /
+  `ADMINNG_WEBAUTHN_ORIGINS` (passkeys registered under the old RP ID must be re-enrolled).
+  `compose-github.yml` is a strict copy of `docker-compose.yml` again (router renamed
+  `admin` → `adminng`).
+- Security (audit M-05): only `adminng`/`mua`/`mcp` carried Traefik labels, so a stock
+  Traefik (`exposedByDefault=true`) auto-routed every other container on the `maild` network
+  — the raw `api` among them, bypassing the `adminng` proxy. Every other service now carries
+  `traefik.enable=false` in the three production compose files, and INSTALL.md tells the
+  operator to run Traefik with `--providers.docker.exposedbydefault=false`. `test.sh` checks
+  the labels statically.
+- Security (audit M-06): `cron` loaded the whole operator env file and appended it to a
+  world-readable `/etc/environment`, so one cron foothold exposed every service's secrets
+  (Dovecot master, `ADMINNG_SECRET_KEY`, `MCP_SECRET_KEY`, …). It now gets an explicit
+  allow-list (the mcp pattern; a new cron tunable must be added to its `environment:`
+  block), and the entrypoint rewrites `/etc/environment` (mode 600, one copy — every
+  restart used to append another). Bare allow-list keys that the operator file leaves unset
+  reach Docker as `KEY` with no value, which removes the image default: the cron image
+  snapshots its ENV defaults at build (`/etc/maild-image.env`) and the entrypoint restores
+  every unset one. `resume.sh` now sources `/etc/environment` like the other jobs. `test.sh`
+  checks the mode, the absence of foreign secrets and the pass-through of a tunable.
 - Security (audit M-04): `.gitignore` ignored only the exact name `.env`, so an operator
   file such as `.env-prod` was one `git add -A` away from a public commit. It now ignores
   `.env*` (`env.dev`/`env.sample` have no leading dot and stay tracked), and the

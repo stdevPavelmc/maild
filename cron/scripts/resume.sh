@@ -8,7 +8,10 @@
 #     Yesterday is defined as today -1 day
 #   - Send it to the mail admin
 
-# loading vars
+# load the vars exported by the container entrypoint (a `docker exec` run does not get the
+# image defaults the entrypoint restored: compose's allow-list unsets them — audit M-06)
+source /etc/environment
+
 if [ "$1" = "today" ]; then
     DAY=$(date +" %b %d ")
 else
