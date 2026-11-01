@@ -101,13 +101,21 @@ fi
 # defaults (losing security.admin_password with them) and minted a new random password that no
 # log ever showed, so ?admin + the OTP printed here could not possibly work.
 if SETUP="$(php /config-setup.php)" ; then
+    ADMIN_PANEL="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_PANEL=//p')"
     ADMIN_LOGIN="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_LOGIN=//p')"
     ADMIN_PASSWORD="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_PASSWORD=//p')"
     ADMIN_PASSWORD_SOURCE="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_PASSWORD_SOURCE=//p')"
 
-    # Expose for the admin user the credentials of the SnappyMail admin panel
+    # Expose for the admin user the credentials of the SnappyMail admin panel (printed even
+    # while it is disabled: a generated password is shown only on the boot that mints it)
     echo "======================================================================"
-    echo "|| SnappyMail admin panel: <your webmail URL>/?admin"
+    if [ "${ADMIN_PANEL}" = "on" ] ; then
+        echo "|| SnappyMail admin panel: <your webmail URL>/?admin  [ENABLED]"
+        echo "|| (internet-facing: set MUA_ADMIN_PANEL=off again once you are done)"
+    else
+        echo "|| SnappyMail admin panel: DISABLED (MUA_ADMIN_PANEL=off, the default)"
+        echo "|| set MUA_ADMIN_PANEL=on and restart mua to use <your webmail URL>/?admin"
+    fi
     echo "|| login    : ${ADMIN_LOGIN}"
     case "${ADMIN_PASSWORD_SOURCE}" in
         env)

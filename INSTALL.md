@@ -173,7 +173,9 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
 - **Webmail (SnappyMail):** open `https://webmail.<DEFAULT_DOMAIN>` — served behind your TLS
   ingress (the production compose files expose no webmail port; the dev stack is at
   `http://localhost:8081`) — and log in with a mailbox you created.
-- **Webmail admin panel:** `https://webmail.domain.com/​?admin` — the login (default `maild`)
+- **Webmail admin panel:** disabled by default (`/?admin` answers 403; it would sit on the
+  public webmail host). To use it set `MUA_ADMIN_PANEL=on` in `.env`, `docker compose up -d mua`,
+  open `https://webmail.domain.com/​?admin`, and switch it off again afterwards. The login (default `maild`)
   and the password are printed by the webmail container on every boot, as an OTP:
   `docker compose logs mua | grep -A3 'admin panel'`. The password is generated on the first
   boot and kept in the data volume; set `MUA_ADMIN_PASSWORD` to pin a known one.

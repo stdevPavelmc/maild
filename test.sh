@@ -548,6 +548,16 @@ if [ "$HAVE_DC" = 1 ] ; then
     fi
 fi
 
+# M-03 (2026-10 audit) — the SnappyMail admin panel shares the public webmail host, so it is
+# off unless MUA_ADMIN_PANEL=on: /?admin answers 403 while the webmail itself still serves
+MUA_ADMIN_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$SERVER:8081/?admin")"
+MUA_HOME_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$SERVER:8081/")"
+if [ "$MUA_ADMIN_CODE" = 403 ] && [ "$MUA_HOME_CODE" = 200 ] ; then
+    t_ok "webmail admin panel is disabled by default (/?admin 403, webmail 200)"
+else
+    t_fail "webmail admin panel exposure (/?admin=$MUA_ADMIN_CODE, /=$MUA_HOME_CODE; want 403/200)"
+fi
+
 if [ -z "$PASS" ] ; then
     echo "ERROR: no password for $ADMINMAIL in $CREDS_FILE (run ./bootstrap-dev.sh first, or export PASS)" >&2
     exit 1

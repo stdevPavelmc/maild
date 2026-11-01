@@ -355,7 +355,8 @@ more. See `.agents/services/provisioning.md`.
   this job: it strips the quotes, PHP rejects the whole file, SnappyMail falls back to its
   factory defaults — `security.admin_password` included — and mints a random password nobody
   printed, so `/?admin` + the OTP from the logs could not work (see Changelog 1.4.0-rc).
-- Admin panel: `/?admin`, login `MUA_ADMIN_USER` (**default `maild`**). The password is the OTP
+- Admin panel: `/?admin` — **off by default** (`MUA_ADMIN_PANEL=off`, `allow_admin_panel = Off`
+  → 403; audit M-03), `on` enables it. Login `MUA_ADMIN_USER` (**default `maild`**). The password is the OTP
   of the entrypoint banner (`docker compose logs mua`): generated on the first boot and kept in
   the data volume, or the one in `MUA_ADMIN_PASSWORD` when set. A password changed from the
   panel is respected (SnappyMail deletes `admin_password.txt` then) and no OTP is printed.

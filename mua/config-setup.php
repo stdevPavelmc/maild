@@ -222,6 +222,16 @@ if (!\preg_match('/^[A-Za-z0-9_.@+\-]+$/', $sAdminUser)) {
 	$sAdminUser = DEFAULT_ADMIN_USER;
 }
 
+// The admin panel lives on the public webmail host (/?admin): off unless the operator asks
+// for it (2026-10 audit M-03). MailD writes the whole configuration itself, so the panel is
+// only needed for occasional manual tweaks: set MUA_ADMIN_PANEL=on, restart mua, use it,
+// then switch it off again.
+$bAdminPanel = \in_array(
+	\strtolower(\trim((string) \getenv('MUA_ADMIN_PANEL'))),
+	['on', 'yes', 'true', '1'],
+	true
+);
+
 $sEnvPassword = \trim((string) \getenv('MUA_ADMIN_PASSWORD'));
 if (\preg_match('/[\r\n]/', $sEnvPassword)) {
 	fail('MUA_ADMIN_PASSWORD must be a single line');
@@ -258,6 +268,7 @@ $aSections = [
 	],
 	'security' => [
 		'admin_login' => ini_quote($sAdminUser),
+		'allow_admin_panel' => $bAdminPanel ? 'On' : 'Off',
 	],
 	'plugins' => [
 		'enable' => 'On',
@@ -361,6 +372,7 @@ if (isset($aPlugins['change-password'])) {
 	);
 }
 
+echo 'MUA_ADMIN_PANEL=' . ($bAdminPanel ? 'on' : 'off') . "\n";
 echo 'MUA_ADMIN_LOGIN=' . $sAdminUser . "\n";
 if ('env' !== $sSource && 'stored' !== $sSource) {
 	echo 'MUA_ADMIN_PASSWORD=' . $sPassword . "\n";

@@ -61,7 +61,8 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   plugin against MailD's own driver (`mua/plugins/change-password-maild/`). Verify a password
   with `… exec mda doveadm auth test <user> '<password>'` (mind the auth cache, below) or a real
   IMAP login: `curl --insecure -u '<user>:<password>' imaps://localhost:993/ -X 'LIST "" "INBOX"'`.
-- **Webmail admin panel (`/?admin`):** the entrypoint prints the credentials at boot —
+- **Webmail admin panel (`/?admin`):** disabled by default (`MUA_ADMIN_PANEL=off` → 403, audit
+  M-03); set `MUA_ADMIN_PANEL=on` in `env.dev` and recreate `mua` to use it. The entrypoint prints the credentials at boot —
   `… logs mua | grep -A3 'admin panel'`. The login is `MUA_ADMIN_USER` (`maild` by default) and
   the password is the OTP shown there (generated on the first boot, kept in the data volume;
   `MUA_ADMIN_PASSWORD` pins it). If the banner says `unchanged, set from the admin panel`, the

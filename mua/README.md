@@ -12,7 +12,10 @@ for webmail configuration.
 - **Configuration management (`config-setup.php`):** A custom PHP startup script patches
   SnappyMail's `application.ini` at startup, safely configuring branding titles, database
   connections, and admin credentials without clobbering foreign settings.
-- **Admin panel:** Available at `https://webmail.<domain>/?admin`. Username defaults to
+- **Admin panel:** **Disabled by default** (`MUA_ADMIN_PANEL=off`: `/?admin` answers 403) —
+  it shares the public webmail host and MailD writes the whole configuration itself. Set
+  `MUA_ADMIN_PANEL=on` and restart `mua` to use `https://webmail.<domain>/?admin`, then switch
+  it off again. Username defaults to
   `maild`. On first boot, a one-time random password is generated, printed in the container
   logs, and stored in the persistent data volume (or set explicitly via `MUA_ADMIN_PASSWORD`).
 - **Built-in plugins:** Pre-installs baseline plugins defined in `MUA_PLUGINS`:
@@ -55,6 +58,7 @@ production, `env.dev` in development) overrides any value.
 - `POSTGRES_USER=maild`: Database username.
 - `POSTGRES_EXTRA_DB=contacts`: Contacts address book database name.
 - `PASSWORD_SCHEME=argon2id`: Hashing scheme used when users change password (`argon2id` default, `md5crypt` legacy).
+- `MUA_ADMIN_PANEL=off`: SnappyMail admin panel (`/?admin`); `on` enables it (internet-facing — enable only while needed).
 - `MUA_ADMIN_USER=maild`: Username for the webmail admin panel.
 - `MUA_CONFIG_WAIT_TIMEOUT=120`: Seconds to wait for SnappyMail's initial configuration files.
 - `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth`: Enabled plugins.

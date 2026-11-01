@@ -19,6 +19,12 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Security (audit M-03): the SnappyMail admin panel was reachable by anyone at
+  `https://webmail.<domain>/?admin` (same public host as the webmail, no 2FA). It is now off
+  by default (`/?admin` answers 403): new `MUA_ADMIN_PANEL` (image default `off`; `on`
+  enables it). MailD writes the whole SnappyMail config itself, so the panel is only for
+  occasional manual tweaks. The boot banner says whether it is enabled and still prints the
+  credentials. `test.sh` checks the 403.
 - **Breaking (production ingress):** the AdminNG public hostname is now
   `admin.${DEFAULT_DOMAIN}` in every production compose file (`compose-github.yml` already
   used it; `docker-compose.yml`/`compose-gitlab.yml` said `adminng.`). The app, service and
