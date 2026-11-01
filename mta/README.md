@@ -16,6 +16,9 @@ client submission, recipient policy enforcement, and inter-service routing.
 - **Delivery:** Routes scanned local mail to Dovecot via LMTP.
 - **Anti-enumeration tarpit (F-07):** Delays rejecting unknown recipients on port 25 by
   `SMTP_TARPIT_DELAY` seconds, slowing down dictionary and harvesting attacks.
+- **No AUTH on port 25 + SASL throttle (audit M-01):** the MX port never offers AUTH (only
+  587/465 do); anvil caps AUTH commands per client IP (`SMTP_AUTH_RATE_LIMIT`) and connections
+  on 587/465 (`SMTP_CONNECTION_RATE_LIMIT`), `mynetworks` exempt.
 - **Outbound throttle (F-12):** Supervised internal `ratelimitd` daemon (`127.0.0.1:12341`)
   tracks submission recipient counts per authenticated user over `OUTBOUND_RATE_WINDOW`,
   deferring (`450`) once `OUTBOUND_RATE_RECIPIENTS` is reached. Accounts in
@@ -60,6 +63,8 @@ production, `env.dev` in development) overrides any value.
 - `DNSBL_ENABLE=true`: Enable DNS-based blackhole list checks.
 - `DNSBL_LIST=zen.spamhaus.org=127.0.0.[2..11]*2,psbl.surriel.com,bl.spamcop.net,bl.spameatingmonkey.net`: Comma-separated DNSBL list.
 - `SMTP_TARPIT_DELAY=2`: Seconds to sleep before rejecting unknown recipients on port 25 (`0` disables).
+- `SMTP_AUTH_RATE_LIMIT=60`: AUTH commands per client IP per minute (`smtpd_client_auth_rate_limit`, `0` disables).
+- `SMTP_CONNECTION_RATE_LIMIT=60`: Connections per client IP per minute on 587/465 only (`0` disables).
 - `OUTBOUND_RATE_RECIPIENTS=200`: Maximum outbound recipients per user per rate window (`0` disables).
 - `OUTBOUND_RATE_WINDOW=3600`: Outbound rate limit window in seconds (default 1 hour).
 - `OUTBOUND_RATE_EXEMPT_USERS=`: Comma-separated addresses exempt from outbound rate limiting (e.g. `no-reply@example.com`).

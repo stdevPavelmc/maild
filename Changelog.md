@@ -19,6 +19,15 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Security (audit M-01): SMTP AUTH had no brute-force limit and was offered on the MX port
+  (25) after STARTTLS — the "no AUTH on 25" filters were dead (`auth_filter.pcre` unreferenced,
+  `command_filter.pcre` only seen by postscreen before the TLS handoff, and matching
+  `AUTH LOGIN` while the server offers `AUTH PLAIN`). Now `smtpd_sasl_auth_enable = no`
+  globally (587/465 keep AUTH), anvil caps AUTH commands per client IP
+  (`SMTP_AUTH_RATE_LIMIT`, default 60/min) and submission connections on 587/465
+  (`SMTP_CONNECTION_RATE_LIMIT`, default 60/min; never on :25), `mynetworks` exempt. Both
+  dead filter files and `postscreen_command_filter` are removed. **Mail clients that
+  authenticated on port 25 must move to 587 or 465.** `test.sh` B2b/B2c.
 - Security (audit M-03): the SnappyMail admin panel was reachable by anyone at
   `https://webmail.<domain>/?admin` (same public host as the webmail, no 2FA). It is now off
   by default (`/?admin` answers 403): new `MUA_ADMIN_PANEL` (image default `off`; `on`

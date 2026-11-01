@@ -56,6 +56,8 @@ ENV POSTGRES_HOST=db \
     DNSBL_ENABLE=true \
     DNSBL_LIST=zen.spamhaus.org=127.0.0.[2..11]*2,psbl.surriel.com,bl.spamcop.net,bl.spameatingmonkey.net \
     SMTP_TARPIT_DELAY=2 \
+    SMTP_AUTH_RATE_LIMIT=60 \
+    SMTP_CONNECTION_RATE_LIMIT=60 \
     OUTBOUND_RATE_RECIPIENTS=200 \
     OUTBOUND_RATE_WINDOW=3600 \
     OUTBOUND_RATE_EXEMPT_USERS= \
@@ -95,4 +97,4 @@ LABEL org.opencontainers.image.title="MailD MTA (Postfix)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-24"
+      org.opencontainers.image.created="2026-11-01"

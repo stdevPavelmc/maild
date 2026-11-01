@@ -36,6 +36,16 @@ case "${SMTP_TARPIT_DELAY}" in
         SMTP_TARPIT_DELAY=0
         ;;
 esac
+# M-01 SASL/submission throttles (anvil): whole numbers per client IP per minute; the image
+# bakes 60/60, this only guards an empty or malformed value. 0 disables either one.
+for v in SMTP_AUTH_RATE_LIMIT SMTP_CONNECTION_RATE_LIMIT ; do
+    case "${!v}" in
+        ''|*[!0-9]*)
+            [ -n "${!v}" ] && echo "WARNING: mta: ${v}='${!v}' is not a whole number, using 60" 1>&2
+            printf -v "$v" '%s' 60
+            ;;
+    esac
+done
 # F-12 per-user outbound throttle (ratelimitd): integers only, sane floors; the
 # daemon re-validates defensively, these are the values the entrypoint start passes.
 if [ -z "${OUTBOUND_RATE_RECIPIENTS}" ] ; then
@@ -150,6 +160,9 @@ echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}" >> "${CFILE}"
 echo "DNSBL_LIST='${DNSBL_LIST}'" >> "${CFILE}"
 # F-07 tarpit (placeholder _SMTP_TARPIT_DELAY_ in main.cf.s)
 echo "SMTP_TARPIT_DELAY=${SMTP_TARPIT_DELAY}" >> "${CFILE}"
+# M-01 throttles (placeholders _SMTP_AUTH_RATE_LIMIT_ / _SMTP_CONNECTION_RATE_LIMIT_)
+echo "SMTP_AUTH_RATE_LIMIT=${SMTP_AUTH_RATE_LIMIT}" >> "${CFILE}"
+echo "SMTP_CONNECTION_RATE_LIMIT=${SMTP_CONNECTION_RATE_LIMIT}" >> "${CFILE}"
 
 # config dump
 if [ "${MTA_DEBUG}" ] ; then

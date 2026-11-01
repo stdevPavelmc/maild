@@ -857,6 +857,31 @@ else
     t_fail "port 25 does not authenticate (nor relay) in the clear (rc=$SW_RC)" ; dump_swaks
 fi
 
+# B2b — M-01 (2026-10 audit): the MX port never offers AUTH, not even after STARTTLS (the
+# old postscreen command filter never saw the post-TLS AUTH); 587 still does
+swx -s "$SERVER" -p 25 -tls --quit-after EHLO
+B2B_25="$(grep -cE '^<~? *250[- ]AUTH' "$SW_LOG")"
+swx -s "$SERVER" -p 587 -tls --quit-after EHLO
+B2B_587="$(grep -cE '^<~? *250[- ]AUTH' "$SW_LOG")"
+if [ "$B2B_25" = 0 ] && [ "$B2B_587" -ge 1 ] ; then
+    t_ok "port 25 advertises no AUTH even after STARTTLS; 587 still does"
+else
+    t_fail "AUTH advertisement (port 25: $B2B_25 AUTH line(s), want 0; port 587: $B2B_587, want ≥1)"
+fi
+
+# B2c — M-01: anvil throttles SASL attempts (every smtpd) and submission connections
+# (587/465 only, never :25) per client IP — the image defaults reach the live config
+if [ "$HAVE_DC" = 1 ] ; then
+    B2C_AUTH="$(dcx mta postconf -h smtpd_client_auth_rate_limit 2>/dev/null | tr -d '\r\n')"
+    B2C_CONN="$(dcx mta postconf -P submission/inet/smtpd_client_connection_rate_limit smtps/inet/smtpd_client_connection_rate_limit 2>/dev/null | awk -F' = ' '{print $2}' | xargs)"
+    B2C_25="$(dcx mta postconf -h smtpd_client_connection_rate_limit 2>/dev/null | tr -d '\r\n')"
+    if [ "$B2C_AUTH" = 60 ] && [ "$B2C_CONN" = "60 60" ] && [ "$B2C_25" = 0 ] ; then
+        t_ok "SASL throttle: 60 AUTH/min per IP, 60 connections/min on 587/465, :25 unthrottled"
+    else
+        t_fail "SASL throttle (auth=$B2C_AUTH, 587/465 conn='$B2C_CONN', global conn=$B2C_25; want 60, '60 60', 0)"
+    fi
+fi
+
 # B3 — STARTTLS on 587 serves a certificate
 if timeout -k5 20 openssl s_client -starttls smtp -connect "$SERVER:587" \
         -servername mail.localhost </dev/null 2>/dev/null | grep -q 'BEGIN CERTIFICATE' ; then

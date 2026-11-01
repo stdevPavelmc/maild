@@ -56,7 +56,9 @@ smtpd_sasl_type = dovecot
 smtpd_sasl_path = inet:_MDAIP_:12345
 
 # SALS settings
-smtpd_sasl_auth_enable = yes
+# No AUTH by default (2026-10 audit M-01): the MX port (25) never offers it; submission (587)
+# and smtps (465) turn it on explicitly in master.cf.
+smtpd_sasl_auth_enable = no
 smtpd_sasl_authenticated_header = yes
 smtpd_sasl_security_options = noanonymous
 broken_sasl_auth_clients = yes
@@ -68,6 +70,10 @@ smtpd_tls_CAfile =
 smtp_tls_security_level = may
 smtpd_tls_security_level = may
 smtpd_sasl_tls_security_options = $smtpd_sasl_security_options
+# SASL brute-force throttle (2026-10 audit M-01): AUTH commands per client IP per anvil
+# minute (anvil_rate_time_unit), counted by anvil on every smtpd (only 587/465 offer AUTH).
+# mynetworks is exempt (smtpd_client_event_limit_exceptions). 0 disables.
+smtpd_client_auth_rate_limit = _SMTP_AUTH_RATE_LIMIT_
 smtpd_tls_auth_only = yes
 smtp_tls_loglevel = 1
 smtpd_tls_loglevel = 1
@@ -132,8 +138,6 @@ postscreen_disable_vrfy_command = yes
 postscreen_greet_action = drop
 # no pipelining
 postscreen_pipelining_action = drop
-# no auth in SMTP(25)
-postscreen_command_filter = pcre:/etc/postfix/rules/command_filter.pcre
 # DNSRBL in postscreen
 postscreen_dnsbl_threshold = 3
 postscreen_dnsbl_action = enforce

@@ -165,7 +165,12 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 ## mta — Postfix
 
-- SMTP 25, submission 587 (auth), SMTPS 465. SPF (`SPF_ENABLE`) and DNSBL (`DNSBL_ENABLE`,
+- SMTP 25 (**no AUTH**: `smtpd_sasl_auth_enable = no` globally, audit M-01), submission 587
+  and SMTPS 465 (AUTH via `-o smtpd_sasl_auth_enable=yes`). Anvil throttles per client IP:
+  `smtpd_client_auth_rate_limit = SMTP_AUTH_RATE_LIMIT` (60/min, every smtpd) and
+  `smtpd_client_connection_rate_limit = SMTP_CONNECTION_RATE_LIMIT` (60/min, 587/465 only —
+  never :25, an upstream relay may carry all inbound mail); `mynetworks` exempt. The old
+  `command_filter.pcre`/`auth_filter.pcre` "no AUTH on 25" filters were dead and are gone. SPF (`SPF_ENABLE`) and DNSBL (`DNSBL_ENABLE`,
   `DNSBL_LIST`) checks; `RELAY` / `ALWAYS_BCC` optional; max size `MAX_MESSAGESIZE`.
 - Anti-enumeration (audit F-07): `smtpd_recipient_restrictions` sleeps `SMTP_TARPIT_DELAY`
   seconds (image default 2; `0` makes the entrypoint strip the line) before the

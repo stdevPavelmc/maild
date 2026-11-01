@@ -18,6 +18,9 @@ submission inet n       -       y       -       -       smtpd
   #-o content_filter=dfilt:
   -o receive_override_options=
   -o syslog_name=postfix/submission
+  # connections per client IP per minute (2026-10 audit M-01): submission ports only, never
+  # :25 (a deployment may receive all its inbound mail from a single upstream relay)
+  -o smtpd_client_connection_rate_limit=_SMTP_CONNECTION_RATE_LIMIT_
   -o smtpd_tls_security_level=encrypt
   -o smtpd_sasl_auth_enable=yes
   -o smtpd_client_restrictions=permit_sasl_authenticated,reject
@@ -42,6 +45,9 @@ submission inet n       -       y       -       -       smtpd
 smtps     inet  n       -       y       -       -       smtpd
   -o receive_override_options=
   -o syslog_name=postfix/smtps
+  # connections per client IP per minute (2026-10 audit M-01): submission ports only, never
+  # :25 (a deployment may receive all its inbound mail from a single upstream relay)
+  -o smtpd_client_connection_rate_limit=_SMTP_CONNECTION_RATE_LIMIT_
   -o smtpd_tls_wrappermode=yes
   -o smtpd_tls_security_level=encrypt
   -o smtpd_sasl_auth_enable=yes
