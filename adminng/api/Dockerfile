@@ -45,6 +45,11 @@ ENV POSTGRES_HOST=db \
     ADMINNG_QUOTA_CACHE_TTL=300 \
     VMAIL_ROOT=/home/vmail
 
+# ADMINNG_TRUSTED_PROXIES is deliberately NOT baked: unset means "the subnets this
+# container is attached to, minus the docker gateway", computed at runtime
+# (app/settings.py); `none` trusts no
+# proxy and a CIDR list overrides both. See .agents/services/configuration.md.
+
 WORKDIR /app
 
 COPY requirements.txt ./
@@ -81,4 +86,4 @@ LABEL org.opencontainers.image.title="MailD AdminNG API" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-24"
+      org.opencontainers.image.created="2026-11-01"

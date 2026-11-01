@@ -33,6 +33,93 @@ def _bool(name: str, default: bool = False) -> bool:
     )
 
 
+def attached_subnets(
+    route4: str = "/proc/net/route", route6: str = "/proc/net/ipv6_route"
+) -> list[str]:
+    """The subnets of the networks this container is attached to: the directly
+    connected routes (no gateway), IPv4 and IPv6, minus loopback, link-local and
+    multicast. Default trust set for X-Forwarded-For (2026-10 audit H-02) — the
+    same rule the MCP applies to MCP_TRUSTED_PROXIES (mcp/app/maild_mcp/settings.py).
+    """
+    import ipaddress
+    import socket
+    import struct
+
+    nets: list[str] = []
+    try:
+        with open(route4) as fh:
+            for line in fh.readlines()[1:]:
+                f = line.split()
+                if len(f) < 8 or f[0] == "lo" or int(f[2], 16) or not int(f[1], 16):
+                    continue
+                dest = socket.inet_ntoa(struct.pack("<I", int(f[1], 16)))
+                mask = socket.inet_ntoa(struct.pack("<I", int(f[7], 16)))
+                nets.append(str(ipaddress.ip_network(f"{dest}/{mask}", strict=False)))
+    except OSError:
+        pass
+    try:
+        with open(route6) as fh:
+            for line in fh:
+                f = line.split()
+                if len(f) < 10 or f[9] == "lo":
+                    continue
+                try:
+                    if int(f[4], 16):
+                        continue
+                    net = ipaddress.IPv6Network(
+                        (ipaddress.IPv6Address(int(f[0], 16)), int(f[1], 16)),
+                        strict=False,
+                    )
+                except ValueError:
+                    continue
+                if net.prefixlen and not (
+                    net.is_link_local or net.is_multicast or net.is_loopback
+                ):
+                    nets.append(str(net))
+    except OSError:
+        pass
+    return sorted(set(nets))
+
+
+def attached_gateways(
+    route4: str = "/proc/net/route", route6: str = "/proc/net/ipv6_route"
+) -> list[str]:
+    """The next-hop gateways of this container's routes (IPv4 and IPv6). The
+    docker bridge gateway lies inside the attached subnet, yet it is never a
+    proxy MailD runs: it is the source of every published-port (docker-proxy)
+    or host-originated connection, whose X-Forwarded-For is client-controlled.
+    Excluded from the default trust set (2026-10 audit H-02 follow-up)."""
+    import ipaddress
+    import socket
+    import struct
+
+    gateways: set[str] = set()
+    try:
+        with open(route4) as fh:
+            for line in fh.readlines()[1:]:
+                f = line.split()
+                if len(f) < 8 or f[0] == "lo" or not int(f[2], 16):
+                    continue
+                gateways.add(socket.inet_ntoa(struct.pack("<I", int(f[2], 16))))
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(route6) as fh:
+            for line in fh:
+                f = line.split()
+                if len(f) < 10 or f[9] == "lo":
+                    continue
+                try:
+                    hop = ipaddress.IPv6Address(int(f[4], 16))
+                except ValueError:
+                    continue
+                if not (hop.is_unspecified or hop.is_link_local or hop.is_loopback):
+                    gateways.add(str(hop))
+    except OSError:
+        pass
+    return sorted(gateways)
+
+
 # --- PostgreSQL: the PostfixAdmin catalogue + AdminNG's own database -----------
 POSTGRES_HOST = os.environ.get("POSTGRES_HOST", "db")
 POSTGRES_PORT = _int("POSTGRES_PORT", 5432)
@@ -94,6 +181,26 @@ ADMINNG_FLOW_TTL = _int("ADMINNG_FLOW_TTL", 300)        # login-step1 -> step2
 ADMINNG_ENROLL_TTL = _int("ADMINNG_ENROLL_TTL", 600)    # TOTP enrollment window
 ADMINNG_LOGIN_MAX_FAILURES = _int("ADMINNG_LOGIN_MAX_FAILURES", 5)
 ADMINNG_LOCKOUT_SECONDS = _int("ADMINNG_LOCKOUT_SECONDS", 900)
+# --- Client IP / proxy trust (2026-10 audit H-02) -------------------------------
+# CIDRs whose X-Forwarded-For is believed. The right-most hop that is not a trusted
+# proxy is the client (the same rule the MCP applies, mcp/app/asgi.py). Unset = the
+# subnets of the networks this container is attached to: the api's only legitimate
+# direct peer is the `adminng` nginx container, and in production the operator's
+# ingress sits in front of it. `none` = trust no proxy (the TCP peer is always the
+# client). Setting it explicitly is the escape hatch for unusual topologies.
+_proxies = os.environ.get("ADMINNG_TRUSTED_PROXIES", "").strip()
+ADMINNG_TRUSTED_PROXIES = (
+    []
+    if _proxies.lower() == "none"
+    else [cidr.strip() for cidr in _proxies.split(",") if cidr.strip()]
+    if _proxies
+    else attached_subnets()
+)
+# Addresses inside the trusted subnets that are still never believed: with the
+# computed default, the docker gateway(s) — a published-port or host-originated
+# request arrives from there with a client-supplied X-Forwarded-For. An explicit
+# ADMINNG_TRUSTED_PROXIES is taken verbatim (the operator owns that topology).
+ADMINNG_UNTRUSTED_HOPS = [] if _proxies else attached_gateways()
 ADMINNG_DEVICE_NAME_MAX = _int("ADMINNG_DEVICE_NAME_MAX", 120)
 # Stale PENDING device grants (a browser that asked for access but was never
 # approved) are purged after this many days (audit F-11): the client re-enrolls

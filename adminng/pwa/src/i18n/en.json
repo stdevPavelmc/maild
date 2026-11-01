@@ -149,7 +149,8 @@
     "superadmin": "Superadmin (global access)",
     "superadminShort": "Superadmin",
     "domains": "Managed domains",
-    "create": "Create administrator"
+    "create": "Create administrator",
+    "selfNoDelete": "You cannot delete your own account"
   },
   "devices": {
     "title": "Devices",

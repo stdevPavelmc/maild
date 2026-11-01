@@ -23,6 +23,7 @@ plaintext passwords, which never enter this container).
 
 import sys
 import unittest
+from unittest.mock import patch
 
 from app import catalogue
 from app.auth import Principal
@@ -133,7 +134,7 @@ class CatalogueTests(unittest.TestCase):
             cur.execute("SELECT password FROM admin WHERE username = %s", (MAILBOX,))
             stored = cur.fetchone()["password"]
         self.assertTrue(verify_password("rotated", stored))
-        self.assertEqual(catalogue.get_admin(MAILBOX)["domains"], [DOMAIN])
+        self.assertEqual(catalogue.get_admin(SUPER, MAILBOX)["domains"], [DOMAIN])
 
     def test_03_aliases_and_counters(self):
         alias = catalogue.create_alias(
@@ -343,6 +344,296 @@ class CatalogueTests(unittest.TestCase):
                     catalogue.delete_domain(SUPER, dom)
                 except ApiError:
                     pass
+
+
+ADM_DOMAIN = "admins.adminng-selftest.test"
+OTHER_DOMAIN = "other.adminng-selftest.test"
+TENANT = Principal(f"tenant@{ADM_DOMAIN}", False, [ADM_DOMAIN], DEVICE)
+PEER = f"peer@{ADM_DOMAIN}"
+BOSS = f"boss@{ADM_DOMAIN}"
+FOREIGN = f"foreign@{OTHER_DOMAIN}"
+VICTIM = f"victim@{OTHER_DOMAIN}"
+OUTSIDER = f"outsider@{OTHER_DOMAIN}"
+
+
+def _wipe_admins() -> None:
+    """Remove every trace of the admin role self-test domains (idempotent)."""
+    with connect() as conn, conn.cursor() as cur:
+        for domain in (ADM_DOMAIN, OTHER_DOMAIN):
+            cur.execute("DELETE FROM domain_admins WHERE domain = %s", (domain,))
+            cur.execute(
+                "DELETE FROM domain_admins WHERE username LIKE %s", (f"%@{domain}",)
+            )
+            cur.execute("DELETE FROM admin WHERE username LIKE %s", (f"%@{domain}",))
+            cur.execute("DELETE FROM mailbox WHERE domain = %s", (domain,))
+            cur.execute("DELETE FROM domain WHERE domain = %s", (domain,))
+        conn.commit()
+
+
+class AdminPermissionTests(unittest.TestCase):
+    """H-01 + the admin role model: a domain admin fully manages the non-super
+    administrators of its own domains only; nobody deletes themselves; at
+    least one superadmin row always survives."""
+
+    @classmethod
+    def setUpClass(cls):
+        _wipe_admins()
+        for domain in (ADM_DOMAIN, OTHER_DOMAIN):
+            catalogue.create_domain(
+                SUPER,
+                {
+                    "domain": domain,
+                    "description": "Admin role self-test",
+                    "maxquota": 0,
+                    "quota": 0,
+                    "transport": "virtual",
+                    "backupmx": False,
+                    "active": True,
+                    "default_aliases": False,
+                },
+            )
+        catalogue.create_admin(
+            SUPER,
+            {
+                "username": FOREIGN,
+                "password": "foreign-secret",
+                "superadmin": False,
+                "active": True,
+                "domains": [OTHER_DOMAIN],
+            },
+        )
+
+    @classmethod
+    def tearDownClass(cls):
+        _wipe_admins()
+
+    def test_01_tenant_creates_a_scoped_peer(self):
+        peer = catalogue.create_admin(
+            TENANT,
+            {
+                "username": PEER,
+                "password": "peer-secret",
+                "superadmin": False,
+                "active": True,
+                "domains": [ADM_DOMAIN],
+            },
+        )
+        self.assertEqual(peer["domains"], [ADM_DOMAIN])
+        self.assertFalse(peer["superadmin"])
+
+    def test_02_tenant_cannot_create_superadmins_or_leave_its_scope(self):
+        base = {"username": f"evil@{ADM_DOMAIN}", "password": "x", "active": True}
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.create_admin(
+                TENANT, {**base, "superadmin": True, "domains": [ADM_DOMAIN]}
+            )
+        self.assertEqual(ctx.exception.code, "FORBIDDEN")
+
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.create_admin(
+                TENANT, {**base, "superadmin": False, "domains": [OTHER_DOMAIN]}
+            )
+        self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.create_admin(TENANT, {**base, "superadmin": False, "domains": []})
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    def test_03_superadmins_are_invisible_to_tenants(self):
+        boss = catalogue.create_admin(
+            SUPER,
+            {
+                "username": BOSS,
+                "password": "boss-secret",
+                "superadmin": True,
+                "active": True,
+                "domains": [],
+            },
+        )
+        try:
+            with self.assertRaises(ApiError) as ctx:
+                catalogue.get_admin(TENANT, BOSS)
+            self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+
+            listed = catalogue.list_admins(TENANT, 50, None)["items"]
+            names = [admin["username"] for admin in listed]
+            self.assertIn(PEER, names)
+            self.assertNotIn(BOSS, names)
+            with connect() as conn, conn.cursor() as cur:
+                cur.execute("SELECT username FROM admin WHERE superadmin")
+                for row in cur.fetchall():
+                    self.assertNotIn(row["username"], names)
+        finally:
+            catalogue.delete_admin(SUPER, BOSS)
+
+    def test_04_tenant_updates_its_peers_but_cannot_escalate(self):
+        updated = catalogue.update_admin(TENANT, PEER, {"active": False})
+        self.assertFalse(updated["active"])
+        updated = catalogue.update_admin(
+            TENANT, PEER, {"password": "rotated", "domains": [ADM_DOMAIN]}
+        )
+        self.assertEqual(updated["domains"], [ADM_DOMAIN])
+
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.update_admin(TENANT, PEER, {"superadmin": True})
+        self.assertEqual(ctx.exception.code, "FORBIDDEN")
+
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.update_admin(TENANT, PEER, {"domains": [OTHER_DOMAIN]})
+        self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+
+        # a foreign-tenant peer is neither visible nor manageable
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.get_admin(TENANT, FOREIGN)
+        self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.update_admin(TENANT, FOREIGN, {"active": False})
+        self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+
+    def test_05_nobody_deletes_themselves_or_escalates_by_delete(self):
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.delete_admin(TENANT, TENANT.username)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.delete_admin(SUPER, SUPER.username)
+        self.assertEqual(ctx.exception.status_code, 403)
+
+        boss = catalogue.create_admin(
+            SUPER,
+            {
+                "username": BOSS,
+                "password": "boss-secret",
+                "superadmin": True,
+                "active": True,
+                "domains": [],
+            },
+        )
+        try:
+            with self.assertRaises(ApiError) as ctx:
+                catalogue.delete_admin(TENANT, BOSS)
+            self.assertEqual(ctx.exception.code, "FORBIDDEN")
+
+            with self.assertRaises(ApiError) as ctx:
+                catalogue.delete_admin(TENANT, FOREIGN)
+            self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+
+            catalogue.delete_admin(SUPER, BOSS)  # a superadmin peer is deletable
+            with self.assertRaises(ApiError) as ctx:
+                catalogue.get_admin(SUPER, BOSS)
+            self.assertEqual(ctx.exception.status_code, 404)
+        finally:
+            with connect() as conn, conn.cursor() as cur:
+                cur.execute("DELETE FROM admin WHERE username = %s", (BOSS,))
+                conn.commit()
+
+    def test_06_tenant_deletes_its_peer_and_the_last_superadmin_survives(self):
+        catalogue.delete_admin(TENANT, PEER)
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.get_admin(SUPER, PEER)
+        self.assertEqual(ctx.exception.status_code, 404)
+
+        boss = catalogue.create_admin(
+            SUPER,
+            {
+                "username": BOSS,
+                "password": "boss-secret",
+                "superadmin": True,
+                "active": True,
+                "domains": [],
+            },
+        )
+        try:
+            # Simulate "this is the last superadmin row" without touching the
+            # fixture superadmins: every guard must refuse (409).
+            with patch("app.catalogue._superadmin_rows", return_value=0):
+                for attempt in (
+                    lambda: catalogue.delete_admin(SUPER, BOSS),
+                    lambda: catalogue.update_admin(SUPER, BOSS, {"superadmin": False}),
+                    lambda: catalogue.update_admin(SUPER, BOSS, {"active": False}),
+                ):
+                    with self.assertRaises(ApiError) as ctx:
+                        attempt()
+                    self.assertEqual(ctx.exception.status_code, 409)
+        finally:
+            catalogue.delete_admin(SUPER, BOSS)
+
+    def test_07_tenant_cannot_name_an_admin_after_a_foreign_mailbox(self):
+        """Admin passwords mirror onto the same-named mailbox: a tenant naming a
+        new admin after another tenant's mailbox would take that mailbox over."""
+        catalogue.create_mailbox(
+            SUPER,
+            {
+                "username": VICTIM,
+                "password": "victim-secret",
+                "name": "Cross-tenant victim",
+                "quota_bytes": 0,
+                "active": True,
+            },
+        )
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT password FROM mailbox WHERE username = %s", (VICTIM,))
+            before = cur.fetchone()["password"]
+
+        with self.assertRaises(ApiError) as ctx:
+            catalogue.create_admin(
+                TENANT,
+                {
+                    "username": VICTIM,
+                    "password": "attacker-chosen",
+                    "superadmin": False,
+                    "active": True,
+                    "domains": [ADM_DOMAIN],
+                },
+            )
+        self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+        with connect() as conn, conn.cursor() as cur:
+            cur.execute("SELECT password FROM mailbox WHERE username = %s", (VICTIM,))
+            self.assertEqual(cur.fetchone()["password"], before)
+            cur.execute("SELECT 1 FROM admin WHERE username = %s", (VICTIM,))
+            self.assertIsNone(cur.fetchone())
+
+    def test_08_a_peer_with_a_foreign_address_stays_superadmin_only(self):
+        """A superadmin may scope an admin with a foreign address to the
+        tenant's domain; the tenant still cannot rotate (mirror), disable or
+        delete it."""
+        catalogue.create_admin(
+            SUPER,
+            {
+                "username": OUTSIDER,
+                "password": "outsider-secret",
+                "superadmin": False,
+                "active": True,
+                "domains": [ADM_DOMAIN],
+            },
+        )
+        for attempt in (
+            lambda: catalogue.update_admin(TENANT, OUTSIDER, {"password": "x"}),
+            lambda: catalogue.update_admin(TENANT, OUTSIDER, {"active": False}),
+            lambda: catalogue.delete_admin(TENANT, OUTSIDER),
+        ):
+            with self.assertRaises(ApiError) as ctx:
+                attempt()
+            self.assertEqual(ctx.exception.code, "FORBIDDEN_TENANT")
+        catalogue.delete_admin(SUPER, OUTSIDER)
+
+    def test_09_list_scope_ignores_domain_case(self):
+        shouting = Principal(TENANT.username, False, [ADM_DOMAIN.upper()], DEVICE)
+        catalogue.create_admin(
+            SUPER,
+            {
+                "username": PEER,
+                "password": "peer-secret",
+                "superadmin": False,
+                "active": True,
+                "domains": [ADM_DOMAIN],
+            },
+        )
+        try:
+            names = [a["username"] for a in catalogue.list_admins(shouting, 50, None)["items"]]
+            self.assertIn(PEER, names)
+        finally:
+            catalogue.delete_admin(SUPER, PEER)
 
 
 if __name__ == "__main__":

@@ -77,6 +77,7 @@ Every tunable defaults inside the image (`adminng/api/Dockerfile`). The operator
 - `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300`: WebAuthn challenge lifetime in seconds.
 - `ADMINNG_SEARCH_LIMIT=20`: Maximum results per category in rapid search.
 - `ADMINNG_QUOTA_CACHE_TTL=300`: Mailbox quota cache TTL in seconds.
+- `ADMINNG_TRUSTED_PROXIES`: Not baked (computed at boot). CIDRs whose `X-Forwarded-For` is believed — unset means the subnets this container is attached to (the `adminng` nginx peer), minus the docker gateway; `none` trusts no proxy (every client then shares the nginx IP — a lockout DoS). Lockout/audit IPs come from the right-most untrusted hop, never the client-supplied left-most value (2026-10 audit H-02).
 - `VMAIL_ROOT=/home/vmail`: Base path for Maildir storage.
 
 ### Optional overrides

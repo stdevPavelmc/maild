@@ -110,6 +110,7 @@ The operator file (`.env` in production, `env.dev` in development) overrides any
 - `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300`: WebAuthn challenge lifetime in seconds.
 - `ADMINNG_SEARCH_LIMIT=20`: Maximum results per category in rapid search.
 - `ADMINNG_QUOTA_CACHE_TTL=300`: Mailbox quota cache TTL in seconds.
+- `ADMINNG_TRUSTED_PROXIES`: Not baked (computed at boot). CIDRs whose `X-Forwarded-For` is believed — unset means the subnets the container is attached to (the `adminng` nginx peer), minus the docker gateway; `none` trusts no proxy (every client then shares the nginx IP — a lockout DoS). Lockouts and audit rows key on the right-most untrusted hop, never the client-supplied left-most value.
 - `PASSWORD_SCHEME=argon2id`: Password hash format (`argon2id` default, `md5crypt` legacy).
 
 ### Optional overrides

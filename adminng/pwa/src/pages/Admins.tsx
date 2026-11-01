@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { api, ApiError, type Admin, type Domain } from '../lib/api'
 import { useOnline } from '../lib/online'
 import { usePaged } from '../lib/usePaged'
+import { useAuth } from '../store/AuthContext'
 import { Empty, ErrorBanner, Field, Input, Modal, SectionHeader, Toggle } from '../components/kit'
 import {
   ActionButton,
@@ -21,6 +22,11 @@ import { ConfirmDelete } from '../components/ConfirmDelete'
 export function AdminsPage({ password }: { password: string }) {
   const { t } = useTranslation()
   const online = useOnline()
+  // Role model (technical-draft §5): a superadmin manages every administrator;
+  // a domain admin only the non-super peers inside its own domains — so the
+  // superadmin toggle is superadmin-only and nobody can delete their own row.
+  const { user } = useAuth()
+  const isSuperadmin = user?.superadmin ?? false
   const [openNew, setOpenNew] = useState(false)
   const [username, setUsername] = useState('')
   const [newPassword, setNewPassword] = useState('')
@@ -81,9 +87,13 @@ export function AdminsPage({ password }: { password: string }) {
                 />
                 <ActionButton
                   glyph="❌"
-                  label={t('common.delete')}
+                  label={
+                    admin.username === user?.username
+                      ? t('admins.selfNoDelete')
+                      : t('common.delete')
+                  }
                   tone="danger"
-                  disabled={!online}
+                  disabled={!online || admin.username === user?.username}
                   onClick={() => setDeleting(admin)}
                 />
               </ActionRow>
@@ -141,7 +151,9 @@ export function AdminsPage({ password }: { password: string }) {
             onChange={(event) => setNewPassword(event.target.value)}
           />
         </Field>
-        <Toggle checked={superadmin} label={t('admins.superadmin')} disabled={!online} onChange={setSuperadmin} />
+        {isSuperadmin && (
+          <Toggle checked={superadmin} label={t('admins.superadmin')} disabled={!online} onChange={setSuperadmin} />
+        )}
         {!superadmin && (
           <div className="space-y-1 rounded border border-slate-800 p-3">
             <p className="text-xs uppercase tracking-wide text-slate-400">{t('admins.domains')}</p>

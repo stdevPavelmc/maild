@@ -21,7 +21,7 @@ import psycopg
 from . import settings
 from .auth import Principal, ensure_domain_allowed, revoke_user_sessions
 from .db import connect
-from .errors import conflict, not_found
+from .errors import ApiError, conflict, forbidden_tenant, not_found
 from .passwords import hash_password
 from .pagination import clamp_limit, decode_cursor, page
 
@@ -620,22 +620,87 @@ def _admin_out(row: dict) -> dict:
     }
 
 
-def list_admins(limit: int, cursor: str | None) -> dict:
+def _super_only() -> ApiError:
+    return ApiError(403, "FORBIDDEN", "superadmin only")
+
+
+def _assert_not_self(principal: Principal, username: str) -> None:
+    """Nobody deletes their own administrator account: a superadmin removing
+    itself (while others remain) would orphan its sessions on the way out, and
+    a domain admin erasing itself was never a tenant capability."""
+    if principal.username == username:
+        raise ApiError(403, "FORBIDDEN", "an administrator cannot delete itself")
+
+
+def _in_scope(principal: Principal, domains: list[str]) -> bool:
+    return {domain.lower() for domain in domains} <= {
+        domain.lower() for domain in principal.domains
+    }
+
+
+def _address_in_scope(principal: Principal, username: str) -> bool:
+    """The administrator's *own address* must be in the caller's domains too: an
+    admin password is mirrored onto the same-named mailbox, so naming an admin
+    after a foreign tenant's mailbox would overwrite that mailbox's password."""
+    return _in_scope(principal, [username.rpartition("@")[2]])
+
+
+def _assert_visible(principal: Principal, target: dict) -> None:
+    """Read scope: a domain admin sees the administrators with at least one
+    managed domain inside its own scope — never a superadmin."""
+    if principal.superadmin:
+        return
+    own = {domain.lower() for domain in principal.domains}
+    if target["superadmin"] or not any(
+        domain.lower() in own for domain in target["domains"]
+    ):
+        raise forbidden_tenant()
+
+
+def _assert_manageable(principal: Principal, target: dict) -> None:
+    """Write scope: a domain admin manages only non-super administrators whose
+    *whole* domain set lies inside its own scope — a peer shared with a foreign
+    domain stays superadmin-only (no tenant can destroy another tenant's admin)
+    and a domainless admin can only be managed by a superadmin. The target's
+    own address must also be in scope (a password rotation is mirrored onto
+    the same-named mailbox)."""
+    if principal.superadmin:
+        return
+    if target["superadmin"]:
+        raise _super_only()
+    if (
+        not target["domains"]
+        or not _in_scope(principal, target["domains"])
+        or not _address_in_scope(principal, target["username"])
+    ):
+        raise forbidden_tenant()
+
+
+def list_admins(principal: Principal, limit: int, cursor: str | None) -> dict:
     limit = clamp_limit(limit)
     after = decode_cursor(cursor) if cursor else None
+    scope, scope_params = "", []
+    if not principal.superadmin:
+        scope = (
+            " AND NOT a.superadmin AND EXISTS ("
+            "SELECT 1 FROM domain_admins s WHERE s.username = a.username "
+            "AND s.active AND lower(s.domain) = ANY(%s))"
+        )
+        scope_params = [[domain.lower() for domain in principal.domains]]
     sql = (
         _ADMIN_SELECT
         + " WHERE (%s::text IS NULL OR a.username > %s::text)"
+        + scope
         + " GROUP BY a.username, a.superadmin, a.active, a.created, a.modified"
         + " ORDER BY a.username LIMIT %s"
     )
     with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
-        cur.execute(sql, (after, after, limit + 1))
+        cur.execute(sql, [after, after, *scope_params, limit + 1])
         rows = [_admin_out(row) for row in cur.fetchall()]
     return page(rows, "username", limit)
 
 
-def get_admin(username: str) -> dict:
+def _admin_row(username: str) -> dict:
     sql = (
         _ADMIN_SELECT
         + " WHERE a.username = %s"
@@ -647,6 +712,12 @@ def get_admin(username: str) -> dict:
     if row is None:
         raise not_found("admin", username)
     return _admin_out(row)
+
+
+def get_admin(principal: Principal, username: str) -> dict:
+    admin = _admin_row(username)
+    _assert_visible(principal, admin)
+    return admin
 
 
 def _check_domains_exist(cur, domains: list[str]) -> None:
@@ -679,7 +750,36 @@ def _active_superadmins(cur, excluding: str | None = None) -> int:
     )
     return cur.fetchone()["n"]
 
+def _superadmin_rows(cur, excluding: str | None = None) -> int:
+    """Row-level count (active or not): the deployment must always keep at
+    least one superadmin row, so deleting/demoting the last one is refused
+    even when it is inactive."""
+    cur.execute(
+        "SELECT count(*) AS n FROM admin WHERE superadmin "
+        "AND (%s::text IS NULL OR username <> %s::text)",
+        (excluding, excluding),
+    )
+    return cur.fetchone()["n"]
+
+
 def create_admin(principal: Principal, payload: dict) -> dict:
+    if not principal.superadmin:
+        # A domain admin provisions peers inside its own tenant only: never a
+        # superadmin, never a domainless account, never a foreign domain — and
+        # never an address outside its domains (the password is mirrored onto
+        # the same-named mailbox: a cross-tenant mailbox takeover otherwise).
+        if payload["superadmin"]:
+            raise _super_only()
+        if not payload["domains"]:
+            raise ApiError(
+                422,
+                "VALIDATION",
+                "a domain-scoped administrator needs at least one managed domain",
+            )
+        if not _in_scope(principal, payload["domains"]) or not _address_in_scope(
+            principal, payload["username"]
+        ):
+            raise forbidden_tenant()
     hashed = hash_password(payload["password"])
     with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(%s)", (_ADMIN_LOCK,))
@@ -701,11 +801,27 @@ def create_admin(principal: Principal, payload: dict) -> dict:
         )
         _mirror_mailbox_password(cur, payload["username"], hashed)
         conn.commit()
-    return get_admin(payload["username"])
+    return get_admin(principal, payload["username"])
 
 
 def update_admin(principal: Principal, username: str, payload: dict) -> dict:
-    current = get_admin(username)
+    current = _admin_row(username)
+    if not principal.superadmin:
+        _assert_manageable(principal, current)
+        # A tenant admin may rotate passwords, disable peers and re-assign
+        # domains — but only inside its own scope, and never a superadmin flag
+        # (this also blocks a domain admin promoting itself).
+        if payload.get("superadmin"):
+            raise _super_only()
+        if payload.get("domains") is not None:
+            if not payload["domains"]:
+                raise ApiError(
+                    422,
+                    "VALIDATION",
+                    "a domain-scoped administrator needs at least one managed domain",
+                )
+            if not _in_scope(principal, payload["domains"]):
+                raise forbidden_tenant()
     new_superadmin = (
         payload["superadmin"]
         if payload.get("superadmin") is not None
@@ -716,14 +832,13 @@ def update_admin(principal: Principal, username: str, payload: dict) -> dict:
     with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(%s)", (_ADMIN_LOCK,))
         # Never lock the deployment out: demoting/deactivating the last active
-        # superadmin is refused.
-        if (
-            current["superadmin"]
-            and current["active"]
-            and (not new_superadmin or not new_active)
-            and _active_superadmins(cur, excluding=username) == 0
-        ):
-            raise conflict("cannot demote or disable the last active superadmin")
+        # superadmin is refused, and the last superadmin *row* (even inactive)
+        # can never be demoted away — at least one must always exist.
+        if current["superadmin"] and (not new_superadmin or not new_active):
+            if _superadmin_rows(cur, excluding=username) == 0:
+                raise conflict("cannot demote or disable the last superadmin")
+            if current["active"] and _active_superadmins(cur, excluding=username) == 0:
+                raise conflict("cannot demote or disable the last active superadmin")
 
         fields = {}
         if payload.get("superadmin") is not None:
@@ -751,19 +866,26 @@ def update_admin(principal: Principal, username: str, payload: dict) -> dict:
 
     if new_active is False:
         revoke_user_sessions(username)
-    return get_admin(username)
+    return get_admin(principal, username)
 
 
 def delete_admin(principal: Principal, username: str) -> None:
-    current = get_admin(username)
+    # H-01: the caller's role is enforced here (the single choke point every
+    # mutation goes through), not only at the router — a re-auth token proves
+    # the *caller's* password, never the right to remove somebody else.
+    _assert_not_self(principal, username)
+    current = _admin_row(username)
+    _assert_manageable(principal, current)
     with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:
         cur.execute("SELECT pg_advisory_xact_lock(%s)", (_ADMIN_LOCK,))
-        if (
-            current["superadmin"]
-            and current["active"]
-            and _active_superadmins(cur, excluding=username) == 0
-        ):
-            raise conflict("cannot delete the last active superadmin")
+        # At least one superadmin row must survive: the old guard only covered
+        # the last *active* one, so an inactive last superadmin was deletable;
+        # and deleting the last active one must not lock the deployment out.
+        if current["superadmin"]:
+            if _superadmin_rows(cur, excluding=username) == 0:
+                raise conflict("cannot delete the last superadmin")
+            if current["active"] and _active_superadmins(cur, excluding=username) == 0:
+                raise conflict("cannot delete the last active superadmin")
         cur.execute("DELETE FROM domain_admins WHERE username = %s", (username,))
         cur.execute("DELETE FROM admin WHERE username = %s", (username,))
         conn.commit()

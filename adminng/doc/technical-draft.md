@@ -132,6 +132,7 @@ baked (the operator sets them).
 | `ADMINNG_TOTP_REQUIRED` | `superadmin` | `all` \| `superadmin` \| `none` — who must enroll TOTP |
 | `ADMINNG_SEARCH_LIMIT` | `20` | rapid-search result cap per entity type |
 | `ADMINNG_QUOTA_CACHE_TTL` | `300` | quota-usage cache lifetime, seconds (§7) |
+| `ADMINNG_TRUSTED_PROXIES` | *computed* | CIDRs whose `X-Forwarded-For` is believed. Unset = the subnets the container is attached to (the `adminng` nginx peer) minus the docker gateway, read at boot; `none` = trust no proxy. Never a range clients can reach (2026-10 audit H-02) |
 
 Operator-file mandatory: `POSTGRES_PASSWORD` (compose `${POSTGRES_PASSWORD:?}`
 guard). Operator-file optional: every knob above, documented as commented lines
@@ -425,7 +426,11 @@ confirm button (§6.3) so no destructive click can be a reflex.
 ### 4.6 Rate limiting & lockout
 
 - Per `username` + `ip`: 5 failed `login-step1`/`step2` attempts ⇒ 15-minute
-  lockout (`LOGIN_LOCKOUT` audit event; the login screen says so).
+  lockout (`LOGIN_LOCKOUT` audit event; the login screen says so). The `ip` half
+  of the key comes from `app.audit.client_ip`: the right-most `X-Forwarded-For`
+  hop that is not a trusted proxy (`ADMINNG_TRUSTED_PROXIES`), never the
+  client-supplied left-most value, so the key cannot be rotated per request
+  (2026-10 audit H-02).
 - Per `ip`: global device-registration/login-spam cap; `reauth-confirm`
   rate-limited per access token. (Anonymous handshake spam is gone: a device
   row is only created by a verified login.)
@@ -450,8 +455,10 @@ confirm button (§6.3) so no destructive click can be a reflex.
   `{"items": [...], "next_cursor": "..." | null}` — one page feeds the
   virtualized lists (§6.6); no unbounded arrays.
 - Multi-tenant scoping: a domain admin sees/edits only rows whose `domain` ∈
-  its `domain_admins` set; the devices panel and the admins CRUD are
-  superadmin-only.
+  its `domain_admins` set; the devices panel is superadmin-only, while the
+  admins CRUD follows the role model of the route table below (a domain admin
+  manages only the non-super administrators fully inside its own domains, whose own
+  address is also in one of them — the admin password mirrors onto that mailbox).
 - Full request/response schemas are generated from the Pydantic models at
   FastAPI's built-in `/docs` once Phase 1 lands; the JSON examples in the
   original Spanish drafts remain the contract of record where they still apply
@@ -486,8 +493,8 @@ confirm button (§6.3) so no destructive click can be a reflex.
 | `GET /mailboxes/{u}/quota` | access | `{quota_bytes, used_bytes, percentage}` from `.maildirsize` (§7) |
 | `GET /aliases?domain=&goto=&q=` · `POST /aliases` | access | `?goto=<mailbox>` backs the user editor's alias tags |
 | `PUT /aliases/{id}` · `DELETE /aliases/{id}` | access (+ reauth on DELETE) | alias CRUD |
-| `GET /admins` · `POST /admins` | superadmin | create = `admin` + `domain_admins` rows |
-| `PUT /admins/{u}` · `DELETE /admins/{u}` | superadmin (+ reauth on DELETE) | superadmin flag / domain assignments |
+| `GET /admins` · `POST /admins` | access | tenant-scoped for domain admins: they see only the non-super administrators with a domain in their scope; create = `admin` + `domain_admins` rows (from a domain admin: `superadmin=true` → 403, a foreign domain or a foreign *address* → 403 `FORBIDDEN_TENANT`, no domains → 422) |
+| `PUT /admins/{u}` · `DELETE /admins/{u}` | access (+ reauth on DELETE) | same role model: a domain admin may update (active/password/domains within its own scope) and delete only fully-scoped non-super peers — never a superadmin, never itself (403 `FORBIDDEN`); no administrator may delete their own account; the last superadmin row cannot be deleted or demoted (409, even while inactive), and the last *active* one cannot be disabled |
 | `GET /logs?actor=&domain=&action=&entity=&cursor=` | access | audit events; for domain admins the domain filter is **forced on** (their own domains only); `actor=__none__` selects rows whose actor is not an existing admin (Nobody) |
 | `GET /logs/facets?domain=&actor=` | access | `{actors, actions}` distinct dropdown options, tenant-scoped like `/logs` |
 

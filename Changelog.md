@@ -19,6 +19,36 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
 ## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+- Security (audit H-02): the AdminNG login lockout was defeatable by rotating the
+  `X-Forwarded-For` header — `client_ip()` trusted its left-most (client-controlled)
+  value. It now returns the right-most hop that is not a trusted proxy (the MCP rule,
+  `mcp/app/asgi.py`), with the socket peer appended and every hop validated: an
+  unparseable hop fails closed to the peer. New `ADMINNG_TRUSTED_PROXIES` (not baked —
+  unset = the subnets this container is attached to, `none` = trust nobody, or an
+  explicit CIDR list), logged at boot. The lockout key, the TOTP-step lockout and the
+  stored `audit_event.ip`/`device.last_ip` can no longer be forged; rotating the header
+  keeps every attempt on the same key. The computed default never believes the docker
+  gateway (published-port / host traffic arrives from it with a client-supplied header),
+  so `env.dev` no longer needs a `none` deviation and the dev stack runs the production
+  rule. Covered by `test.sh` I16b/I16c and `adminng/api/tests/test_client_ip.py`.
+- Security (audit H-01): `DELETE /api/v1/admins/{u}` trusted the re-auth token alone, so
+  any domain admin could delete any administrator — superadmins included. The `/admins`
+  router is now role-scoped end to end, with all checks in the catalogue layer (single
+  choke point behind the admin advisory lock): a domain admin is the full manager of its
+  tenant's administrators — it lists, creates, disables (and rotates passwords / re-assigns
+  domains within its scope) and deletes the non-super administrators whose whole domain set
+  lies inside its own domains *and whose own address is in one of them* — but can never
+  see, create, modify or delete a superadmin, never act outside its domains, and never
+  delete itself. The address rule closes a cross-tenant mailbox takeover the scoped CRUD
+  would otherwise open: an admin password is mirrored onto the same-named mailbox, so
+  naming a new admin after another tenant's mailbox reset that mailbox's password. The
+  tenant-scoped list now also matches domains case-insensitively. Additionally: no administrator
+  (superadmin included) may delete their own account, and the last-superadmin guard is now
+  row-level — the last `superadmin` row can no longer be deleted or demoted even while
+  inactive (the old guard only protected the last *active* one). The PWA Admins page hides
+  the superadmin toggle from tenant admins and disables the self-delete. Covered by
+  `test.sh` I11b/I11c and `adminng/api/tests/test_catalogue.py` `AdminPermissionTests`
+  (test_07–09 pin the address rule and the case-insensitive scope).
 - Security (final review): the MCP now believes `X-Forwarded-For` from the networks its
   container is attached to when `MCP_TRUSTED_PROXIES` is unset (it used to trust nobody, so
   behind the ingress every client looked like the proxy: login lockouts, the client registration

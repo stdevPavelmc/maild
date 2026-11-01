@@ -288,6 +288,11 @@ bind_prep() { # <image> <host dir> <sh snippet run inside /target>
 		-c "$3" >/dev/null ||
 		warn "could not prepare $2 with $1: $3"
 }
+# A plain `compose up` before the first bootstrap already let docker create ldata/ as root:
+# hand the top-level dir (not its service-owned children) back to the invoking user.
+if [ ! -w "${SCRIPT_DIR}/ldata" ]; then
+	bind_prep "pavelmc/maild-amavis:develop" "ldata" "chown $(id -u):$(id -g) /target"
+fi
 # image names match docker-compose-dev.yml (this script is hard-wired to the dev stack);
 # amavis is uid 994 (amavis — what resolute allocates), clamav is uid 100 / gid 101.
 # amavis: the whole image content matters — beside tmp/ it needs $db_home (amavisd dies

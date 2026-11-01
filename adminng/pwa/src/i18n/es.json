@@ -149,7 +149,8 @@
     "superadmin": "Superadministrador (acceso global)",
     "superadminShort": "Superadministrador",
     "domains": "Dominios gestionados",
-    "create": "Crear administrador"
+    "create": "Crear administrador",
+    "selfNoDelete": "No puedes eliminar tu propia cuenta"
   },
   "devices": {
     "title": "Dispositivos",

@@ -2115,6 +2115,56 @@ else
         else
             t_fail "I11 tenant isolation (get=$I11_A post=$ADMINNG_CODE)"
         fi
+
+        # I11b — a domain admin is the full manager of its tenant's admins:
+        #       the list is scoped (no superadmins, itself visible), and a
+        #       peer can be created, disabled and deleted with re-auth
+        adminng_call GET /admins "$ADMINNG_DEVICE_2" "$A_TOKEN"
+        I11B_LIST="$ADMINNG_CODE" ; I11B_BODY="$ADMINNG_BODY"
+        adminng_call POST /admins "$ADMINNG_DEVICE_2" "$A_TOKEN" \
+            "{\"username\":\"deputy@$DOMAIN\",\"password\":\"deputy-pass-1\",\"superadmin\":false,\"domains\":[\"$DOMAIN\"]}"
+        I11B_CREATE="$ADMINNG_CODE"
+        adminng_call PUT "/admins/deputy@$DOMAIN" "$ADMINNG_DEVICE_2" "$A_TOKEN" \
+            '{"active":false}'
+        I11B_DISABLE="$ADMINNG_CODE"
+        adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE_2" "$A_TOKEN" \
+            "{\"password\":\"$PASS\"}"
+        A_SV="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
+        adminng_call DELETE "/admins/deputy@$DOMAIN" "$ADMINNG_DEVICE_2" "$A_TOKEN" "" "$A_SV"
+        I11B_DELETE="$ADMINNG_CODE"
+        if [ "$I11B_LIST" = 200 ] &&
+           ! printf '%s' "$I11B_BODY" | grep -q '"superadmin":true' &&
+           printf '%s' "$I11B_BODY" | grep -q "\"username\":\"$ADMINMAIL\"" &&
+           [ "$I11B_CREATE" = 201 ] && [ "$I11B_DISABLE" = 200 ] &&
+           [ "$I11B_DELETE" = 204 ] ; then
+            t_ok "I11b a domain admin lists its tenant's admins only, then creates, disables and deletes a peer (re-auth)"
+        else
+            t_fail "I11b tenant admin lifecycle (list=$I11B_LIST create=$I11B_CREATE disable=$I11B_DISABLE delete=$I11B_DELETE)"
+        fi
+
+        # I11c — the H-01 regression: a valid re-auth token must NOT let a
+        #        domain admin delete a superadmin or itself, nor create one
+        adminng_call POST /auth/reauth-confirm "$ADMINNG_DEVICE_2" "$A_TOKEN" \
+            "{\"password\":\"$PASS\"}"
+        A_SV="$(printf '%s' "$ADMINNG_BODY" | adminng_jqf security_validation_token)"
+        adminng_call DELETE "/admins/$DEPLOY_ADMIN" "$ADMINNG_DEVICE_2" "$A_TOKEN" "" "$A_SV"
+        I11C_SUPER="$ADMINNG_CODE"
+        adminng_call DELETE "/admins/$ADMINMAIL" "$ADMINNG_DEVICE_2" "$A_TOKEN" "" "$A_SV"
+        I11C_SELF="$ADMINNG_CODE"
+        adminng_call POST /admins "$ADMINNG_DEVICE_2" "$A_TOKEN" \
+            "{\"username\":\"evil@$DOMAIN\",\"password\":\"evil-pass-1\",\"superadmin\":true,\"domains\":[]}"
+        I11C_ESC="$ADMINNG_CODE"
+        # an admin named after a foreign-tenant address (its password would be
+        # mirrored onto that mailbox) is refused even when scoped to $DOMAIN
+        adminng_call POST /admins "$ADMINNG_DEVICE_2" "$A_TOKEN" \
+            "{\"username\":\"$DEPLOY_ADMIN\",\"password\":\"evil-pass-1\",\"superadmin\":false,\"domains\":[\"$DOMAIN\"]}"
+        I11C_FOREIGN="$ADMINNG_CODE"
+        if [ "$I11C_SUPER" = 403 ] && [ "$I11C_SELF" = 403 ] && [ "$I11C_ESC" = 403 ] &&
+           [ "$I11C_FOREIGN" = 403 ] ; then
+            t_ok "I11c a domain admin cannot delete a superadmin or itself, nor create a superadmin or a foreign-address admin (403)"
+        else
+            t_fail "I11c tenant admin negatives (super=$I11C_SUPER self=$I11C_SELF escalate=$I11C_ESC foreign=$I11C_FOREIGN)"
+        fi
     fi
 
     # I12 — re-auth DELETE cascade (fresh 30 s token)
@@ -2228,6 +2278,38 @@ else
     else
         t_fail "I16 lockout (got $ADMINNG_CODE: $(printf '%s' "$ADMINNG_BODY" | head -c 120))"
     fi
+
+    # I16b — H-02 regression: rotating X-Forwarded-For must NOT dodge the lockout.
+    # The api believes XFF only from trusted proxies (the attached subnet minus the
+    # docker gateway the test host comes through), so every attempt keys on the
+    # gateway even with a distinct forged IP each time.
+    LOCK_USER2="nobody2@adminng-lockout.test"
+    for I16B_N in 1 2 3 4 5 6 ; do
+        I16B_CODE="$(curl -s -o "$TMPRUN/xff.json" -w '%{http_code}' \
+            -X POST "$API_BASE/auth/login-step1" \
+            -H "X-Device-ID: $ADMINNG_DEVICE_2" \
+            -H "X-Device-Secret: $ADMINNG_DEVICE_SECRET_2" \
+            -H 'Content-Type: application/json' \
+            -H "X-Forwarded-For: 198.51.100.$I16B_N" \
+            --data "{\"username\":\"$LOCK_USER2\",\"password\":\"wrong\"}")"
+    done
+    I16B_BODY="$(cat "$TMPRUN/xff.json" 2>/dev/null)"
+    if [ "$I16B_CODE" = 429 ] && printf '%s' "$I16B_BODY" | grep -q RATE_LIMITED ; then
+        t_ok "I16b rotating X-Forwarded-For cannot bypass the lockout (429 despite a new forged IP per attempt)"
+    else
+        t_fail "I16b XFF lockout bypass (got $I16B_CODE: $(printf '%s' "$I16B_BODY" | head -c 120))"
+    fi
+
+    # I16c — the stored key is the real peer, not the forged header (audit integrity)
+    I16C_IP="$(dcx db psql -U maild -d adminng -tAq -c \
+        "SELECT ip FROM rate_limit WHERE username='$LOCK_USER2' ORDER BY updated_at DESC LIMIT 1;" \
+        2>/dev/null | tr -d ' \r\n')"
+    if [ -n "$I16C_IP" ] && ! printf '%s' "$I16C_IP" | grep -q '^198\.51\.100\.' ; then
+        t_ok "I16c the lockout/audit IP is the real peer ($I16C_IP), not the forged X-Forwarded-For"
+    else
+        t_fail "I16c forged client IP stored (got '$I16C_IP')"
+    fi
+    dcx api adminng.py --reset-ratelimit "$LOCK_USER2" > /dev/null 2>&1 || true
 
     # I17 — adminng.py --reset-ratelimit lifts the lockout (testing/ops aid)
     if dcx api adminng.py --reset-ratelimit "$LOCK_USER" > /dev/null 2>&1 ; then

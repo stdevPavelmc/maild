@@ -58,6 +58,16 @@ def main() -> int:
         )
         return 2
     warn_placeholder_secret(settings.ADMINNG_SECRET_KEY)
+    proxies = settings.ADMINNG_TRUSTED_PROXIES
+    log.info(
+        "X-Forwarded-For trusted from: %s",
+        ", ".join(proxies) if proxies else "nobody (the TCP peer is the client)",
+    )
+    if settings.ADMINNG_UNTRUSTED_HOPS:
+        log.info(
+            "X-Forwarded-For never trusted from the docker gateway: %s",
+            ", ".join(settings.ADMINNG_UNTRUSTED_HOPS),
+        )
     log.info(
         "waiting for PostgreSQL (catalogue=%s, adminng=%s)",
         settings.POSTGRES_DB,
