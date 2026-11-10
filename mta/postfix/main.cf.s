@@ -195,7 +195,11 @@ smtpd_recipient_restrictions =
     # it. SMTP_TARPIT_DELAY=0 strips this line (entrypoint). Submission/smtps and the
     # amavis reinjection override smtpd_recipient_restrictions in master.cf, so only
     # the public MX port pays the delay.
-    sleep _SMTP_TARPIT_DELAY_
+    # The sleep blocks an smtpd process, so it is stress-aware (2026-10 audit L-04): once
+    # :25 hits its process limit the master starts new smtpd processes with stress=yes and
+    # those sleep 0 — a flood of slow RCPTs can no longer starve inbound mail; the tarpit
+    # comes back by itself when the load drops.
+    sleep ${stress?{0}:{_SMTP_TARPIT_DELAY_}}
 
     # reject if not a valid user
     reject_unlisted_recipient

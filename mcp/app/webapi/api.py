@@ -55,6 +55,11 @@ user_auth = UserAuth()
 # ------------------------------------------------------------------ altcha ---
 @api.get("/altcha/challenge")
 def altcha_challenge(request):
+    if not webauth.challenge_allowed(_ip(request)):
+        resp = JsonResponse({"error": "rate_limited", "message": "Too many requests, try again in a minute."},
+                            status=429)
+        resp["Retry-After"] = str(webauth.CHALLENGE_WINDOW)
+        return resp
     resp = JsonResponse(webauth.altcha_challenge())
     resp["Cache-Control"] = "no-store"
     return resp

@@ -9,6 +9,7 @@ Generated passwords are printed once, OTP-style, with the same banner as the api
 """
 
 import logging
+import os
 import time
 
 from django.conf import settings
@@ -25,6 +26,30 @@ log = logging.getLogger("mcp.boot")
 # arbitrary, constant: serialises migrate across containers/replicas booting together
 MIGRATE_LOCK_ID = 0x6D63705F6D6967  # "mcp_mig"
 
+# env.sample ships `change-me-openssl-rand-hex-NN` placeholders (2026-10 audit L-07).
+PLACEHOLDER_PREFIX = "change-me"
+# A known value of these is a full compromise, so the MCP refuses to start with one:
+# MCP_SECRET_KEY derives the web-session JWT key, the token-hash HMAC, the handle and ALTCHA
+# keys and the Fernet key of stored SMTP passwords; the master password opens every mailbox.
+FATAL_PLACEHOLDERS = ("MCP_SECRET_KEY", "MCP_DOVECOT_MASTER_PASSWORD")
+# The db role is internal-only: warned, not fatal.
+WARN_PLACEHOLDERS = ("MCP_DB_PASSWORD",)
+MIN_SECRET_KEY_LEN = 32
+
+
+def check_secrets(env: dict) -> list[str]:
+    """→ the fatal problems (empty = boot). Warnings are logged here."""
+    fatal = [name for name in FATAL_PLACEHOLDERS
+             if (env.get(name) or "").startswith(PLACEHOLDER_PREFIX)]
+    for name in WARN_PLACEHOLDERS:
+        if (env.get(name) or "").startswith(PLACEHOLDER_PREFIX):
+            log.warning("%s still holds the env.sample placeholder: generate one with "
+                        "`openssl rand -hex 18` (db role and the operator file together)", name)
+    key = env.get("MCP_SECRET_KEY") or ""
+    if key and not key.startswith(PLACEHOLDER_PREFIX) and len(key) < MIN_SECRET_KEY_LEN:
+        log.warning("MCP_SECRET_KEY is only %d characters: use `openssl rand -hex 32`", len(key))
+    return fatal
+
 
 def _banner(label: str, who: str, password: str) -> None:
     log.warning("#################### !!! #############################")
@@ -36,6 +61,12 @@ class Command(BaseCommand):
     help = "MailD MCP boot: wait for the catalogue, migrate, seed the admin, ensure the service mailbox."
 
     def handle(self, *args, **options):
+        fatal = check_secrets(dict(os.environ))
+        if fatal:
+            raise CommandError(
+                f"{', '.join(fatal)} still hold(s) the env.sample placeholder, a publicly known "
+                "value: generate real ones (`openssl rand -hex 32` / `-hex 18`), set them in the "
+                "operator env file and recreate the stack (the master password is shared with mda)")
         self.wait_for_catalogue()
         self.migrate()
         self.seed_admin()

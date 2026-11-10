@@ -35,5 +35,7 @@ if [ ! -f /certs/mail.crt -a ! -f /certs/mail.key ] ; then
         -config /etc/dovecot/dovecot-openssl.cnf \
         -out /certs/mail.crt \
         -keyout /certs/mail.key
-    chmod +r /certs/mail.key
 fi
+# The private key is root-only (2026-10 audit L-05): Dovecot reads it as root, the
+# vmail/dovecot workers never need it. Also tightens a key an older image generated 644.
+[ -f /certs/mail.key ] && chmod go-rwx /certs/mail.key

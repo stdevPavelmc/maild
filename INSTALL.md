@@ -223,17 +223,35 @@ You get a block like:
 
 ```
 =|| DKIM / DNS config for maild.cu ||=
-; key#1 1024 bits, s=2ck9waejsv2blkpbhffm, d=maild.cu, /var/lib/amavis/dkim/maild.cu.pem
+; key#1 2048 bits, s=2ck9waejsv2blkpbhffm, d=maild.cu, /var/lib/amavis/dkim/maild.cu.pem
 2ck9waejsv2blkpbhffm._domainkey.maild.cu.       3600 TXT (
   "v=DKIM1; p="
-  "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDCghuUcneR3QE4l6sPEHSzGQTv"
+  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAiL8jVrbgJ5wUcIA3voB/"
   ...)
 ```
 
 Publish the name `<selector>._domainkey.<domain>` as a `TXT` record whose contents is all the
-quoted lines joined into one line. The key is stored in the amavis volume and survives
-reboots. If you add a **new** domain later through the UI, `docker compose restart amavis`
-so it generates that domain's key, then read it from the logs again.
+quoted lines joined into one line. A 2048-bit key is longer than the 255 characters a single
+TXT string holds: most DNS panels split it for you; in a zone file, keep it as several quoted
+strings inside one record (verifiers concatenate them). The key is stored in the amavis volume
+and survives reboots. If you add a **new** domain later through the UI,
+`docker compose restart amavis` so it generates that domain's key, then read it from the logs
+again.
+
+New keys are `DKIM_KEY_BITS` bits (image default **2048**; `3072`/`4096` are accepted).
+**Keys generated before the 2026-10 audit fix are 1024 bits** (RFC 8301 deprecates them; the
+daily DNS check reports it as E7) and are never rotated automatically. To rotate a domain:
+
+```sh
+docker compose -f docker-compose.yml exec amavis sh -c \
+  'rm /var/lib/amavis/dkim/<domain>.pem && sed -i "/^<domain> /d" /var/lib/amavis/dkim/db.txt'
+docker compose -f docker-compose.yml restart amavis
+docker compose -f docker-compose.yml logs amavis | grep -A12 'DKIM / DNS config for <domain>'
+```
+
+The restart creates a new key under a **new selector**: publish that record right away (mail
+signed in between fails DKIM until it propagates, so do it at a quiet hour) and keep the old
+selector's record for a few days for mail still in transit.
 
 ## DNS health check
 

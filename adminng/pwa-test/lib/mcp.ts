@@ -45,7 +45,7 @@ export function dropAccounts(domain: string): void {
       `DELETE FROM token WHERE account_id IN ${ids}; ` +
       `DELETE FROM account_address WHERE account_id IN ${ids}; ` +
       `DELETE FROM account WHERE main_email LIKE '%@${domain}'; ` +
-      `DELETE FROM login_failure WHERE key LIKE '%@${domain}';`,
+      `DELETE FROM login_failure WHERE key LIKE '%@${domain}' OR key = '*';`,
   )
 }
 

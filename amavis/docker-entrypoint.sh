@@ -249,6 +249,16 @@ mkdir -p /var/lib/amavis/dkim
 DKIM_LIST=/var/lib/amavis/dkim/db.txt
 touch $DKIM_LIST
 
+# RSA size of NEW DKIM keys (image default 2048; 2026-10 audit L-06). Anything but a
+# supported size falls back to 2048 — never below it.
+case "${DKIM_KEY_BITS}" in
+    2048|3072|4096) ;;
+    *)
+        [ -n "${DKIM_KEY_BITS}" ] && echo "WARNING: amavis: DKIM_KEY_BITS='${DKIM_KEY_BITS}' is not 2048/3072/4096, using 2048" 1>&2
+        DKIM_KEY_BITS=2048
+        ;;
+esac
+
 # if dkim signing enabled
 if [ "${DKIM_SIGNING}" ] ; then
     # get the list of domains
@@ -279,7 +289,9 @@ if [ "${DKIM_SIGNING}" ] ; then
                     echo "DKIM key not present for domain ${DOMAIN} ...generating!!!"
 
                     # generate the key and the selector and set correct perms
-                    /usr/sbin/amavisd genrsa ${KEY} 1024
+                    # RFC 8301: 1024-bit keys are deprecated (2026-10 audit L-06). Only NEW keys use
+                    # DKIM_KEY_BITS: an existing key is never rotated (see INSTALL.md, DKIM).
+                    /usr/sbin/amavisd genrsa ${KEY} ${DKIM_KEY_BITS}
                     chmod 640 ${KEY}
                     chown root:amavis ${KEY}
                 fi

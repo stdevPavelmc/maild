@@ -40,29 +40,33 @@ Methodology: static review of every service's config, entrypoints and applicatio
 
 The stack is, overall, **well engineered for security**: the open-relay posture is correct, Dovecot SQL injection is blocked at the username-charset layer, the MCP OAuth 2.1 server is a textbook implementation (S256 PKCE enforced, single-use codes, refresh-reuse detection, SSRF-hardened CIMD fetch), the MCP's `X-Forwarded-For` handling is done the *right* way, and the webmail change-password driver is parameterized and self-scoped. Most of what follows is hardening; two issues are genuinely serious.
 
-| # | Severity | Finding | Service |
-|---|----------|---------|---------|
-| H-01 | **HIGH** | Domain admin can delete any administrator (missing superadmin check) | adminng api |
-| H-02 | **HIGH** | Login lockout bypass via spoofable `X-Forwarded-For` (verified live) | adminng api |
-| M-01 | MEDIUM | No SMTP SASL brute-force limiting; AUTH on :25 behind an ineffective filter | mta |
-| M-02 | MEDIUM | Unauthenticated CIMD fetch → thread-exhaustion DoS + SSRF/status oracle | mcp |
-| M-03 | MEDIUM | SnappyMail admin panel internet-exposed (verified live) | mua |
-| M-04 | MEDIUM | `.env-prod` not covered by `.gitignore` (latent public-repo secret leak) | repo |
-| M-05 | MEDIUM | Internal `api` auto-exposed by default Traefik (`traefik.enable=false` missing) | compose |
-| M-06 | MEDIUM | `cron` loads the whole secret file and dumps it to world-readable `/etc/environment` | compose/cron |
-| L-01 | LOW | Domain admin can set superadmin-reserved domain fields (transport/quota) | adminng api |
-| L-02 | LOW | `reauth-confirm` password check has no rate limiting | adminng api |
-| L-03 | LOW | MCP login has no per-IP throttle; ALTCHA PoW is trivial | mcp |
-| L-04 | LOW | SMTP recipient-restriction tarpit `sleep` enables smtpd process exhaustion | mta |
-| L-05 | LOW | Self-signed TLS private key created world-readable (mode 644) | mta/mda |
-| L-06 | LOW | DKIM keys generated at 1024-bit RSA | amavis |
-| L-07 | LOW | `MCP_SECRET_KEY` has no placeholder/weak-value guard | mcp |
-| L-08 | LOW | Internet-facing services lack `no-new-privileges`/`cap_drop` | compose |
-| L-09 | LOW | `cron` bind-mounts host `/var/log` read-write as root | compose |
-| L-10 | LOW | DB backups written unencrypted + world-readable | cron |
-| I-01 | INFO | `/healthz` reachable through the ingress leaks subsystem status | mcp |
+| # | Severity | Finding | Service | Status |
+|---|----------|---------|---------|--------|
+| H-01 | **HIGH** | Domain admin can delete any administrator (missing superadmin check) | adminng api | Fixed 2026-10-31 (+11-01 follow-up) |
+| H-02 | **HIGH** | Login lockout bypass via spoofable `X-Forwarded-For` (verified live) | adminng api | Fixed 2026-10-31 (+11-01 follow-up) |
+| M-01 | MEDIUM | No SMTP SASL brute-force limiting; AUTH on :25 behind an ineffective filter | mta | Fixed 2026-11-01 |
+| M-02 | MEDIUM | Unauthenticated CIMD fetch → thread-exhaustion DoS + SSRF/status oracle | mcp | Fixed 2026-11-01 |
+| M-03 | MEDIUM | SnappyMail admin panel internet-exposed (verified live) | mua | Fixed 2026-11-01 |
+| M-04 | MEDIUM | `.env-prod` not covered by `.gitignore` (latent public-repo secret leak) | repo | Fixed 2026-11-01 |
+| M-05 | MEDIUM | Internal `api` auto-exposed by default Traefik (`traefik.enable=false` missing) | compose | Fixed 2026-11-01 |
+| M-06 | MEDIUM | `cron` loads the whole secret file and dumps it to world-readable `/etc/environment` | compose/cron | Fixed 2026-11-01 |
+| L-01 | LOW | Domain admin can set superadmin-reserved domain fields (transport/quota) | adminng api | Fixed 2026-11-10 |
+| L-02 | LOW | `reauth-confirm` password check has no rate limiting | adminng api | Fixed 2026-11-10 |
+| L-03 | LOW | MCP login has no per-IP throttle; ALTCHA PoW is trivial | mcp | Fixed 2026-11-10 |
+| L-04 | LOW | SMTP recipient-restriction tarpit `sleep` enables smtpd process exhaustion | mta | Fixed 2026-11-10 |
+| L-05 | LOW | Self-signed TLS private key created world-readable (mode 644) | mta/mda | Fixed 2026-11-10 |
+| L-06 | LOW | DKIM keys generated at 1024-bit RSA | amavis | Fixed 2026-11-10 (new keys) |
+| L-07 | LOW | `MCP_SECRET_KEY` has no placeholder/weak-value guard | mcp | Fixed 2026-11-10 |
+| L-08 | LOW | Internet-facing services lack `no-new-privileges`/`cap_drop` | compose | Partial 2026-11-10, remainder accepted risk |
+| L-09 | LOW | `cron` bind-mounts host `/var/log` read-write as root | compose | Fixed 2026-11-10 |
+| L-10 | LOW | DB backups written unencrypted + world-readable | cron | Fixed 2026-11-10 (encryption opt-in) |
+| I-01 | INFO | `/healthz` reachable through the ingress leaks subsystem status | mcp | Fixed 2026-11-10 |
+| N-01 | MEDIUM | Dovecot MCP master user usable from any network (public 993) — found during remediation | mda | Fixed 2026-11-10 |
+| N-02 | INFO | `mcp` allow-list drops image ENV defaults — found during remediation | compose | Open |
 
-**2 HIGH · 6 MEDIUM · 10 LOW · 1 INFO.**
+**2 HIGH · 6 MEDIUM · 10 LOW · 1 INFO.** All HIGH and MEDIUM are fixed; every LOW/INFO is fixed
+except the rest of L-08, which is an accepted risk. Remediation pass 2026-11-10 also found
+and fixed **N-01** (§6b) and a broken DKIM comparison in `check_dns.sh` (L-06 note).
 
 ---
 
@@ -108,7 +112,9 @@ def delete_admin(username, request, principal: Principal = Depends(require_reaut
 
 **Impact.** A low-privilege tenant admin can delete **other administrators**: every superadmin except the last active one (the last-superadmin guard still holds), plus every peer/other-tenant domain admin. Cross-privilege, cross-tenant destruction of the administrator set — removal of rival/oversight admins and denial of administrative access. Target usernames (e.g. the provisioned `sysadmin@DEFAULT_DOMAIN`) are public/guessable.
 
-**Fix.** Require superadmin **and** re-auth. Minimal, mirroring `routers/devices.py:83`:
+**Fix.** *(Superseded by the remediation above: rather than superadmin-only, the `/admins`
+routes were opened to domain admins with row-level scoping in `catalogue`. The original
+recommendation is kept for the record.)* Require superadmin **and** re-auth. Minimal, mirroring `routers/devices.py:83`:
 
 ```python
 # in delete_admin, before catalogue.delete_admin(...)
@@ -183,7 +189,9 @@ BYPASS (rotating XFF):   12 attempts → all HTTP 401, never 429
 **Fix.**
 - Add an `ADMINNG_TRUSTED_PROXIES` setting (CIDR list; default the docker network / empty).
 - Rewrite `client_ip()` to return the right-most XFF hop that is not a trusted proxy, falling back to `request.client.host`; **validate** the result with `ipaddress.ip_address()` before using/storing it (drop to the socket peer on failure).
-- Belt-and-braces: strip inbound `X-Forwarded-For`/`X-Real-IP` from untrusted clients at nginx (`proxy_set_header X-Forwarded-For $remote_addr;` instead of `$proxy_add_x_forwarded_for`, since there is exactly one proxy hop below Traefik), or have Traefik set a single trusted header.
+- *(Not applied, on purpose:* with the right-to-left parser in place nginx must keep
+  `$proxy_add_x_forwarded_for` — `$remote_addr` would be Traefik's IP and every client would
+  share one lockout key.*)* Belt-and-braces: strip inbound `X-Forwarded-For`/`X-Real-IP` from untrusted clients at nginx (`proxy_set_header X-Forwarded-For $remote_addr;` instead of `$proxy_add_x_forwarded_for`, since there is exactly one proxy hop below Traefik), or have Traefik set a single trusted header.
 - See H-01 companion **M-05**: if the `api` is reachable without traversing nginx, there is *no* proxy to append the header, making this trivially exploitable — fix both.
 
 ---
@@ -307,51 +315,106 @@ Verified live: `openssl s_client -starttls smtp -connect :25` + `EHLO` advertise
 ## 5. LOW findings
 
 ### L-01 — Domain admin can set superadmin-reserved domain fields
+> **Remediation 2026-11-10:** `catalogue.update_domain` answers 403 to a non-superadmin that sends
+> `transport`/`backupmx`/`maxquota`/`quota` (refused, not silently dropped; the PWA only sends
+> `description`/`active`). Coverage: `test_catalogue.py` test_07b.
+
 **CWE-269** · [adminng/api/app/routers/domains.py:65-74](adminng/api/app/routers/domains.py#L65) → [catalogue.py:227-240](adminng/api/app/catalogue.py#L227).
 `PUT /api/v1/domains/{domain}` is gated by `get_principal` + `ensure_domain_allowed` only (no superadmin gate), and `update_domain` writes every non-null `DomainUpdate` field — including `transport`, `backupmx`, `maxquota`, `quota`. A domain admin can `PUT {"transport":"smtp:[attacker.host]:25"}` to reroute their own domain's delivery, or raise `maxquota`/`quota` above superadmin-set caps. Scoped to their own domain(s), so impact is confined to that tenant, but these are superadmin-only capabilities in the PostfixAdmin model.
 **Fix.** When `not principal.superadmin`, strip/reject `transport`, `backupmx`, `maxquota`, `quota` (leave `description`, `active` editable); or split `DomainUpdate` into tenant vs superadmin subsets.
 
 ### L-02 — `reauth-confirm` has no rate limiting
+> **Remediation 2026-11-10:** `reauth_confirm` uses the login counter (`ratelimit.check/failure/success`,
+> username+IP): 5 wrong passwords → 429 (`REAUTH_LOCKOUT` audit), which also locks the login form
+> for that pair. Coverage: `test_ratelimit.py` `ReauthThrottleTests`.
+
 **CWE-307** · [adminng/api/app/auth.py:631-657](adminng/api/app/auth.py#L631).
 `login_step1/step2/webauthn` all call `ratelimit.check/failure`; `reauth_confirm` verifies the account password with no throttle (only an audit record). An attacker holding a stolen access token + device secret (but not the password) can brute-force the password to obtain a destructive-action token. Bounded (needs a stolen session) but a real gap vs. the login paths.
 **Fix.** Wrap the `_verify_credentials` call in `ratelimit.check` / `ratelimit.failure` / `ratelimit.success` exactly like `login_step1` (shared `rate_limit` table). Pair with H-02's `client_ip` fix so the IP half of the key cannot be rotated.
 
 ### L-03 — MCP user login has no per-IP throttle; ALTCHA PoW trivial
+> **Remediation 2026-11-10:** second `login_failure` row per IP (`key='*'`): 20 failures on any
+> accounts within 15 min → 15 min lock, never cleared by a good login (user and admin logins).
+> ALTCHA cost 1,000,000; challenges capped at 30/IP/min per worker; idle rows purged hourly.
+> Coverage: pytest, `test.sh` K4b.
+
 **CWE-307** · [mcp/app/mcpcore/webauth.py:24,78](mcp/app/mcpcore/webauth.py#L78); [mcp/app/webapi/api.py:79-103](mcp/app/webapi/api.py#L79).
 Lockout keys on `username+IP` and arms only after 5 same-user/same-IP failures; ALTCHA `max_number=100000` solves in ms and challenges are unlimited. Horizontal spraying (one password across many addresses from one IP) never arms a lockout. The MCP `client_ip` is non-spoofable, so a per-IP cap is effective here.
 **Fix.** Add a username-independent per-IP failure throttle (e.g. 20/15 min) before `accounts.login`; raise `ALTCHA_MAX_NUMBER` to ≥1,000,000 and rate-limit `GET /webapi/altcha/challenge`.
 
 ### L-04 — SMTP recipient-restriction tarpit `sleep` enables smtpd process exhaustion  ✅ verified live
+> **Remediation 2026-11-10:** the tarpit is kept (F-07) but is `sleep ${stress?{0}:{N}}`: once :25
+> hits its process limit, new smtpd processes start in stress mode and do not sleep, so the pool
+> can no longer be starved (the in-flight sleepers finish normally). Verified with
+> `postconf -x -o stress=yes`. Coverage: `test.sh` B2d.
+
 **CWE-400** · [mta/postfix/main.cf.s:194](mta/postfix/main.cf.s#L194) (`sleep _SMTP_TARPIT_DELAY_`).
 The F-07 tarpit is a blocking `sleep` (default 2 s) in `smtpd_recipient_restrictions` on the process-per-connection public smtpd, reached unauthenticated for any RCPT to a hosted domain (verified: unauth `RCPT TO:<probe@maild.cu>` took 2.23 s). With `smtpd_recipient_limit=1000`, one pipelined session holds a process ~33 min; `default_process_limit=100` caps the pool, so a couple of source IPs can saturate it → temporary denial of inbound mail. Self-healing, no data gain.
 **Fix.** Remove the blocking `sleep`; deter harvesting with non-blocking controls (postscreen is already on; add `smtpd_client_recipient_rate_limit`, a lower `smtpd_client_connection_count_limit`, and cap `-o smtpd_recipient_limit=20` on the :25 service). If a tarpit is kept, bound per-session recipients and keep the delay small relative to `default_process_limit`.
 
 ### L-05 — Self-signed TLS private key created world-readable (644)  ✅ verified live
+> **Remediation 2026-11-10:** mta and mda no longer `chmod +r`; both run `chmod go-rwx` on
+> `/certs/mail.key` every boot (also fixes keys older images left 0644). Coverage: `test.sh` L-05.
+
 **CWE-732** · [mta/docker-entrypoint.sh:370](mta/docker-entrypoint.sh#L370) & [mda/configure.sh:38](mda/configure.sh#L38) (`chmod +r /certs/mail.key`).
 When no operator cert is supplied, both entrypoints generate a self-signed key and `chmod +r` it → mode 644, readable by `other`. The non-root mail workers (postfix uid 101, vmail uid 5000) that parse untrusted input on the exposed ports are each "other" relative to `root:root` and can read the TLS private key; a worker memory-disclosure/RCE leaks it (passive decryption / MITM). The key also sits on the shared `/certs` volume.
 **Fix.** Replace `chmod +r` with `chmod 600 /certs/mail.key` (both Postfix and Dovecot load the key as root before dropping privileges). Matches the already-correct 600 handling of `adminng.key`/`adminng-ca.key`.
 
 ### L-06 — DKIM keys generated at 1024-bit RSA
+> **Remediation 2026-11-10:** `DKIM_KEY_BITS` (image default 2048; 2048/3072/4096). Existing keys
+> are not rotated — INSTALL.md → DKIM documents the procedure. Side finding: `check_dns.sh`
+> extracted the local `p=` from the `showkeys` file with a regex that stopped at the first
+> blank, so the local key was always empty and E5 ("published key does not match") never
+> fired; a multi-string 2048-bit published record would also have been cut. Both are now
+> read whitespace-free.
+
 **CWE-326** · [amavis/docker-entrypoint.sh:282](amavis/docker-entrypoint.sh#L282) (`amavisd genrsa ${KEY} 1024`).
 DKIM signing is on by default; keys are hardcoded to 1024-bit, deprecated by RFC 8301. A factored key lets an attacker forge DKIM (and thus pass DMARC) for the deployment's domains → high-credibility spoofing. README already claims 2048.
 **Fix.** `amavisd genrsa ${KEY} ${DKIM_KEY_BITS:-2048}`; add `DKIM_KEY_BITS=2048` to the amavis Dockerfile ENV; document the regenerate-and-republish-TXT migration for existing deployments (the `if [ ! -f ${KEY} ]` guard never rotates existing keys).
 
 ### L-07 — `MCP_SECRET_KEY` has no placeholder/weak-value guard
+> **Remediation 2026-11-10:** `mcp_boot` refuses to start while `MCP_SECRET_KEY` or
+> `MCP_DOVECOT_MASTER_PASSWORD` starts with `change-me` (warning for `MCP_DB_PASSWORD` and a
+> key shorter than 32 chars). The mda refuses to enable the master user with the placeholder —
+> needed because of N-01. Coverage: pytest.
+
 **CWE-1392** · [mcp/app/maild_mcp/settings.py:50](mcp/app/maild_mcp/settings.py#L50).
 `SECRET_KEY = env_required("MCP_SECRET_KEY")` enforces only non-empty; `env.sample` ships the literal `change-me-openssl-rand-hex-32`. AdminNG guards exactly this ([adminng/api/app/bootstrap.py:28](adminng/api/app/bootstrap.py#L28) `PLACEHOLDER_SECRET_KEYS`); the MCP does not. This key derives the token-hash HMAC, opaque-handle signing, ALTCHA PoW key and the Fernet key for the stored external SMTP password — a known value lets an attacker forge handles/ALTCHA solutions and (if the DB leaks) decrypt SMTP creds.
 **Fix.** Mirror AdminNG's placeholder check in `mcp_boot` (warn/refuse on the shipped `change-me-…` literals for `MCP_SECRET_KEY`, `MCP_DB_PASSWORD`, `MCP_DOVECOT_MASTER_PASSWORD`).
 
 ### L-08 — Internet-facing services lack `no-new-privileges` / `cap_drop`
+> **Remediation 2026-11-10 (partial):** `no-new-privileges` on `api`, `adminng`, `mua`, `mda`, `mta`,
+> `cron` in all four compose files; the `api` is also `read_only` + `tmpfs /tmp` + `cap_drop: ALL`.
+> **Accepted risk (2026-11-10):** `cap_drop` + minimal `cap_add` for mta/mda/mua/adminng and
+> setuid-bit stripping are not done. Their root master processes (Postfix master, Dovecot,
+> Apache, nginx) would each need a measured capability set, and with `no-new-privileges` in
+> place a worker foothold can no longer use setuid binaries, which was the escalation path
+> reported here. Revisit if a service ever runs untrusted plugins. cron keeps its capabilities
+> on purpose (see L-09). Coverage: `test.sh` static check.
+
 **CWE-250 / CWE-732** · [docker-compose.yml](docker-compose.yml) `mta`/`mda`/`mua`/`adminng`/`api` (none set `security_opt`/`cap_drop`/`read_only`; contrast `mcp` at :375-381).
 `mcp` is the only hardened service. The images facing untrusted traffic ship the usual setuid-root binaries and run with Docker's full default capability set and `no-new-privileges` off, so a worker-process foothold can escalate to in-container root (blast radius includes the writable shared `/certs` and `/home/vmail`).
 **Fix.** Mirror the mcp hardening across all three compose files: minimum `security_opt: ["no-new-privileges:true"]` on `mta`/`mda`/`mua`/`adminng`/`api`; then `cap_drop: [ALL]` + minimal `cap_add` (mta/mda: `NET_BIND_SERVICE,SETUID,SETGID,CHOWN,DAC_OVERRIDE`; adminng nginx similar; api can drop all); `read_only: true` + `tmpfs` for adminng/api. Optionally strip unused setuid bits in the Dockerfiles.
 
 ### L-09 — `cron` bind-mounts host `/var/log` read-write as root
+> **Remediation 2026-11-10:** `/var/log:/var/log:ro` in the three production files (dev keeps
+> `ldata/logs` writable: `test.sh` seeds a fixture syslog). `no-new-privileges` added;
+> `cap_drop: ALL` deliberately **not** — the root jobs need `DAC_OVERRIDE`/`CHOWN` on the vmail tree.
+
 **CWE-668** · [docker-compose.yml:301-304](docker-compose.yml#L301) (`- /var/log:/var/log`).
 The cron service mounts the **host** `/var/log` RW, runs as root, no `cap_drop`/`no-new-privileges`, and processes attacker-influenced data (pflogsumm/sa-learn/DNS). A code-exec there gains root write to host logs (anti-forensics) and can fill the host filesystem (host DoS).
 **Fix.** Make the mount `:ro` (cron only reads host logs) in all three compose files, and add `cap_drop: [ALL]` + `security_opt: ["no-new-privileges:true"]`.
 
 ### L-10 — DB backups written unencrypted + world-readable
+> **Remediation 2026-11-10:** (a) `umask 077`, `/backups` + `/backups/db` 0700, older archives
+> tightened to 0600 (`test.sh` G4a). (b) **opt-in** age encryption: `BACKUP_AGE_RECIPIENT` (public
+> keys only; the private key never touches the server). Each dump is validated plain, encrypted,
+> header-checked, plaintext removed; unset = plain archives as before. New `restore_db.sh`
+> detects plain/encrypted by content, asks for the private key, validates before changing
+> anything, takes a safety dump and restores in one transaction as the db owner. Operator guide
+> `BACKUP-RESTORE.md`; `test.sh` G4d–G4g. (c) done by M-06 (the cron env no longer carries the
+> signing keys).
+
 **CWE-312 / CWE-732** · [cron/scripts/backup_db.sh:46,125,208,290](cron/scripts/backup_db.sh#L46).
 Backups are created with the default umask (dir 0755, files 0644) and no encryption, retained 15 days, containing mailbox Argon2id hashes, TOTP ciphertext, session/device/webauthn rows, token hashes, OAuth clients/codes and the audit trail. Compounded by M-06 (the signing keys live in the same cron container), so one cron/volume compromise yields both ciphertext and the keys to decrypt it. Backups are the artifact most likely to travel to lower-trust storage.
 **Fix.** (a) `umask 077` + `mkdir -m 0700` for the backup dir. (b) Envelope-encrypt each dump to an operator public key (`… | age -r "$BACKUP_AGE_RECIPIENT"` or `gpg -e`), gated on the recipient var; validate the encrypted artifact. (c) Keep the app signing keys out of the cron container (see M-06).
@@ -361,9 +424,42 @@ Backups are created with the default umask (dir 0755, files 0644) and no encrypt
 ## 6. INFO
 
 ### I-01 — `/healthz` reachable through the ingress leaks subsystem status
+> **Remediation 2026-11-10:** router rule `Host(...) && !Path(`/healthz`)` in the three production
+> files (the container healthcheck hits 127.0.0.1). Coverage: `test.sh` static check.
+
 **CWE-200** · [mcp/app/mcpcore/views.py:31](mcp/app/mcpcore/views.py#L31); mcp Traefik router rule.
 The mcp router matches the host with no path restriction, so `/healthz` is anonymously reachable and returns per-subsystem booleans (db/catalogue/imap).
 **Fix.** Tighten the router rule to `Host(...) && !Path(/healthz)` (the internal Dockerfile healthcheck hits `127.0.0.1:8080/healthz` directly, not via Traefik), or return only the aggregate status for non-loopback callers. Chain-update all three compose files.
+
+---
+
+## 6b. Found during remediation
+
+### N-01 — Dovecot MCP master passdb accepts logins from any network (MEDIUM) · **REMEDIATED 2026-11-10**
+
+> **Remediation:** the `master-users` entry is rendered with `allow_real_nets=<mcp container
+> address>/32` (the real TCP peer, which no proxy/ID header can override); unresolved = loopback only.
+> A watchdog in the mda entrypoint re-resolves `MCP` (5 s until found, then
+> `PEER_WATCH_INTERVAL`) and rewrites the file atomically; Dovecot re-reads it, no reload.
+> Verified live: master login OK from the mcp container; refused from the host on 993 and 143
+> and from the api container; the user's own login from the host is unaffected; with the
+> restriction removed the host login on 993 succeeds (the exposure was real). Coverage:
+> `test.sh` J1b, L7 (mcp moved → new address admitted, old one refused).
+
+**CWE-284** · [mda/dovecot/conf.d/auth-master.conf.ext.in](mda/dovecot/conf.d/auth-master.conf.ext.in).
+The master passdb (`user@domain*mcp` + master password) is limited to the IMAP protocol but not
+to a source network, so it is usable on the internet-facing **993**. Its only protection is the
+password: a leaked or guessable `MCP_DOVECOT_MASTER_PASSWORD` opens every active mailbox
+from anywhere. The L-07 fix blocks the shipped placeholder, but a network restriction is the
+real control.
+Severity raised to MEDIUM during the fix: a single leaked secret (it sits in the operator env
+file and in two containers) meant remote read access to every mailbox, with no other control.
+
+### N-02 — `mcp` allow-list drops image ENV defaults (INFO, open)
+Reported in the M-06 remediation: a bare allow-list key the operator leaves unset reaches the
+`mcp` container unset, removing the image default. Masked today by the Python settings'
+fallbacks and `${MCP_WORKERS:-2}` in the entrypoint; give it the cron treatment
+(`/etc/maild-image.env` snapshot + restore) before any shell code relies on an image default.
 
 ---
 
@@ -375,7 +471,7 @@ These were actively probed/reviewed and found robust — recorded so future chan
 - **Postfix pgsql maps** use `%s` (auto-escaped by Postfix) → no SQLi.
 - **Dovecot SQL passdb/userdb** interpolate `%{user}` inside quotes, guarded by `auth_username_chars` (no quote/metacharacter can reach the query) → no SQLi. `ssl = required` (no cleartext auth pre-TLS on 993/995).
 - **Dovecot sieve-extprograms** exposes only `vnd.dovecot.pipe`, restricted to `sieve_pipe_bin_dir`; the learn scripts pass the message as a *file* (no shell interpolation). ManageSieve (4190) isn't exposed in production → no user-supplied-sieve RCE.
-- **Dovecot MCP master user** is IMAP-only (fails over POP3/ManageSieve/SMTP-AUTH), the userdb still requires the target mailbox `active='1'`, master logins are logged, and the master-users file is `0640 root:dovecot`.
+- **Dovecot MCP master user** is IMAP-only (fails over POP3/ManageSieve/SMTP-AUTH), the userdb still requires the target mailbox `active='1'`, master logins are logged, and the master-users file is `0640 root:dovecot`. *(Network-restricted to the mcp container since N-01.)*
 - **MCP OAuth 2.1 server** — S256 PKCE enforced (authorize rejects non-S256/missing challenge); auth codes single-use (`select_for_update` + `used`), 2 min, bound to client+redirect_uri+PKCE+resource; access/refresh tokens opaque + hashed at rest; refresh rotation with family-wide reuse detection; scopes can only be narrowed; consent endpoint is Bearer-authenticated and binds the code to the logged-in account and *its own* addresses (no CSRF, no cross-account mint).
 - **MCP CIMD fetch** SSRF controls are strong (https-only, public-IP-only, connect-to-checked-address so no DNS rebinding, no redirects, 5 s/64 KB caps) — see M-02 for the residual DoS/oracle.
 - **MCP `X-Forwarded-For`** handled correctly (right-most untrusted hop vs `MCP_TRUSTED_PROXIES`) — the model AdminNG should copy (H-02).
@@ -390,14 +486,19 @@ These were actively probed/reviewed and found robust — recorded so future chan
 
 - **Webmail ↔ Dovecot plaintext IMAP/Sieve** (`mua` → `mda:143`/`:4190`, no TLS) lives entirely on the internal docker network; 143/4190 are not published in production. Acceptable given network isolation; revisit if the internal network is ever shared with untrusted workloads.
 - **cron jobs run as root** parsing attacker-influenced mail/logs. No injection was found (static queries, `sa-learn --file`, quoted shell vars). Still, privilege separation (drop to a non-root user for parse jobs) would reduce the blast radius of any future parser bug — tracked implicitly via L-08/L-09.
-- **`compose-github.yml` drift** (chain-consistency bug, not security): its adminng Traefik router/host is `admin`/`admin.${DEFAULT_DOMAIN}` while `docker-compose.yml` and `compose-gitlab.yml` use `adminng`/`adminng.${DEFAULT_DOMAIN}`. Violates the strict-copy rule; worth fixing in the same pass as M-05/M-06 since those touch all three files.
+- ~~**`compose-github.yml` drift**~~ — fixed with M-05 (every file serves `admin.${DEFAULT_DOMAIN}`, router `adminng`).
 
 ---
 
 ## 9. Remediation priority
 
-1. **Now:** H-01 (one authz check), H-02 (`client_ip` rewrite), M-04 (`.gitignore` one-liner — latent secret leak).
-2. **Next:** M-05 + M-06 + L-08/L-09 (compose hardening, one chained pass across the three files), M-03 (webmail admin panel), M-01 (SMTP SASL throttle), M-02 (CIMD DoS).
-3. **Then:** the remaining LOW items and I-01, folded into routine hardening.
+Original plan (all three steps done 2026-10-31 → 2026-11-10):
+
+1. ~~**Now:** H-01, H-02, M-04.~~
+2. ~~**Next:** M-05 + M-06 + L-08/L-09, M-03, M-01, M-02.~~
+3. ~~**Then:** the remaining LOW items and I-01.~~
+
+Still open: N-02 (INFO). Accepted risk:
+the rest of L-08 (`cap_drop` for mta/mda/mua/adminng).
 
 *Per the project doc rule, any config/compose/env change above must update the matching `.agents/` doc in the same commit, and the three production compose files must be chain-updated together.*

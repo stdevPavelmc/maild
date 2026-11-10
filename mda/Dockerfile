@@ -68,7 +68,9 @@ ENV POSTGRES_HOST=db \
     STATE=Kingston \
     CITY=Kingston \
     ORG=MailD \
-    OU=MailD
+    OU=MailD \
+    MCP=mcp \
+    PEER_WATCH_INTERVAL=30
 
 ADD dovecot/ /etc/dovecot
 
@@ -147,4 +149,4 @@ LABEL org.opencontainers.image.title="MailD MDA (Dovecot)" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-24"
+      org.opencontainers.image.created="2026-11-10"

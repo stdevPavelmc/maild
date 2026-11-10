@@ -98,7 +98,7 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 | `ldata/amavis` | `/var/lib/amavis` | clamav, amavis (quarantine in `virusmails/`); cron **read-only** (the DKIM keys `dkim/db.txt` + `dkim/*.txt` for `check_dns.sh`) |
 | `ldata/spamassassin` | `/var/lib/spamassassin` | amavis (bayes db), cron (learning) |
 | `ldata/mua_web` | `/var/www/html/data` | mua (only the writable `data/` dir!) |
-| `ldata/logs` | `/var/log` | cron (empty in dev — JSON logging, see DEV-SETUP.md) |
+| `ldata/logs` | `/var/log` | cron (empty in dev — JSON logging, see DEV-SETUP.md; production binds the host `/var/log` read-only) |
 | `ldata/backups` | `/backups` | cron (db dumps) |
 | `ldata/mcp_logs` | `/var/log/maild-mcp` | mcp (audit/access/error logs; owner 10001, prepared by bootstrap) |
 | `ldata/dozzle` | `/data` | dozzle |

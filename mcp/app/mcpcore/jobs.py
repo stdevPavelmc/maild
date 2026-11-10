@@ -8,7 +8,7 @@ import logging
 from django.db import connections
 from django.utils import timezone
 
-from mcpcore import accounts, audit, imap, tokens
+from mcpcore import accounts, audit, imap, tokens, webauth
 from mcpcore.models import AltchaUsed, WebSession
 
 log = logging.getLogger("mcp.jobs")
@@ -32,6 +32,7 @@ def run_once() -> dict | None:
             "pending_addresses_expired": accounts.purge_expired_pending(),
             "altcha_purged": AltchaUsed.objects.filter(expires_at__lt=now).delete()[0],
             "sessions_purged": WebSession.objects.filter(expires_at__lt=now).delete()[0],
+            "login_failures_purged": webauth.purge_failures(),
             "log_files_pruned": audit.prune(),
             # OAuth (P4): spent codes / stale requests, and access tokens dead for a day
             "oauth_cleanup": _oauth_cleanup(now),

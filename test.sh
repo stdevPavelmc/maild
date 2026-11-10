@@ -406,7 +406,7 @@ cleanup() {
                 DELETE FROM token WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM account_address WHERE account_id IN (SELECT id FROM account WHERE main_email LIKE '%@${DOMAIN}');
                 DELETE FROM account WHERE main_email LIKE '%@${DOMAIN}';
-                DELETE FROM login_failure WHERE key LIKE '%@${DOMAIN}';
+                DELETE FROM login_failure WHERE key LIKE '%@${DOMAIN}' OR key = '*';
                 DELETE FROM notice_throttle WHERE kind='claim_conflict' AND key LIKE '%@${DOMAIN}';" > /dev/null 2>&1 || true
             case "${K_POLICY_BEFORE:-}" in
                 t) dcx db psql -U maild -d mcp -q -c "UPDATE domain_policy SET allowed=true WHERE domain='$DOMAIN'" > /dev/null 2>&1 || true ;;
@@ -531,6 +531,40 @@ if [ -z "$TRAEFIK_WHY" ] ; then
     t_ok "production compose files: only adminng/mua/mcp are Traefik-routed, every other service traefik.enable=false"
 else
     t_fail "production compose Traefik labels:$TRAEFIK_WHY"
+fi
+
+# L-08/L-09/I-01 (2026-10 audit) — static: every production compose file hardens the
+# internet-facing services (no-new-privileges; the api also read-only + cap_drop ALL), mounts
+# the host /var/log read-only on cron and keeps /healthz off the MCP Traefik router
+HARD_WHY=""
+for PF in docker-compose.yml compose-github.yml compose-gitlab.yml ; do
+    HARD_WHY="$HARD_WHY$(awk -v f="$PF" '
+        /^services:/ { s = 1; next }
+        s && /^  [a-z-]+:$/ { if (svc != "") chk(); svc = $1; sub(":", "", svc); nnp = ro = cd = 0; next }
+        s && /no-new-privileges:true/ { nnp = 1 }
+        s && /^    read_only: true/ { ro = 1 }
+        s && /^      - ALL$/ { cd = 1 }
+        s && /\/var\/log:\/var\/log/ && !/:ro$/ { printf " %s:cron-/var/log-rw", f }
+        s && /routers\.mcp\.rule=/ && !/!Path\(`\/healthz`\)/ { printf " %s:mcp-healthz-routed", f }
+        function chk() {
+            if (svc ~ /^(api|adminng|mua|mda|mta|cron|mcp)$/ && !nnp) printf " %s:%s-nnp", f, svc
+            if (svc ~ /^(api|mcp)$/ && !(ro && cd)) printf " %s:%s-ro/cap", f, svc
+        }
+        END { if (svc != "") chk() }' "$SCRIPT_DIR/$PF")"
+done
+if [ -z "$HARD_WHY" ] ; then
+    t_ok "production compose files: no-new-privileges on every exposed service, api/mcp read-only with no capabilities, cron /var/log read-only, MCP /healthz not routed"
+else
+    t_fail "production compose hardening:$HARD_WHY"
+fi
+
+# L-05 (2026-10 audit) — the TLS private key in /certs is never group/world-readable
+if [ "$HAVE_DC" = 1 ] ; then
+    KEY_MODE="$(dcx mta stat -c %a /certs/mail.key 2>/dev/null | tr -d '\r\n')"
+    case "$KEY_MODE" in
+        600|400) t_ok "L-05 /certs/mail.key is root-only (mode $KEY_MODE)" ;;
+        *) t_fail "L-05 /certs/mail.key mode ${KEY_MODE:-unknown} (want 600)" ;;
+    esac
 fi
 
 # M-06 (2026-10 audit) — cron gets an allow-list, never the whole operator env file, and
@@ -880,6 +914,17 @@ if [ "$HAVE_DC" = 1 ] ; then
     else
         t_fail "SASL throttle (auth=$B2C_AUTH, 587/465 conn='$B2C_CONN', global conn=$B2C_25; want 60, '60 60', 0)"
     fi
+    # B2d — L-04: the :25 tarpit sleeps only while smtpd has spare processes (stress=yes → 0)
+    B2D_RAW="$(dcx mta postconf -h smtpd_recipient_restrictions 2>/dev/null | tr -d '\r' | grep -oE 'sleep [^,]*')"
+    B2D_STRESS="$(dcx mta postconf -x -o stress=yes -h smtpd_recipient_restrictions 2>/dev/null | tr -d '\r' | grep -oE 'sleep [0-9]+')"
+    case "$B2D_RAW" in
+        '') t_skip "B2d stress-aware tarpit (SMTP_TARPIT_DELAY=0, no sleep)" ;;
+        *)  if [ "$B2D_STRESS" = "sleep 0" ] && printf '%s' "$B2D_RAW" | grep -q 'stress?' ; then
+                t_ok "B2d the :25 tarpit is off under stress ($B2D_RAW → $B2D_STRESS)"
+            else
+                t_fail "B2d stress-aware tarpit (config='$B2D_RAW', under stress='$B2D_STRESS')"
+            fi ;;
+    esac
 fi
 
 # B3 — STARTTLS on 587 serves a certificate
@@ -1364,6 +1409,16 @@ else
         t_fail "the archive carries the catalogue schema (no 'CREATE TABLE public.mailbox' inside)"
     fi
 
+    # G4a — L-10: the dumps carry hashes and the audit trail, so they are root-only
+    if [ -n "$BK_NEW" ] ; then
+        BK_MODES="$(dcx cron sh -c "stat -c %a /backups/db '$BK_NEW'" | tr -d '\r' | tr '\n' ' ')"
+        if [ "$BK_MODES" = "700 600 " ] ; then
+            t_ok "G4a the backup directory is 0700 and the archive 0600 (root-only)"
+        else
+            t_fail "G4a backup permissions (dir/archive modes: ${BK_MODES:-none}, want 700 600)"
+        fi
+    fi
+
     # G4b — the same run also dumps the AdminNG database (device approvals, sessions,
     # TOTP seeds and the audit trail would otherwise be lost on a restore)
     BK_ANEW="$(dcx cron sh -c 'ls -1t /backups/db/maild_adminng_*.sql.gz 2>/dev/null | head -n1' | tr -d '\r')"
@@ -1394,6 +1449,63 @@ else
             t_fail "the MCP archive carries the mcp schema (no admin_user / trailer)"
         fi
     fi
+
+    # G4d–G4g — L-10: optional age encryption and restore_db.sh. A throwaway key pair lives in
+    # the cron container's /tmp; every archive these checks create is removed afterwards.
+    BK_ALL_BEFORE="$(dcx cron sh -c 'ls -1 /backups/db/' | tr -d '\r')"
+    dcx cron sh -c 'rm -f /tmp/maild-test-age.key; age-keygen -o /tmp/maild-test-age.key 2>/dev/null' > /dev/null
+    BK_PUB="$(dcx cron sh -c "grep -o 'age1[a-z0-9]*' /tmp/maild-test-age.key" | tr -d '\r')"
+    # BACKUP_AGE_RECIPIENT is not baked in the image, so /etc/environment does not override it
+    dcx cron bash -c "BACKUP_AGE_RECIPIENT='$BK_PUB' /scripts/backup_db.sh" > "$TMPRUN/backup_db_age.log" 2>&1
+    BK_AGE_RC=$?
+    BK_ENEW="$(dcx cron sh -c 'ls -1t /backups/db/maild_adminng_*.sql.gz* 2>/dev/null | head -n1' | tr -d '\r')"
+    BK_EHDR="$(dcx cron sh -c "head -c 21 '$BK_ENEW'" 2>/dev/null | tr -d '\r')"
+    BK_ESTEM="${BK_ENEW%.sql.gz.age}"
+    BK_EPLAIN="$(dcx cron sh -c "ls '${BK_ESTEM}.sql.gz' 2>/dev/null" | tr -d '\r')"
+    if [ "$BK_AGE_RC" -eq 0 ] && [ "${BK_ENEW%.age}" != "$BK_ENEW" ] &&
+       [ "$BK_EHDR" = "age-encryption.org/v1" ] && [ -z "$BK_EPLAIN" ] ; then
+        t_ok "G4d with BACKUP_AGE_RECIPIENT set the archives are age-encrypted ($(basename "$BK_ENEW")) and no plaintext copy is left"
+    else
+        t_fail "G4d encrypted backup (rc=$BK_AGE_RC file='$BK_ENEW' header='$BK_EHDR' plaintext-left='$BK_EPLAIN')"
+        info "$(tail -n 10 "$TMPRUN/backup_db_age.log" | sed 's/^/        /')"
+    fi
+
+    # G4e — an encrypted archive with no key and no terminal is refused before anything changes
+    BK_NOKEY="$(dcx cron /scripts/restore_db.sh --yes --force "$BK_ENEW" 2>&1 | tr -d '\r')"
+    if printf '%s' "$BK_NOKEY" | grep -q 'ENCRYPTED' && printf '%s' "$BK_NOKEY" | grep -q 'pass --identity' &&
+       ! printf '%s' "$BK_NOKEY" | grep -q 'restoring' ; then
+        t_ok "G4e restore_db.sh detects an encrypted archive and asks for the private key (refuses without one)"
+    else
+        t_fail "G4e encrypted archive without a key ($(printf '%s' "$BK_NOKEY" | tail -n 2 | tr '\n' ' '))"
+    fi
+
+    # G4f — the same archive restores with the private key (decrypt → validate → one transaction)
+    BK_RESTORE="$(dcx cron /scripts/restore_db.sh --identity /tmp/maild-test-age.key --yes --force "$BK_ENEW" 2>&1 | tr -d '\r')"
+    BK_RTABLES="$(dcx db psql -U maild -d adminng -tAc "SELECT count(*) FROM pg_tables WHERE schemaname='public'" 2>/dev/null | tr -d '\r ')"
+    if printf '%s' "$BK_RESTORE" | grep -q "OK: 'adminng' restored" && [ "${BK_RTABLES:-0}" -gt 0 ] ; then
+        t_ok "G4f an encrypted AdminNG archive restores with --identity ($BK_RTABLES tables back, safety dump taken)"
+    else
+        t_fail "G4f encrypted restore ($(printf '%s' "$BK_RESTORE" | grep -E 'ERROR|OK' | tail -n 2 | tr '\n' ' '))"
+    fi
+
+    # G4g — a plain archive is detected as such and restored without asking for a key; the MCP
+    # database (when deployed) keeps its restricted owner role
+    if [ -n "${BK_MNEW:-}" ] ; then
+        BK_PLAIN="$(dcx cron /scripts/restore_db.sh --yes --force "$BK_MNEW" 2>&1 | tr -d '\r')"
+        BK_MOWNER="$(dcx db psql -U maild -d mcp -tAc "SELECT string_agg(DISTINCT tableowner, ',') FROM pg_tables WHERE schemaname='public'" 2>/dev/null | tr -d '\r ')"
+        if printf '%s' "$BK_PLAIN" | grep -q 'plain (unencrypted)' && printf '%s' "$BK_PLAIN" | grep -q "OK: 'mcp' restored" &&
+           [ -n "$BK_MOWNER" ] && [ "$BK_MOWNER" != maild ] ; then
+            t_ok "G4g a plain MCP archive restores without a key, its tables stay owned by the MCP role ($BK_MOWNER)"
+        else
+            t_fail "G4g plain restore (owner='$BK_MOWNER'; $(printf '%s' "$BK_PLAIN" | grep -E 'ERROR|OK|plain' | tail -n 2 | tr '\n' ' '))"
+        fi
+    else
+        t_skip "G4g plain MCP restore (no MCP archive)"
+    fi
+    for f in $(dcx cron sh -c 'ls -1 /backups/db/' | tr -d '\r') ; do
+        printf '%s\n' "$BK_ALL_BEFORE" | grep -qxF "$f" || dcx cron rm -f "/backups/db/$f" > /dev/null 2>&1 || true
+    done
+    dcx cron rm -f /tmp/maild-test-age.key > /dev/null 2>&1 || true
 
     # G5 — the regression itself: a pg_dump that aborts writes nothing and exits non-zero, which
     # gzip happily turns into a valid 20-byte archive. A fake pg_dump claiming a NEWER version
@@ -2438,9 +2550,24 @@ MCP_SVC="${MCP_SVC:-mcp@${DEFAULT_DOMAIN}}"
 MCP_HTTP="${MCP_HTTP:-http://$SERVER:8085}"
 MCP_FIXTURE="${MCP_FIXTURE:-charlie@$DOMAIN}"
 
-mcp_imap() { # <user> <pass> [imap command] — IMAP STARTTLS on 143, as the mcp connects
-    timeout -k5 20 curl -s --insecure --ssl-reqd --user "$1:$2" \
-        --url "imap://$SERVER:143/INBOX" -X "${3:-SEARCH ALL}" 2>&1 | grep -q '\* SEARCH'
+# IMAP STARTTLS to mda:143 from INSIDE the mcp container — exactly how the MCP connects, and
+# since N-01 the only address the master passdb admits (allow_real_nets = the mcp container)
+MCP_IMAP_PY='import imaplib, ssl, sys
+host, port, user, pw = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4]
+ctx = ssl.create_default_context(); ctx.check_hostname = False; ctx.verify_mode = ssl.CERT_NONE
+try:
+    c = imaplib.IMAP4_SSL(host, port, ssl_context=ctx) if port == 993 else imaplib.IMAP4(host, port)
+    if port != 993:
+        c.starttls(ctx)
+    c.login(user, pw); c.select("INBOX"); typ, _ = c.search(None, "ALL")
+    print("IMAP-OK" if typ == "OK" else "IMAP-NO")
+except Exception as exc:
+    print("IMAP-NO", exc)'
+mcp_imap() { # <user> <pass>
+    dcx mcp python -c "$MCP_IMAP_PY" mda 143 "$1" "$2" 2>/dev/null | grep -q '^IMAP-OK'
+}
+host_imap() { # <user> <pass> <port 993|143> — the same login from the host (outside the stack)
+    python3 -c "$MCP_IMAP_PY" "$SERVER" "$3" "$1" "$2" 2>/dev/null | grep -q '^IMAP-OK'
 }
 mcp_sql() { # <database> <sql> — as the restricted MCP role, over TCP like the container
     dcx db env PGPASSWORD="$MCP_DB_PW" psql -h 127.0.0.1 -U "$MCP_DB_ROLE" -d "$1" -X -tAc "$2" 2>&1
@@ -2466,6 +2593,23 @@ else
         t_ok "J1 the MCP master user opens an active mailbox over IMAP STARTTLS (${MCP_FIXTURE}*${MCP_MASTER_NAME})"
     else
         t_fail "J1 master-user IMAP login to ${MCP_FIXTURE} (check 'docker compose logs mda' for the master passdb)"
+    fi
+
+    # J1b — N-01: the master password works from the mcp container ONLY — never from outside
+    # the stack (published 993, and 143 in dev) nor from another container; the user's own
+    # login from outside is unaffected (control)
+    J1B_993=no; J1B_143=no; J1B_API=no; J1B_OWN=no
+    host_imap "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" 993 && J1B_993=yes
+    host_imap "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" 143 && J1B_143=yes
+    dcx api python -c "$MCP_IMAP_PY" mda 143 "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" 2>/dev/null |
+        grep -q '^IMAP-OK' && J1B_API=yes
+    host_imap "$MCP_FIXTURE" "${CRED[${MCP_FIXTURE,,}]:-}" 993 && J1B_OWN=yes
+    MCP_MASTER_LINE="$(dcx mda sh -c "cut -d: -f1,3- /etc/dovecot/master-users" 2>/dev/null | tr -d '\r')"
+    if [ "$J1B_993$J1B_143$J1B_API" = nonono ] && [ "$J1B_OWN" = yes ] &&
+       printf '%s' "$MCP_MASTER_LINE" | grep -q 'allow_real_nets=' ; then
+        t_ok "J1b the master password is refused outside the mcp container (host :993/:143, api container); own logins unaffected ($MCP_MASTER_LINE)"
+    else
+        t_fail "J1b master login scope (host993=$J1B_993 host143=$J1B_143 api=$J1B_API own=$J1B_OWN entry='$MCP_MASTER_LINE')"
     fi
 
     # J2 — ... and Dovecot logs who really authenticated (independent audit trail)
@@ -2660,7 +2804,20 @@ else
     else
         t_fail "K4 lockout (got $K_CODE)"
     fi
-    dcx db psql -U maild -d mcp -q -c "DELETE FROM login_failure WHERE key='$K_D'" > /dev/null 2>&1
+    dcx db psql -U maild -d mcp -q -c "DELETE FROM login_failure WHERE key IN ('$K_D', '*')" > /dev/null 2>&1
+
+    # K4b — L-03: a username-independent per-IP cap; spraying one password across many
+    # addresses (never 5 on the same one) locks the source IP, even for a valid account
+    # (never a successful login here: it would create $K_D's account, which K19 must not find)
+    for _ in $(seq 1 19) ; do k_login "spray-$RANDOM@$DOMAIN" "wrong-$RANDOM" ; done
+    k_login "spray-$RANDOM@$DOMAIN" "wrong-$RANDOM"; K4B_20TH="$K_CODE"
+    k_login "$K_D" "$K_PD"
+    if [ "$K4B_20TH" = 401 ] && [ "$K_CODE" = 429 ] && [ "$(k_json "d['error']")" = locked ] ; then
+        t_ok "K4b twenty failed logins on different addresses lock the source IP (the 20th is still checked; then a valid account → 429)"
+    else
+        t_fail "K4b per-IP spray lockout (20th spray: $K4B_20TH, then valid login: $K_CODE)"
+    fi
+    dcx db psql -U maild -d mcp -q -c "DELETE FROM login_failure WHERE key = '*' OR key LIKE 'spray-%'" > /dev/null 2>&1
 
     # K5 — login: IMAP check, short access JWT, refresh cookie HttpOnly+Secure+SameSite=Strict+Path=/webapi
     rm -f "$K_JAR"
@@ -3813,6 +3970,40 @@ else
     fi
     [ -n "$L_PLACEHOLDER" ] && docker rm -f "$L_PLACEHOLDER" > /dev/null 2>&1
     L_PLACEHOLDER=""
+
+    # L7 — N-01 watchdog in the mda: the mcp moves to a new address → the master password works
+    # from the new one within two intervals, and NO LONGER from the old one (a placeholder
+    # container now holding it tries)
+    if [ -n "$MCP_MASTER_PW" ] ; then
+        L7_OLD="$(l_peer_ip maild-dev-mcp)"
+        L7_NET="$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' maild-dev-mcp 2>/dev/null)"
+        timeout -k10 120 "${DC[@]}" stop mcp > /dev/null 2>&1
+        L_PLACEHOLDER="$(docker run -d --rm --network "$L7_NET" --ip "$L7_OLD" --entrypoint sleep pavelmc/maild-mcp:develop 600 2>/dev/null)"
+        timeout -k10 120 "${DC[@]}" start mcp > /dev/null 2>&1
+        L7_NEW="$(l_peer_ip maild-dev-mcp)"
+        if [ "$L7_NEW" = "$L7_OLD" ] || [ -z "$L7_NEW" ] || [ -z "$L_PLACEHOLDER" ] ; then
+            t_skip "L7 could not move mcp to a new address (still ${L7_NEW:-none}); mda master watchdog not exercised"
+        else
+            L7_START=$SECONDS; L7=no
+            while [ $((SECONDS - L7_START)) -le $((2 * L_WATCH + 15)) ] ; do
+                mcp_imap "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" && { L7=yes; break; }
+                sleep 3
+            done
+            L7_SECS=$((SECONDS - L7_START))
+            L7_OLDIP=no
+            docker exec "$L_PLACEHOLDER" python -c "$MCP_IMAP_PY" mda 143 "${MCP_FIXTURE}*${MCP_MASTER_NAME}" "$MCP_MASTER_PW" 2>/dev/null |
+                grep -q '^IMAP-OK' && L7_OLDIP=yes
+            if [ "$L7" = yes ] && [ "$L7_OLDIP" = no ] ; then
+                t_ok "L7 mcp moved $L7_OLD → $L7_NEW: the mda admits the master login from the new address after ${L7_SECS}s and refuses the old one"
+            else
+                t_fail "L7 mda master watchdog (mcp $L7_OLD → $L7_NEW: new=$L7 after ${L7_SECS}s, old address still admitted=$L7_OLDIP)"
+            fi
+        fi
+        [ -n "$L_PLACEHOLDER" ] && docker rm -f "$L_PLACEHOLDER" > /dev/null 2>&1
+        L_PLACEHOLDER=""
+    else
+        t_skip "L7 mda master watchdog (no MCP deployed)"
+    fi
 fi
 
 section "summary"

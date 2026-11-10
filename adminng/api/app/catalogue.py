@@ -224,9 +224,18 @@ def create_domain(principal: Principal, payload: dict) -> dict:
     return get_domain(principal, domain)
 
 
+# Domain fields only a superadmin may change (the PostfixAdmin model): routing and the
+# quota ceilings a tenant must not raise or redirect (2026-10 audit L-01).
+SUPERADMIN_DOMAIN_FIELDS = frozenset({"transport", "backupmx", "maxquota", "quota"})
+
+
 def update_domain(principal: Principal, domain: str, payload: dict) -> dict:
     ensure_domain_allowed(principal, domain)
     fields = {key: value for key, value in payload.items() if value is not None}
+    # Refused rather than silently dropped: a client that sends them must learn they
+    # did not apply. The PWA only sends description/active for a domain admin.
+    if not principal.superadmin and SUPERADMIN_DOMAIN_FIELDS & fields.keys():
+        raise _super_only()
     if fields:
         assignments = ", ".join(f"{key} = %s" for key in fields)
         with connect(settings.POSTGRES_DB) as conn, conn.cursor() as cur:

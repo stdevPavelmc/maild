@@ -2,7 +2,11 @@
 
 - ALTCHA v1 (SHA-256 proof-of-work, D3): HMAC key derived from MCP_SECRET_KEY, 10 min expiry,
   each solved challenge accepted once.
-- Lockout: 5 failures per username+IP → 15 min (same policy as AdminNG).
+- Lockout: 5 failures per username+IP → 15 min (same policy as AdminNG), plus a
+  username-independent per-IP cap (20 failures in 15 min → 15 min) so one address cannot spray
+  a password across many accounts (2026-10 audit L-03). The MCP client IP is not spoofable.
+- ALTCHA cost 1,000,000 (~0.5 s in a browser, ms were enough at 100,000) and at most
+  CHALLENGES_PER_IP challenges per minute per IP (per worker).
 - Session: access JWT (15 min, held in memory by the SPA, `Authorization: Bearer`) + refresh
   token in an HttpOnly cookie that rotates on every use; the `web_session` row carries the
   absolute lifetime (24 h user), and presenting a superseded refresh token revokes the session.
@@ -10,6 +14,9 @@
 
 import datetime as dt
 import secrets
+import threading
+import time
+from collections import deque
 
 import altcha
 import jwt
@@ -21,8 +28,14 @@ from mcpcore import policy
 from mcpcore.crypto import derived_key, new_id, token_hash
 from mcpcore.models import AltchaUsed, LoginFailure, WebSession
 
-ALTCHA_MAX_NUMBER = 100_000
+ALTCHA_MAX_NUMBER = 1_000_000
 ALTCHA_TTL = 600
+CHALLENGES_PER_IP = 30
+CHALLENGE_WINDOW = 60
+_CHALLENGE_TRACK_MAX = 10_000
+# login_failure row counting every failed login from an IP, whatever the account ("*" is never a
+# valid e-mail address nor an `admin:<name>` key)
+IP_KEY = "*"
 REFRESH_COOKIE = "mdmcp_refresh"
 REFRESH_PATH = "/webapi"
 ADMIN_REFRESH_COOKIE = "mdmcp_admin_refresh"
@@ -32,6 +45,27 @@ ADMIN_REFRESH_PATH = "/webapi/admin"
 # ------------------------------------------------------------------- altcha ---
 def _altcha_key() -> str:
     return derived_key("altcha").hex()
+
+
+_challenge_lock = threading.Lock()
+_challenges_by_ip: dict[str, deque] = {}
+
+
+def challenge_allowed(ip: str | None) -> bool:
+    """Sliding-window cap on challenge minting per source IP (in memory, per worker)."""
+    if not ip:
+        return True
+    now = time.monotonic()
+    with _challenge_lock:
+        hits = _challenges_by_ip.setdefault(ip, deque())
+        while hits and hits[0] <= now - CHALLENGE_WINDOW:
+            hits.popleft()
+        if len(hits) >= CHALLENGES_PER_IP:
+            return False
+        hits.append(now)
+        while len(_challenges_by_ip) > _CHALLENGE_TRACK_MAX:
+            _challenges_by_ip.pop(next(iter(_challenges_by_ip)))
+    return True
 
 
 def altcha_challenge() -> dict:
@@ -71,27 +105,48 @@ def altcha_verify(payload: str) -> bool:
 
 # ------------------------------------------------------------------ lockout ---
 def locked(key: str, ip: str) -> bool:
-    row = LoginFailure.objects.filter(key=key, ip=ip).first()
-    return bool(row and row.locked_until and row.locked_until > timezone.now())
+    """The username+IP pair or the whole IP is locked out."""
+    return LoginFailure.objects.filter(key__in=(key, IP_KEY), ip=ip,
+                                       locked_until__gt=timezone.now()).exists()
 
 
-def record_failure(key: str, ip: str) -> bool:
-    """Count a failure; True when it (re)armed the lockout."""
+def _count_failure(key: str, ip: str, limit: int, window: int | None = None) -> bool:
+    """Count one failure on a row; True when it (re)armed the lockout. With `window`, a row
+    idle for longer starts over (a NAT's occasional typos never add up to a lockout)."""
     with transaction.atomic():
         row, _ = LoginFailure.objects.select_for_update().get_or_create(key=key, ip=ip)
-        if row.locked_until and row.locked_until <= timezone.now():
+        now = timezone.now()
+        expired = row.locked_until is not None and row.locked_until <= now
+        stale = window is not None and row.count and row.updated_at < now - dt.timedelta(seconds=window)
+        if expired or stale:
             row.count = 0
             row.locked_until = None
         row.count += 1
-        armed = row.count >= policy.LOGIN_MAX_FAILURES
+        armed = row.count >= limit
         if armed:
-            row.locked_until = timezone.now() + dt.timedelta(seconds=policy.LOGIN_LOCKOUT)
+            row.locked_until = now + dt.timedelta(seconds=policy.LOGIN_LOCKOUT)
         row.save()
     return armed
 
 
+def record_failure(key: str, ip: str) -> bool:
+    """Count a failure for the username+IP and for the IP; True when either lockout armed."""
+    armed = _count_failure(key, ip, policy.LOGIN_MAX_FAILURES)
+    ip_armed = _count_failure(IP_KEY, ip, policy.LOGIN_IP_MAX_FAILURES, policy.LOGIN_IP_WINDOW)
+    return armed or ip_armed
+
+
 def clear_failures(key: str, ip: str) -> None:
+    """A good login clears its own username+IP row only: the per-IP row must not be resettable
+    by an attacker who owns one valid account."""
     LoginFailure.objects.filter(key=key, ip=ip).delete()
+
+
+def purge_failures() -> int:
+    """Hourly: rows idle for a day and not locked (spraying leaves one row per tried name)."""
+    now = timezone.now()
+    old = LoginFailure.objects.filter(updated_at__lt=now - dt.timedelta(days=1))
+    return old.exclude(locked_until__gt=now).delete()[0]
 
 
 # ------------------------------------------------------------------ session ---

@@ -72,6 +72,15 @@ services:
       - vmail:/home/vmail:ro
     depends_on:
       - db
+    # 2026-10 audit L-08: uvicorn runs as uid 5000 on :8080 and writes nothing but /tmp —
+    # no capability, read-only root filesystem, no privilege gain
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -89,6 +98,9 @@ services:
     # No published port: exposed through the ingress proxy (Traefik labels below).
     depends_on:
       - api
+    # 2026-10 audit L-08: setuid/setgid binaries cannot raise privileges in this container
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -122,6 +134,9 @@ services:
       - mua_web:/var/www/html/data
     depends_on:
       - mda
+    # 2026-10 audit L-08: setuid/setgid binaries cannot raise privileges in this container
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -170,6 +185,9 @@ services:
       - vmail:/home/vmail
       - /certs:/certs
       - spool:/var/spool/
+    # 2026-10 audit L-08: setuid/setgid binaries cannot raise privileges in this container
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -212,6 +230,9 @@ services:
       - mda
       - amavis
       - clamav
+    # 2026-10 audit L-08: setuid/setgid binaries cannot raise privileges in this container
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -310,6 +331,8 @@ services:
       AMAVIS_SUBMIT_PORT:
       MX_HOSTNAME:
       BACKUP_MIN_BYTES:
+      # optional age public key(s): set = encrypted archives (BACKUP-RESTORE.md)
+      BACKUP_AGE_RECIPIENT:
       JUNK_RETENTION_DAYS:
       SA_HAM_SAMPLE_PER_USER:
       SA_HAM_SAMPLE_MAX:
@@ -325,7 +348,9 @@ services:
       DNS_CHECK_SPF_MX_COVERAGE:
       DNS_CHECK_TIMEOUT:
     volumes:
-      - /var/log:/var/log
+      # host logs, READ-ONLY (2026-10 audit L-09): the jobs only parse syslog{,.1}, they log
+      # to the container's stdout, never here
+      - /var/log:/var/log:ro
       - vmail:/home/vmail
       - db_backups:/backups
       # read-only view of the DKIM keys Amavis signs with: check_dns.sh compares every
@@ -333,6 +358,10 @@ services:
       - amavis:/var/lib/amavis:ro
     depends_on:
       - db
+    # 2026-10 audit L-08/L-09: no privilege gain. cap_drop is NOT applied: the root jobs need
+    # DAC_OVERRIDE/CHOWN over the vmail tree (sa-learn, purge_junk, check_maildirs)
+    security_opt:
+      - "no-new-privileges:true"
     networks:
       - maild
     logging: # See https://docs.docker.com/config/containers/logging/syslog/
@@ -414,7 +443,8 @@ services:
     labels:
       # Ingress (Traefik) — https://${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}
       - "traefik.enable=true"
-      - "traefik.http.routers.mcp.rule=Host(`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`)"
+      # /healthz is for the container healthcheck (127.0.0.1) only, never the internet (2026-10 audit I-01)
+      - "traefik.http.routers.mcp.rule=Host(`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`) && !Path(`/healthz`)"
       - "traefik.http.routers.mcp.entrypoints=websecure"
       - "traefik.http.routers.mcp.tls=true"
       # custom service (non default port)

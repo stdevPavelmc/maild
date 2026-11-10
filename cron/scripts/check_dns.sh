@@ -1066,7 +1066,11 @@ check_dkim() {
     bits=""
     if [ -n "$f" ] && [ -f "$f" ]; then
         flat="$(tr -d '"' < "$f" | tr '\n' ' ')"
-        lp="$(printf '%s' "$flat" | grep -oE 'p=[A-Za-z0-9+/=]+' | head -n 1 | cut -c3-)"
+        # 'amavisd showkeys' splits the key over quoted lines ("v=DKIM1; p=" then the base64
+        # chunks): drop the ';' comment line and every blank before extracting, or p= is
+        # followed by a space and the local key reads empty (E5 never compared anything).
+        lp="$(grep -v '^[[:space:]]*;' "$f" | tr -d '"[:space:]()' \
+            | grep -oE '(^|;)p=[A-Za-z0-9+/=]+' | head -n 1 | sed 's/^.*p=//')"
         bits="$(printf '%s' "$flat" | grep -oE '[0-9]+ bits' | head -n 1 | tr -cd '0-9')"
     fi
     DKIM_BITS="$bits"
@@ -1108,7 +1112,11 @@ check_dkim() {
             "keep only the current key record"
     fi
     rec="$(printf '%s\n' "$recs" | head -n 1)"
-    dp="$(printf '%s' "$rec" | grep -oE 'p=[A-Za-z0-9+/=]*' | head -n 1 | cut -c3-)"
+    # a key longer than one 255-byte string (any 2048-bit key) is published as several
+    # strings that verifiers concatenate: dns_txt leaves a blank between them, so p= is read
+    # whitespace-free (RFC 6376 3.6.1 also allows folding whitespace inside the value).
+    dp="$(printf '%s' "$rec" | tr -d '[:space:]' | grep -oE '(^|;)p=[A-Za-z0-9+/=]*' | head -n 1 \
+        | sed 's/^;\{0,1\}p=//')"
     if [ -z "$dp" ]; then
         add_finding critical "the DKIM record publishes an empty p= — the key is revoked" \
             "record: $rec" \

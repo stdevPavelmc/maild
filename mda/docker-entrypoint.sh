@@ -175,6 +175,31 @@ if [ "$1" = 'dovecot' ]; then
     # removing) the password is "change the env file + recreate mda".
     MASTER_CONF=/etc/dovecot/conf.d/auth-master.conf.ext
     MASTER_FILE=/etc/dovecot/master-users
+    # N-01 (found in the 2026-10 audit remediation): the master passdb is IMAP-only but the
+    # IMAP service also listens on the public 993. The entry carries allow_real_nets = the mcp
+    # container's own address(es), so the master password works from that container and
+    # nowhere else (the real TCP peer: no proxy/ID header can fake it). Unresolved = loopback
+    # only, i.e. closed until the mcp appears.
+    mcp_master_nets() { # → "ip/32,ip/128" of the mcp container, empty when it does not resolve
+        getent ahosts "${MCP:-mcp}" 2>/dev/null | awk '{ print $1 }' | sort -u |
+            awk '{ printf "%s%s/%s", (n++ ? "," : ""), $1, (index($1, ":") ? 128 : 32) }'
+    }
+    render_master_users() { # <nets or empty> — atomic rewrite, 0640 root:dovecot
+        ( umask 027
+          printf '%s:%s::::::allow_real_nets=%s\n' "${MASTER_NAME}" "${MASTER_HASH}" "${1:-127.0.0.1/32}" \
+              > "${MASTER_FILE}.new" )
+        chown root:dovecot "${MASTER_FILE}.new"
+        chmod 0640 "${MASTER_FILE}.new"
+        mv -f "${MASTER_FILE}.new" "${MASTER_FILE}"
+    }
+    case "${MCP_DOVECOT_MASTER_PASSWORD:-}" in
+        change-me*)
+            # env.sample's placeholder is public and 993 is internet-facing: a master user with
+            # it would open every mailbox to anyone (2026-10 audit L-07). Refuse it.
+            echo "mda: ERROR - MCP_DOVECOT_MASTER_PASSWORD still holds the env.sample placeholder, master user NOT enabled (generate one: openssl rand -hex 18)" >&2
+            MCP_DOVECOT_MASTER_PASSWORD=""
+            ;;
+    esac
     if [ -n "${MCP_DOVECOT_MASTER_PASSWORD:-}" ] ; then
         MASTER_NAME="${MCP_DOVECOT_MASTER_USER:-mcp}"
         # the password goes to doveadm on stdin twice (prompt + retype), never argv
@@ -183,11 +208,27 @@ if [ "$1" = 'dovecot' ]; then
             echo "mda: ERROR - could not hash MCP_DOVECOT_MASTER_PASSWORD, master user NOT enabled" >&2
             rm -f "${MASTER_CONF}" "${MASTER_FILE}"
         else
-            ( umask 027 ; printf '%s:%s\n' "${MASTER_NAME}" "${MASTER_HASH}" > "${MASTER_FILE}" )
-            chown root:dovecot "${MASTER_FILE}"
-            chmod 0640 "${MASTER_FILE}"
+            MASTER_NETS="$(mcp_master_nets)"
+            render_master_users "${MASTER_NETS}"
             cp /etc/dovecot/conf.d/auth-master.conf.ext.in "${MASTER_CONF}"
-            echo "mda: INFO - MCP master user '${MASTER_NAME}' enabled (IMAP only)"
+            echo "mda: INFO - MCP master user '${MASTER_NAME}' enabled (IMAP only, from ${MASTER_NETS:-nowhere yet: '${MCP:-mcp}' does not resolve})"
+            # N-01: follow the mcp container's address (it starts after mda, and a recreate
+            # moves it). Every 5 s until it resolves, then every PEER_WATCH_INTERVAL seconds;
+            # Dovecot re-reads the passwd-file when it changes, no reload needed. A failed
+            # lookup keeps the last known address. PEER_WATCH_INTERVAL=0: resolve at boot only.
+            if [ "${PEER_WATCH_INTERVAL:-30}" -gt 0 ] 2>/dev/null ; then
+                (
+                    while : ; do
+                        if [ -n "${MASTER_NETS}" ] ; then sleep "${PEER_WATCH_INTERVAL}" ; else sleep 5 ; fi
+                        W_NETS="$(mcp_master_nets)"
+                        if [ -n "${W_NETS}" ] && [ "${W_NETS}" != "${MASTER_NETS}" ] ; then
+                            echo "mda: MCP master user now admitted from ${W_NETS} (was ${MASTER_NETS:-nowhere})"
+                            MASTER_NETS="${W_NETS}"
+                            render_master_users "${MASTER_NETS}"
+                        fi
+                    done
+                ) >/proc/1/fd/1 2>/proc/1/fd/2 &
+            fi
         fi
     else
         rm -f "${MASTER_CONF}" "${MASTER_FILE}"

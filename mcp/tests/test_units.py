@@ -442,3 +442,31 @@ def test_cimd_success_path_validates_and_releases(monkeypatch):
         meta, ttl = clients.fetch_validated(url, f"198.51.100.{20 + n}")
         assert meta["client_name"] == "OK" and ttl == 600
     clients._reset_guards()
+
+
+# ------------------------------------------------- 2026-10 audit L-03 / L-07 ---
+from mcpcore import webauth  # noqa: E402
+from mcpcore.management.commands import mcp_boot  # noqa: E402
+
+
+def test_altcha_challenge_cost_and_per_ip_cap(monkeypatch):
+    assert webauth.ALTCHA_MAX_NUMBER >= 1_000_000
+    monkeypatch.setattr(webauth, "_challenges_by_ip", {})
+    clock = [1000.0]
+    monkeypatch.setattr(webauth.time, "monotonic", lambda: clock[0])
+    for _ in range(webauth.CHALLENGES_PER_IP):
+        assert webauth.challenge_allowed("198.51.100.7")
+    assert not webauth.challenge_allowed("198.51.100.7")
+    assert webauth.challenge_allowed("198.51.100.8"), "the cap is per source IP"
+    clock[0] += webauth.CHALLENGE_WINDOW + 1
+    assert webauth.challenge_allowed("198.51.100.7"), "the window slides"
+
+
+def test_placeholder_secrets_refuse_the_boot():
+    good = {"MCP_SECRET_KEY": "a" * 64, "MCP_DOVECOT_MASTER_PASSWORD": "b" * 36, "MCP_DB_PASSWORD": "c" * 36}
+    assert mcp_boot.check_secrets(good) == []
+    sample = {"MCP_SECRET_KEY": "change-me-openssl-rand-hex-32",
+              "MCP_DOVECOT_MASTER_PASSWORD": "change-me-openssl-rand-hex-18",
+              "MCP_DB_PASSWORD": "change-me-openssl-rand-hex-18"}
+    assert mcp_boot.check_secrets(sample) == ["MCP_SECRET_KEY", "MCP_DOVECOT_MASTER_PASSWORD"]
+    assert mcp_boot.check_secrets({**good, "MCP_DB_PASSWORD": "change-me"}) == [], "db role: warning only"

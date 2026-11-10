@@ -8,6 +8,9 @@
 #   - Keep backups for 15 days (retention policy)
 #   - Compress backups to save space
 #   - Send notification to admin on success/failure
+#   - Optionally encrypt every archive to the operator's age public key(s)
+#     (BACKUP_AGE_RECIPIENT; unset = plain archives). Restore: /scripts/restore_db.sh,
+#     key setup: BACKUP-RESTORE.md
 #
 # A failed dump MUST be reported as a failure. This script used to pipe pg_dump into gzip
 # and test the exit status of that pipeline, which is gzip's: a pg_dump that aborted (the
@@ -41,9 +44,28 @@ BACKUP_MIN_BYTES="${BACKUP_MIN_BYTES:-1024}"
 DATE=$(date +%Y%m%d_%H%M%S)
 BACKUP_FILE="${BACKUP_DIR}/maild_backup_${DATE}.sql.gz"
 LOG_FILE="${BACKUP_DIR}/backup.log"
+# Every archive this job (or restore_db.sh's safety dump) writes, plain or encrypted (.age)
+ARCHIVES=( \( -name "maild_backup_*.sql.gz*" -o -name "maild_adminng_*.sql.gz*" \
+              -o -name "maild_mcp_*.sql.gz*" -o -name "pre-restore_*.sql.gz*" \) )
+# Optional encryption (2026-10 audit L-10): one or more age recipients (age1… public keys, or
+# ssh-ed25519/ssh-rsa public keys), comma- or newline-separated. Only PUBLIC keys live here:
+# the private key never touches this server. Unset/empty = archives stay plain gzip.
+RECIPIENT_ARGS=()
+while IFS= read -r r; do
+    r="$(printf '%s' "$r" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
+    [ -n "$r" ] && RECIPIENT_ARGS+=( -r "$r" )
+done < <(printf '%s\n' "${BACKUP_AGE_RECIPIENT:-}" | tr ',' '\n')
+ENCRYPTION="off"
+ENCRYPT_FAIL=""
+[ "${#RECIPIENT_ARGS[@]}" -gt 0 ] && ENCRYPTION="on ($(( ${#RECIPIENT_ARGS[@]} / 2 )) recipient(s), age)"
 
-# Ensure backup directory exists
+# Backups hold password hashes, TOTP ciphertext, session/token hashes and the audit trail:
+# root-only (2026-10 audit L-10). The umask covers every file this run creates (dumps, the
+# log); the chmods tighten a directory/archives an older image left 0755/0644.
+umask 077
 mkdir -p ${BACKUP_DIR}
+chmod 0700 /backups ${BACKUP_DIR}
+find ${BACKUP_DIR} -type f -perm /077 -exec chmod go-rwx {} + 2>/dev/null
 
 # Log function
 log() {
@@ -343,10 +365,48 @@ if [ "${MCP_STATUS}" = "FAILED" ]; then
     FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }the MCP database dump failed: ${MCP_FAIL} (the catalogue archive was kept)"
 fi
 
+# --- Optional encryption ----------------------------------------------------------
+# Each archive was validated in plain form above (gzip -t + dump markers), then it is
+# encrypted, the ciphertext header checked and the plaintext removed. A bad recipient or a
+# failed encryption keeps the PLAIN archive (still 0600) and marks the run FAILED: losing the
+# backup would be worse than an unencrypted one, and the mail tells the admin either way.
+encrypt_archive() { # <file> → <file>.age, plaintext removed; non-zero on failure
+    local in="$1" out="$1.age"
+    if age -e "${RECIPIENT_ARGS[@]}" -o "${out}" "${in}" 2>> ${LOG_FILE} &&
+       [ "$(head -c 21 "${out}" 2>/dev/null)" = "age-encryption.org/v1" ]; then
+        rm -f "${in}"
+        return 0
+    fi
+    rm -f "${out}"
+    return 1
+}
+
+if [ "${#RECIPIENT_ARGS[@]}" -gt 0 ]; then
+    if ! age -e "${RECIPIENT_ARGS[@]}" < /dev/null > /dev/null 2>> ${LOG_FILE}; then
+        ENCRYPT_FAIL="BACKUP_AGE_RECIPIENT is not a valid age/ssh public key list (see the log); the archives were kept UNENCRYPTED"
+    else
+        for var in BACKUP_FILE ADMINNG_BACKUP_FILE MCP_BACKUP_FILE; do
+            f="${!var}"
+            [ -f "${f}" ] || continue
+            if encrypt_archive "${f}"; then
+                printf -v "${var}" '%s' "${f}.age"
+                log "Encrypted: $(basename "${f}").age"
+            else
+                ENCRYPT_FAIL="${ENCRYPT_FAIL:+${ENCRYPT_FAIL}; }could not encrypt $(basename "${f}") (kept unencrypted)"
+            fi
+        done
+    fi
+    if [ -n "${ENCRYPT_FAIL}" ]; then
+        log "ERROR: ${ENCRYPT_FAIL}"
+        BACKUP_STATUS="FAILED"
+        FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }${ENCRYPT_FAIL}"
+    fi
+fi
+
 # Clean up old backups (keep only last 15 days)
 log "Cleaning up old backups (keeping last ${BACKUP_RETENTION_DAYS} days)..."
 
-OLD_BACKUPS=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f -mtime +${BACKUP_RETENTION_DAYS})
+OLD_BACKUPS=$(find ${BACKUP_DIR} "${ARCHIVES[@]}" -type f -mtime +${BACKUP_RETENTION_DAYS})
 
 if [ -n "$OLD_BACKUPS" ]; then
     echo "$OLD_BACKUPS" | while read -r old_file; do
@@ -358,7 +418,7 @@ else
 fi
 
 # Count current backups
-BACKUP_COUNT=$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f | wc -l)
+BACKUP_COUNT=$(find ${BACKUP_DIR} "${ARCHIVES[@]}" -type f | wc -l)
 log "Current backup count: ${BACKUP_COUNT}"
 
 # Calculate total backup size
@@ -367,7 +427,7 @@ log "Total backup storage used: ${TOTAL_SIZE}"
 
 # List recent backups
 log "Recent backups:"
-find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f -mtime -${BACKUP_RETENTION_DAYS} -exec ls -lh {} \; | \
+find ${BACKUP_DIR} "${ARCHIVES[@]}" -type f -mtime -${BACKUP_RETENTION_DAYS} -exec ls -lh {} \; | \
     awk '{print $9, "(" $5 ")"}' | tee -a ${LOG_FILE}
 
 log "=== Backup process completed ==="
@@ -401,19 +461,24 @@ MCP database: ${MCP_DB:-mcp} (${MCP_STATUS})
 MCP File: ${MCP_BACKUP_FILE}
 MCP Size: ${MCP_SIZE} (${MCP_BYTES} bytes, ${MCP_TABLES} tables)
 
+Encryption: ${ENCRYPTION}
 Retention Policy: ${BACKUP_RETENTION_DAYS} days
 Current Backup Count: ${BACKUP_COUNT}
 Total Storage Used: ${TOTAL_SIZE}
 
 Recent Backups:
-$(find ${BACKUP_DIR} \( -name "maild_backup_*.sql.gz" -o -name "maild_adminng_*.sql.gz" -o -name "maild_mcp_*.sql.gz" \) -type f -mtime -7 -printf "%TY-%Tm-%Td %TH:%TM %f (%s bytes)\n" | sort -r)
+$(find ${BACKUP_DIR} "${ARCHIVES[@]}" -type f -mtime -7 -printf "%TY-%Tm-%Td %TH:%TM %f (%s bytes)\n" | sort -r)
 
 Log file: ${LOG_FILE}
 
 $(if [ "${BACKUP_STATUS}" = "FAILED" ]; then
     echo "ACTION REQUIRED: Please investigate the backup failure immediately!"
     echo "Reason: ${FAIL_REASON}"
-    echo "The failed archive was deleted; any other archive listed above is still valid."
+    if [ -n "${ENCRYPT_FAIL}" ]; then
+        echo "The dumps themselves are valid; only the encryption failed (fix BACKUP_AGE_RECIPIENT)."
+    else
+        echo "The failed archive was deleted; any other archive listed above is still valid."
+    fi
     echo "Check the log file for detailed error messages."
 else
     echo "No action required. Backup completed successfully."

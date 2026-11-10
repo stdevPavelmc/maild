@@ -57,7 +57,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 - Postfix hands mail to amavis:10024 and takes it back; amavis queries the catalogue for
   the domain list (that is why it needs `POSTGRES_PASSWORD`), scans with SpamAssassin +
-  ClamAV, signs DKIM (`DKIM_SIGNING`), and bounces the result to `MTA=mta`.
+  ClamAV, signs DKIM (`DKIM_SIGNING`), and bounces the result to `MTA=mta`. New DKIM keys
+  are `DKIM_KEY_BITS` (image default 2048; 2048/3072/4096, anything else → 2048 — 2026-10
+  audit L-06); an existing key is never rotated (INSTALL.md → DKIM has the procedure).
 - **Two listeners (D13, since P1b of the MCP work)**: `10024` = policy bank `MTA` (Postfix's
   `content_filter`), `10026` = bank `INTERNAL` (the stack's own submitters: cron's swaks jobs on
   `AMAVIS_SUBMIT_PORT` and the MailD MCP's service mail). Both banks are `originating` (DKIM,
@@ -87,6 +89,16 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 ## mda — Dovecot
 
+- `no-new-privileges` (2026-10 audit L-08). A self-signed `/certs/mail.key` is root-only (0600;
+  an older 0644 one is tightened every boot, L-05 — also in the mta). The MCP master user is
+  never enabled with an env.sample `change-me…` `MCP_DOVECOT_MASTER_PASSWORD` (L-07).
+- **Master user scope (N-01)**: the `master-users` entry carries
+  `allow_real_nets=<mcp container ip>/32` — the master password works from the mcp container
+  only, never on the public 993/995 nor from any other container (the real TCP peer is checked,
+  no proxy/ID header can fake it). Unresolved `MCP` host ⇒ `127.0.0.1/32` (closed). A background
+  watchdog re-resolves `MCP` every 5 s until it appears, then every `PEER_WATCH_INTERVAL`
+  (30 s; 0 = boot only) and rewrites the file atomically on a change (Dovecot re-reads a
+  modified passwd-file, no reload). `test.sh` J1b (refusals) and L7 (address move).
 - IMAP/POP3/Sieve delivery; reads users/quotas from the catalogue via SQL
   (inline `passdb sql`/`userdb sql` in `mda/dovecot/conf.d/auth-sql.conf.ext` since Dovecot 2.4
   dropped the separate `dovecot-sql.conf.ext` include), Maildir under `/home/vmail`.
@@ -165,6 +177,7 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 
 ## mta — Postfix
 
+- `no-new-privileges` (2026-10 audit L-08; the entrypoint's `su postfix` runs as root, unaffected).
 - SMTP 25 (**no AUTH**: `smtpd_sasl_auth_enable = no` globally, audit M-01), submission 587
   and SMTPS 465 (AUTH via `-o smtpd_sasl_auth_enable=yes`). Anvil throttles per client IP:
   `smtpd_client_auth_rate_limit = SMTP_AUTH_RATE_LIMIT` (60/min, every smtpd) and
@@ -179,6 +192,9 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   the map/policy lookups *and* the tarpit; only external mail addressed to the hosted
   domains pays the delay. Submission/smtps and the amavis reinjection override
   `smtpd_recipient_restrictions` in `master.cf`, so only the public MX port is affected.
+  The sleep is `${stress?{0}:{N}}` (2026-10 audit L-04): when :25 reaches its process limit
+  the master spawns new smtpd with `stress=yes` and those do not sleep, so a flood of slow
+  RCPTs cannot starve inbound mail.
   The 250/550 oracle itself is kept by design (reject-at-RCPT is Postfix best practice;
   accept-then-bounce would create backscatter). Error limits: `smtpd_soft_error_limit=10`
   / `smtpd_hard_error_limit=60` (progressive 1s slowdown, then cut-off) — they used to be
@@ -243,6 +259,11 @@ more. See `.agents/services/provisioning.md`.
 - FastAPI (Uvicorn) on `python:3.14-slim-trixie`, built from `adminng/api/`; service
   hostname `api`, **no published port** — only the `adminng` frontend talks to it, over the
   compose network (`/api/v1/` proxy).
+- Container hardening (2026-10 audit L-08, every compose file): `read_only` rootfs +
+  `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges` (uvicorn runs as 5000 on :8080).
+- Domain admins edit only `description`/`active` of their domains: `transport`, `backupmx`,
+  `maxquota`, `quota` are superadmin-only, 403 otherwise (L-01). `reauth-confirm` shares the
+  login lockout (`rate_limit`, username+IP): 5 wrong passwords → 429 there *and* at login (L-02).
 - Two databases on `db`: the PostfixAdmin catalogue `POSTGRES_DB` (read/write, **zero
   DDL** — the schema belongs to `db/migrations/002_postfixadmin_catalogue.sql`; it writes
   rows exactly like PostfixAdmin: `maildir = domain/local/`, quota in bytes, Argon2id
@@ -313,6 +334,7 @@ more. See `.agents/services/provisioning.md`.
 ## adminng — AdminNG frontend (PWA)
 
 - nginx serving the built Vite/React PWA plus a `/api/v1/` reverse proxy to `api:8080`.
+  `no-new-privileges` (2026-10 audit L-08).
   Dev publishes **8083:80** (plain HTTP: browser harness, desktop LAN, CA download) and
   **8084:443** (HTTPS for LAN devices/APK, local CA from `ldata/certs`); production publishes
   **no port** and is routed by the ingress (`adminng.${DEFAULT_DOMAIN}`, Traefik labels; TLS
@@ -333,6 +355,7 @@ more. See `.agents/services/provisioning.md`.
 
 ## mua — SnappyMail
 
+- `no-new-privileges` (2026-10 audit L-08).
 - Webmail on Apache; dev publishes 8081:80. The app is baked into the image at
   `/var/www/html`; **only** `/var/www/html/data` is persisted (`ldata/mua_web`, owned by
   `www-data` — bootstrap-dev.sh fixes the ownership and restarts mua).
@@ -455,7 +478,9 @@ more. See `.agents/services/provisioning.md`.
   SpamAssassin 4.0.2 provides the `sa-learn` the Bayes job uses. The `cron/spamassassin/` file is a
   reference copy of Debian's `/etc/cron.daily/spamassassin` that the image never installs (the
   rules refresh runs in `amavis`).
-- Volumes: `ldata/logs:/var/log` (empty in dev — JSON logging), `ldata/vmail:/home/vmail`,
+- Volumes: `ldata/logs:/var/log` (empty in dev — JSON logging; read-write in dev only because
+  `test.sh` seeds a fixture syslog there — production mounts the host `/var/log` **`:ro`**,
+  2026-10 audit L-09), `ldata/vmail:/home/vmail`,
   `ldata/backups:/backups` (prod parity: without it `backup_db.sh` dumps into the
   container's writable layer and the dump vanishes on recreate), and `ldata/amavis:/var/lib/amavis:ro`
   (prod: `amavis:/var/lib/amavis:ro`) so `check_dns.sh` can compare each domain's published
@@ -463,6 +488,15 @@ more. See `.agents/services/provisioning.md`.
   **not** mount the shared SpamAssassin volume: its `sa-learn` runs with `HOME=/tmp`, so the
   "shared bayes db" contract only holds for amavis (known drift, see `.local/caveats.md`).
 - HEALTHCHECK: `/var/run/crond.pid` + `kill -0` (added with the resolute move).
+- `no-new-privileges` (2026-10 audit L-08); no `cap_drop` — the root jobs need
+  `DAC_OVERRIDE`/`CHOWN` over the vmail tree. `backup_db.sh` runs with `umask 077` and keeps
+  `/backups` and `/backups/db` at 0700 (archives 0600; older ones are tightened on the next
+  run — L-10). Optional encryption: `BACKUP_AGE_RECIPIENT` (age/ssh public keys, comma-separated;
+  not baked, unset = plain) — each archive is validated plain, encrypted to `.sql.gz.age`, the
+  header checked, the plaintext removed; a bad key keeps the plain archive and fails the run.
+  `/scripts/restore_db.sh` restores one archive (format detected by content, private key via
+  `--identity` or pasted on a tty, validation before any change, safety dump
+  `pre-restore_<db>_*`, one transaction as the db owner). Operator guide: `BACKUP-RESTORE.md`.
 - env: defaults baked in `cron/Dockerfile` (`JUNK_RETENTION_DAYS`, `SA_HAM_SAMPLE_*`,
   `MTA`, `DNS_CHECK_*`); the operator file is the `env_file:` and overrides any of them. The
   entrypoint dumps the whole environment into `/etc/environment` **shell-quoted** (a raw `env`
@@ -499,7 +533,12 @@ more. See `.agents/services/provisioning.md`.
 - **IMAP**: STARTTLS to `mda:143` with the leaf certificate **pinned** to the first cert of
   `MCP_IMAP_CA_FILE` (no hostname/chain check: the cert is never issued for `mda`); master-user
   pool ≤ 3 connections per mailbox, idle close 60 s. Web logins use the user's own credentials.
-- **Web API / user page**: ALTCHA v1 (single use), lockout 5 failures per email+IP → 15 min,
+- **Web API / user page**: ALTCHA v1 (single use, cost 1,000,000, at most 30 challenges per
+  IP per minute per worker), lockout 5 failures per email+IP → 15 min **plus** 20 failures per
+  IP on any accounts (window 15 min, `login_failure` row `key='*'`; a good login never clears
+  it) → 15 min (2026-10 audit L-03); idle rows purged hourly. `mcp_boot` refuses to start
+  while `MCP_SECRET_KEY`/`MCP_DOVECOT_MASTER_PASSWORD` hold an env.sample `change-me…`
+  placeholder (warns for `MCP_DB_PASSWORD`, L-07).
   login = IMAP check; 15-min access JWT in memory + `mdmcp_refresh` cookie (HttpOnly, Secure,
   SameSite=Strict, Path=/webapi) rotating, reuse of the superseded one revokes the session,
   24 h absolute. Secondary addresses: magic link (24 h, `MCP_PUBLIC_URL/confirm#token`, confirmed

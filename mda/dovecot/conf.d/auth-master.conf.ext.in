@@ -2,7 +2,10 @@
 #
 # Installed as auth-master.conf.ext by docker-entrypoint.sh only when
 # MCP_DOVECOT_MASTER_PASSWORD is set; /etc/dovecot/master-users is rendered on
-# the same boot (`<MCP_DOVECOT_MASTER_USER>:{ARGON2ID}…`, 0640 root:dovecot).
+# the same boot (`<MCP_DOVECOT_MASTER_USER>:{ARGON2ID}…::::::allow_real_nets=<mcp ip>/32`,
+# 0640 root:dovecot). allow_real_nets (N-01) limits the master password to the mcp container's
+# own address — never the public 993/995 — and a watchdog in docker-entrypoint.sh follows that
+# address when the mcp is recreated (PEER_WATCH_INTERVAL).
 #
 # Login: `user@domain*<master>` + the master password. The master passdb sits
 # inside `protocol imap`, so the same credentials fail over POP3, ManageSieve

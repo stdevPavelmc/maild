@@ -194,6 +194,32 @@ class CatalogueTests(unittest.TestCase):
         self.assertEqual(ctx.exception.status_code, 404)
         self.assertEqual(catalogue.get_domain(SUPER, DOMAIN)["mailboxes"], 0)
 
+    def test_07b_domain_admin_cannot_set_reserved_domain_fields(self):
+        """2026-10 audit L-01: transport/backupmx/maxquota/quota are superadmin-only."""
+        tenant = Principal(f"tenant@{DOMAIN}", False, [DOMAIN], DEVICE)
+        for field, value in (
+            ("transport", "smtp:[attacker.example]:25"),
+            ("backupmx", True),
+            ("maxquota", 999999),
+            ("quota", 999999),
+        ):
+            with self.subTest(field=field):
+                with self.assertRaises(ApiError) as ctx:
+                    catalogue.update_domain(tenant, DOMAIN, {field: value})
+                self.assertEqual(ctx.exception.status_code, 403)
+        current = catalogue.get_domain(SUPER, DOMAIN)
+        self.assertEqual(current["transport"], "virtual")
+        self.assertFalse(current["backupmx"])
+        # the tenant fields stay editable, and an explicit None is "not sent"
+        updated = catalogue.update_domain(
+            tenant, DOMAIN, {"description": "tenant edit", "transport": None}
+        )
+        self.assertEqual(updated["description"], "tenant edit")
+        # a superadmin still sets them
+        self.assertEqual(
+            catalogue.update_domain(SUPER, DOMAIN, {"maxquota": 0})["maxquota"], 0
+        )
+
     def test_08_domain_alias_scope_and_counts(self):
         source = "alias.adminng-selftest.test"
         secondary = "alt.adminng-selftest.test"

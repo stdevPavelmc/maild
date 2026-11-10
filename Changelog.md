@@ -18,7 +18,53 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## Unreleased — MailD MCP (P0–P5 — `mcp/progress.md`)
+## 2026-11-10 2.0.0-rc1 — MailD MCP (P0–P5 — `mcp/progress.md`) and the 2026-10 security audit
+- Security (audit LOW/INFO batch, L-01…L-10, I-01):
+  - AdminNG: a domain admin could set the superadmin-only domain fields (`transport` — reroute
+    its domain's mail —, `backupmx`, `maxquota`, `quota`); they now answer 403 for it (L-01).
+    `reauth-confirm` checked the password with no throttle; it now shares the login lockout
+    (5 failures per username+IP → 429, also at the login form) (L-02).
+  - MCP: a username-independent per-IP lockout (20 failed logins on any accounts within
+    15 min → 15 min; a good login never clears it), ALTCHA cost 100,000 → 1,000,000, at most 30
+    challenges per IP per minute, `login_failure` purged hourly (L-03). `mcp_boot` refuses to
+    start while `MCP_SECRET_KEY`/`MCP_DOVECOT_MASTER_PASSWORD` hold an env.sample `change-me…`
+    placeholder and warns for `MCP_DB_PASSWORD`; the mda never enables a master user with the
+    placeholder (it would open every mailbox on 993) (L-07). The MCP Traefik router no longer
+    serves `/healthz` (I-01).
+  - mta: the :25 tarpit `sleep` is suspended in Postfix stress mode (`${stress?{0}:{N}}`), so
+    slow RCPT floods can no longer exhaust the smtpd pool (L-04). mta/mda: a self-signed
+    `/certs/mail.key` is generated 0600 and an existing world-readable one is tightened at
+    boot (L-05).
+  - amavis: new DKIM keys are `DKIM_KEY_BITS` bits (new, default **2048**; was a hard-coded
+    1024). Existing keys are kept — INSTALL.md → DKIM explains the rotation (L-06).
+    `check_dns.sh` now reads the local and the published `p=` whitespace-free: the local key
+    (split over quoted lines by `amavisd showkeys`) was always read empty, so the E5 "published
+    key does not match" check never compared anything, and a multi-string 2048-bit record
+    would have been cut at the first string.
+  - Compose (all four files): `no-new-privileges` on `api`, `adminng`, `mua`, `mda`, `mta`,
+    `cron`; the `api` also runs `read_only` + `tmpfs /tmp` + `cap_drop: ALL` (L-08; dropping
+    capabilities on the other services is an accepted risk). Production
+    mounts the host `/var/log` into cron read-only (dev keeps `ldata/logs` writable for the
+    test fixture) (L-09). `backup_db.sh` writes with `umask 077` and keeps `/backups` and
+    `/backups/db` at 0700, older archives tightened to 0600 (L-10).
+  - Backups (L-10): optional encryption — set `BACKUP_AGE_RECIPIENT` (new, not baked; age or ssh
+    public keys, comma-separated) and every archive is validated, encrypted to `.sql.gz.age` and
+    the plaintext removed (a bad key keeps the plain archive and fails the run loudly). Unset, the
+    archives stay plain gzip as before. New `/scripts/restore_db.sh`: detects plain vs encrypted
+    by content, asks for the private key (or `--identity`), validates the dump before touching
+    anything, takes a safety dump, refuses while clients are connected (`--force`), restores in
+    one transaction as the database owner. The cron image now ships `age`. Operator guide:
+    `BACKUP-RESTORE.md`. `test.sh` G4d–G4g.
+  - mda (N-01, found during the remediation): the Dovecot master user was IMAP-only but usable
+    from any network — including the public 993 — so the master password alone opened every
+    mailbox from the internet. Its `master-users` entry now carries
+    `allow_real_nets=<mcp container address>`, followed by a watchdog when the mcp moves (new
+    mda ENV `MCP=mcp`, `PEER_WATCH_INTERVAL=30`). The master password now works from the mcp
+    container only. `test.sh` J1–J6 log in from inside the mcp container (as the MCP does),
+    J1b checks the refusals (host 993/143, another container), L7 the address move.
+  - Tests: pytest +2 (MCP), `test_catalogue` 07b, `test_ratelimit` reauth throttle, `test.sh`
+    hardening/healthz static check, L-05 key mode, B2d stress tarpit, G4a backup modes, G4d–G4g
+    encryption/restore, K4b per-IP spray lockout.
 - Security (audit M-02): the anonymous `GET /oauth/authorize` fetched any uncached CIMD
   `client_id` URL synchronously — on Django's single shared sync thread, so one slow or
   blackholed URL froze every sync view of the worker for up to 5 s per request — and echoed

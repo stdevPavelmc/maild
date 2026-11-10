@@ -380,10 +380,13 @@ if [ ! -f /certs/mail.crt -a ! -f /certs/mail.key ] ; then
         -config /etc/postfix/postfix-openssl.cnf \
         -out /certs/mail.crt \
         -keyout /certs/mail.key
-    chmod +r /certs/mail.key
 else
     echo "SSL certs in place, skipping generation"
 fi
+# The private key is root-only (2026-10 audit L-05): Postfix reads it as root before the
+# smtpd workers drop to the postfix user, so group/other never need it. Also tightens a key
+# an older image generated 644 into the shared /certs volume.
+[ -f /certs/mail.key ] && chmod go-rwx /certs/mail.key
 
 # Remove references for manual files for set-perms to make it happy
 cat /etc/postfix/postfix-files | sed "s|^.*directory/man.*$||g" | uniq > /tmp/1

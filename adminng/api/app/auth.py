@@ -629,19 +629,33 @@ def logout_session(refresh_token: str) -> None:
 
 
 def reauth_confirm(password: str, principal: Principal, ip: str | None) -> dict:
-    """Re-authenticate for a destructive action: 30-second scoped token."""
+    """Re-authenticate for a destructive action: 30-second scoped token.
+
+    Throttled on the login counter (2026-10 audit L-02): it is the same password, so a
+    stolen session must not turn this endpoint into an unlimited guessing oracle, and a
+    lockout armed here also blocks the login form for that username+IP (and vice versa).
+    """
+    ratelimit.check(principal.username, ip)
     try:
         _verify_credentials(principal.username, password)
     except ApiError:
+        locked = ratelimit.failure(principal.username, ip)
         audit.record(
             actor=principal.username,
-            action="REAUTH_FAIL",
+            action="REAUTH_LOCKOUT" if locked else "REAUTH_FAIL",
             result="denied",
             device_id=principal.device_id,
             ip=ip,
             endpoint="POST /api/v1/auth/reauth-confirm",
         )
+        if locked:
+            raise ApiError(
+                429,
+                "RATE_LIMITED",
+                "too many failed attempts, the account is temporarily locked",
+            ) from None
         raise
+    ratelimit.success(principal.username, ip)
     audit.record(
         actor=principal.username,
         action="REAUTH_OK",
