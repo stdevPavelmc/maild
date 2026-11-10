@@ -18,7 +18,7 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2026-11-10 2.0.0-rc1 — MailD MCP (P0–P5 — `mcp/progress.md`) and the 2026-10 security audit
+## 2026-11-10 2.0.0-rc1
 - Security (audit LOW/INFO batch, L-01…L-10, I-01):
   - AdminNG: a domain admin could set the superadmin-only domain fields (`transport` — reroute
     its domain's mail —, `backupmx`, `maxquota`, `quota`); they now answer 403 for it (L-01).
