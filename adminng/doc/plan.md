@@ -141,7 +141,7 @@ running it) · **validated** (verified by running the acceptance checks).
 - `npm run build` is the gate: i18n completeness → `tsc --noEmit` → Vite. It runs inside the
   image, so a missing Spanish key fails the image build.
 - Browser suite: **`adminng/pwa-test`** — a dev-only one-shot container (service `pwa-test`)
-  with Playwright 1.64.1 + Chromium and Lighthouse 12.8.2 baked in. `./adminng/pwa-test/run.sh
+  with Playwright 1.64.1 + Chromium and Lighthouse 13.6.0 baked in (12.8.2 until 2026-11-10). `./adminng/pwa-test/run.sh
   verify` runs `flows`, `installable`, `superadmin`, `webauthn`, `card-layout` and the
   Lighthouse budget; no host Node or `npx playwright install` is involved. **5/5 passing.**
 - The catalogue card grids are two columns from the 640 px breakpoint up and one on phones;

@@ -506,7 +506,7 @@ more. See `.agents/services/provisioning.md`.
 ## mcp — MailD MCP server
 
 - Image `pavelmc/maild-mcp:develop` from `mcp/Dockerfile`: stage 1 `node:26-alpine` builds the
-  user SPA (`mcp/ui`, React 18 + Vite 5 + Tailwind 3 + i18next, pinned to the AdminNG versions;
+  user SPA (`mcp/ui`, React 18 + Vite 6 + React Router 7 + Tailwind 3 + i18next, pinned to the AdminNG versions;
   `npm run build` runs the EN/ES `i18n:check`), stage 2 `python:3.14-slim-trixie`, uid 10001,
   read-only rootfs + `tmpfs /tmp`, `cap_drop: ALL`, `no-new-privileges`. Design and decisions:
   `mcp/technical-proposal.md`; delivery status: `mcp/progress.md`.

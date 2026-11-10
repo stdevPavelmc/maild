@@ -18,7 +18,24 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
-## 2026-11-10 2.0.0-rc1
+- Security (GitHub dependency alerts, 2026-11-10): JavaScript dependencies of the three web
+  packages updated. **None of the alerts was exploitable in a deployment**: every Vite, esbuild
+  and launch-editor issue lives in the Vite *dev server* (production images serve a static
+  `vite build`; several are Windows-only); the React Router ones need SSR hydration or an
+  attacker-chosen `<Link>`/`navigate()` target (both apps use a client-only `<BrowserRouter>`
+  with fixed or internally built targets); fast-uri/glob/minimatch run only inside the PWA's
+  service-worker build on our own patterns; the `pwa-test` ones (extract-zip, OpenTelemetry via
+  Lighthouse's Sentry, puppeteer chain) are in the dev-only browser harness.
+  - `adminng/pwa`: Vite 5.4 → **6.4.6**, react-router-dom 6.30 → **7.18.5**, `npm audit fix`
+    (fast-uri 3.1.9, serialize-javascript 7.1.4, postcss-selector-parser) and an `overrides`
+    pin of `glob` ^14.0.4 under `workbox-build` (also pulls minimatch 11.0.6); the
+    service-worker precache list is unchanged. Left: `deepmerge` (low, no patched release
+    exists; build-time option merging in `@rollup/plugin-node-resolve`).
+  - `mcp/ui`: Vite **6.4.6**, react-router-dom **7.18.5** (exact pins) — `npm audit` clean.
+  - `adminng/pwa-test`: Lighthouse 12.8.2 → **13.6.0** — `npm audit` clean; the budget still
+    passes (performance 100, accessibility 96, best-practices 100).
+  - Verified: both production builds, `run.sh verify` 5/5, `run.sh mcp` 17/17,
+    `run.sh superadmin` 1/1, `test.sh` fast subset 191/0.
 - Security (audit LOW/INFO batch, L-01…L-10, I-01):
   - AdminNG: a domain admin could set the superadmin-only domain fields (`transport` — reroute
     its domain's mail —, `backupmx`, `maxquota`, `quota`); they now answer 403 for it (L-01).

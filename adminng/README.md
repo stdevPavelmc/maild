@@ -4,10 +4,9 @@ AdminNG is the modern, PWA-first administration interface for MailD's PostfixAdm
 catalogue (domains, users/mailboxes, aliases, administrators, security logs) —
 usable from any browser and installable as an Android app.
 
-**Status: design phase.** The consolidated specification is
-[doc/technical-draft.md](doc/technical-draft.md) and the phased roadmap is
-[doc/plan.md](doc/plan.md). The original Spanish drafts that seeded this design
-are kept in `doc/` as source material.
+The consolidated specification is [doc/technical-draft.md](doc/technical-draft.md)
+and the phased roadmap is [doc/plan.md](doc/plan.md). The original Spanish drafts
+that seeded this design are kept in `doc/` as source material.
 
 ## Project layout
 
