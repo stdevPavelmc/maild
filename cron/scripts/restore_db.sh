@@ -15,12 +15,14 @@
 # - The archive is decrypted/decompressed and validated (gzip -t, the pg_dump header and
 #   trailer) BEFORE anything is touched.
 # - The target database comes from the file name (maild_backup_ → POSTGRES_DB, maild_adminng_ →
-#   ADMINNG_DB, maild_mcp_ → MCP_DB, pre-restore_<db>_ → <db>); --database overrides it.
+#   ADMINNG_DB, maild_mcp_ → MCP_DB, maild_roundcube_ → ROUNDCUBE_DB, pre-restore_<db>_ → <db>);
+#   --database overrides it.
 # - A safety dump of the current database is written first (pre-restore_<db>_<date>.sql.gz,
 #   encrypted like the daily archives when BACKUP_AGE_RECIPIENT is set; same 15-day retention).
 # - The restore is ONE transaction: DROP SCHEMA public CASCADE, CREATE SCHEMA public, the dump.
 #   Any error rolls everything back and the database is left exactly as it was. It runs as the
-#   database's owner (SET ROLE), so the MCP database stays owned by its restricted role.
+#   database's owner (SET ROLE), so the MCP and Roundcube databases stay owned by their
+#   restricted roles.
 
 source /etc/environment
 set -o pipefail
@@ -29,6 +31,7 @@ umask 077
 BACKUP_DIR="/backups/db"
 : "${ADMINNG_DB:=adminng}"
 : "${MCP_DB:=mcp}"
+: "${ROUNDCUBE_DB:=roundcube}"
 : "${POSTGRES_PORT:=5432}"
 
 IDENTITY=""
@@ -121,6 +124,7 @@ if [ -z "${TARGET_DB}" ]; then
         maild_backup_*)  TARGET_DB="${POSTGRES_DB}" ;;
         maild_adminng_*) TARGET_DB="${ADMINNG_DB}" ;;
         maild_mcp_*)     TARGET_DB="${MCP_DB}" ;;
+        maild_roundcube_*) TARGET_DB="${ROUNDCUBE_DB}" ;;
         pre-restore_*)   TARGET_DB="$(basename "${ARCHIVE}" | sed -E 's/^pre-restore_(.+)_[0-9]{8}_[0-9]{6}\.sql\.gz.*$/\1/')" ;;
         *) die "cannot tell the database from the file name, pass --database NAME" ;;
     esac
@@ -192,9 +196,10 @@ if [ "${CLIENTS:-0}" -gt 0 ]; then
     if [ "${FORCE}" != 1 ]; then
         cat >&2 <<EOF
 restore: stop the services that write to it first, then run this again, e.g.
-    docker compose stop api mta mda mua amavis mcp      # catalogue (${POSTGRES_DB})
+    docker compose stop api mta mda mua mua2 amavis mcp # catalogue (${POSTGRES_DB})
     docker compose stop api                             # AdminNG (${ADMINNG_DB})
     docker compose stop mcp                             # MCP (${MCP_DB})
+    docker compose stop mua2                            # Roundcube (${ROUNDCUBE_DB})
 or pass --force: the swap is one transaction (readers see the old or the new data, never a
 mix), but anything written between the dump and now is lost either way.
 EOF
@@ -258,7 +263,7 @@ fi
 
 info "OK: '${TARGET_DB}' restored from $(basename "${ARCHIVE}")"
 if [ "${TARGET_DB}" = "${POSTGRES_DB}" ]; then
-    echo "restore: next: 'docker compose restart db' (re-asserts the MCP role's catalogue grants),"
+    echo "restore: next: 'docker compose restart db' (re-asserts the MCP/Roundcube roles' catalogue grants),"
     echo "         then start/restart the mail services: docker compose up -d"
 else
     echo "restore: next: start/restart the services that use it: docker compose up -d"

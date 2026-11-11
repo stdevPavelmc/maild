@@ -18,6 +18,50 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-11-11 2.0.0-rc2
+- Fixed (2026-11-10): **the mta peer-IP watchdog broke when two peers swapped addresses.** It
+  rewrote `s/OLD/NEW/` one peer at a time, so when amavis and mda traded addresses in the same
+  round (stop both, start them in the other order), the second rewrite undid the first: amavis
+  dropped out of the 10025 reinjection allow-list and **every message was deferred** until the
+  mta was restarted by hand. The repatch is now two-phase (old → placeholder → new), matches
+  only whole addresses (`172.23.0.6` no longer hits `172.23.0.60`) and defers a round while a
+  new address is still baked for a peer that does not resolve. Verified live with a forced
+  amavis ↔ mda swap.
+- Added (2026-11-10): **the Roundcube database in the daily backups.** `backup_db.sh` writes
+  `maild_roundcube_<date>.sql.gz` (identities, signatures, prefs, personal contacts) with the
+  same validation, encryption and retention as the others, SKIPPED while `ROUNDCUBE_DB` is
+  missing or empty; the MCP and Roundcube dumps now share one `dump_service_db` function.
+  `restore_db.sh` maps `maild_roundcube_` to `ROUNDCUBE_DB`; new test G4c2.
+- Added (2026-11-10): **`mua2`, a Roundcube webmail on Debian trixie**, the candidate
+  replacement for the SnappyMail `mua` — **dev compose only** (http://localhost:8086) until it is
+  approved (`mua2/README.md`, promotion checklist).
+  - Default UI language from `ROUNDCUBE_LANGUAGE` (image default `en_US`, `auto` = the
+    browser's, validated against the shipped localizations; the dev env sets `es_ES`).
+  - `ROUNDCUBE_UPLOAD_MAX` is the attachment limit the compose screen shows (24 MB, not 18):
+    Roundcube's `max_message_size` is the encoded message, so it is set to upload × 1.33 +
+    10 KB, capped by the mta's `MAX_MESSAGESIZE`.
+  - Roundcube **1.7.6** (released 2026-11-09, a 17-fix security release; tarball sha256-pinned,
+    signature verified) on `debian:trixie-slim` with Debian's PHP 8.4 (security backports,
+    `apt-get upgrade` at build). No ImageMagick/GD/LDAP/gnupg/aspell; installer and unused
+    plugins removed; spell check, messages cache and mbox import off; `disable_functions` for
+    every shell/process call; SameSite=Strict session cookie, IP check, AES-256-CBC des_key.
+  - Zero-touch boot like the rest of the stack: settings rendered from the environment, bounded
+    `maild_provision` gate, schema created on an empty database / upgraded after an image bump.
+  - New restricted db role **`maild_roundcube`** (`ROUNDCUBE_DB_PASSWORD`, only when set: the db
+    then also creates `ROUNDCUBE_DB=roundcube`): owner of its database; on the catalogue only
+    column `SELECT` for the directory (never `mailbox.password` nor `alias.goto`) and column
+    `UPDATE` of `mailbox.password`/`modified`. The container gets an env allow-list (no
+    `env_file`), so `POSTGRES_PASSWORD` never reaches it, and Apache starts with a scrubbed
+    environment. `db/ensure_roles.sh` now ensures each optional role independently.
+  - `maild_directory` plugin: the catalogue's mailboxes and distribution lists as a read-only
+    address book, own domain by default (`ROUNDCUBE_DIRECTORY_SCOPE`), autocomplete from **3
+    characters** (enforced server-side too), first-login identity name from `mailbox.name`.
+  - Password change through the `password` plugin, hashed per `PASSWORD_SCHEME` (Argon2id
+    `{ARGON2ID}` with the API's parameters; md5crypt only until 2027-02-01). Sieve filters,
+    vacation and forward via ManageSieve; Junk button (move only, imapsieve learns).
+  - `test.sh` section **Q** (7 checks, skipped when mua2 is not running): login page, exposure,
+    secrets/role, directory autocomplete, password change round-trip through Dovecot, send +
+    Sent copy, ManageSieve.
 - Security (GitHub dependency alerts, 2026-11-10): JavaScript dependencies of the three web
   packages updated. **None of the alerts was exploitable in a deployment**: every Vite, esbuild
   and launch-editor issue lives in the Vite *dev server* (production images serve a static
@@ -36,6 +80,7 @@ Dates must be YEAR-MONTH-DAY then version number in semver format.
     passes (performance 100, accessibility 96, best-practices 100).
   - Verified: both production builds, `run.sh verify` 5/5, `run.sh mcp` 17/17,
     `run.sh superadmin` 1/1, `test.sh` fast subset 191/0.
+## 2026-11-10 2.0.0-rc1
 - Security (audit LOW/INFO batch, L-01…L-10, I-01):
   - AdminNG: a domain admin could set the superadmin-only domain fields (`transport` — reroute
     its domain's mail —, `backupmx`, `maxquota`, `quota`); they now answer 403 for it (L-01).

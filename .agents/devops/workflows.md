@@ -123,7 +123,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   inactive mailbox, never rehashing a legacy `$1$` row with the master password — with a control
   proving the own-login rehash still works, and the `auth_user=<mcp>` login trail), the
   `maild_mcp` role grants, the service mailbox (created once, untouched on restart) and
-  `/healthz`; G4c checks the MCP backup archive. Section K covers the P1 user side: the
+  `/healthz`; G4c checks the MCP backup archive and G4c2 the Roundcube (mua2) one. Section K covers the P1 user side: the
   domain allow-list CLI, web login (ALTCHA, lockout, refresh rotation + reuse revocation),
   secondary addresses (magic link through amavis, D11 conflicts + postmaster notice, owner wins,
   disabled secondary refused), PATs (scopes → 403 `insufficient_scope`, switch → 403, subset,

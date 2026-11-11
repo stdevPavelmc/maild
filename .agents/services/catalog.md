@@ -2,7 +2,7 @@
 
 All services live on the compose network `maild-dev` (dev) / `maild` (production, external).
 Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `mda`,
-`amavis`, `clamav`, `api`, `adminng`, `mua`, `cron` — never rename them.
+`amavis`, `clamav`, `api`, `adminng`, `mua`, `mua2`, `cron` — never rename them.
 
 ## db — PostgreSQL catalogue
 
@@ -20,7 +20,8 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   existing databases or the schema. `ADMINNG_DB` is a separate variable on purpose:
   `mua/config-setup.php` reads `POSTGRES_EXTRA_DB` as a single database name for the
   SnappyMail contacts DSN, so the two lists must not be merged. `MCP_DB` (default `mcp`) is
-  ensured the same way for the MailD MCP.
+  ensured the same way for the MailD MCP, and `ROUNDCUBE_DB` (default `roundcube`) for mua2 —
+  the latter **only when `ROUNDCUBE_DB_PASSWORD` is set** (no mua2 → no database).
 - Boot chain: postgres ready → `ensure_databases.sh` → `migrate.sh` (catalogue migrations,
   incl. `003_mcp_service_mailbox.sql`: the `SECURITY DEFINER` function
   `maild_mcp_ensure_service_mailbox(address, hash, name)`, insert-only, Argon2id hashes only,
@@ -231,7 +232,11 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Hard-depends on mda, amavis, clamav. Delivers local mail over LMTP to the mda's IP
   (rendered into `main.cf`/`master.cf` at start), repatched by the **peer-IP watchdog**
   (`PEER_WATCH_INTERVAL`, default 30s, `0` disables it) when `amavis`/`mda`/`mua` come back with
-  a new address; the mta reloads Postfix itself after the repatch.
+  a new address; the mta reloads Postfix itself after the repatch. The repatch is two-phase
+  (old addresses → `MAILD_PEER_<NAME>` tokens → new addresses), so peers that trade addresses
+  in the same round (amavis ↔ mda after a stop/start) stay correct; matches are anchored on
+  address boundaries, and a round is deferred (logged) while a new address is still baked for
+  a peer whose lookup fails.
 - Logs to stdout (`maillog_file = /dev/stdout`); the daily traffic resume parses a syslog
   with rsyslog-style stamps, which only exists in production (dev: `test.sh` phase G
   materialises one).
@@ -415,6 +420,49 @@ more. See `.agents/services/provisioning.md`.
 - env: defaults baked in `mua/Dockerfile` (`BANNER_TITLE`, `MUA_*`, `POSTGRES_EXTRA_DB`);
   the operator file is the `env_file:` and overrides any of them.
 
+## mua2 — Roundcube (trial, dev only)
+
+Candidate replacement for `mua`; full reference in `mua2/README.md` (features, security
+choices, variables, Roundcube bump procedure, promotion checklist). Only in
+`docker-compose-dev.yml` until the main developer approves the switch.
+
+- Base `debian:trixie-slim` + Debian's **PHP 8.4** (`libapache2-mod-php8.4`, prefork) — Debian
+  security backports + `apt-get upgrade` at build; Roundcube **1.7.6** complete tarball,
+  `ARG ROUNDCUBE_VERSION`/`ROUNDCUBE_SHA256` (sha256-pinned, signature checked when bumping).
+  Not installed on purpose: ImageMagick, php-gd, php-ldap, gnupg, aspell. The installer and
+  unused plugins (enigma, squirrelmail_usercopy, autologon, debug_logger, example_addressbook)
+  are deleted from the image; the tree is root-owned, read-only for www-data.
+- Dev publishes 8086:80. Volume `/var/lib/roundcube` (`ldata/mua2`) holds only the generated
+  `des_key`; Roundcube's state (users, identities, prefs, personal contacts, sessions) is the
+  `ROUNDCUBE_DB` database, owned by the restricted **`ROUNDCUBE_DB_USER`** role
+  (`maild_roundcube`, `db/ensure_roles.sh`): catalogue column `SELECT` on
+  `domain(domain, active)`, `mailbox(username, domain, name, active)`,
+  `alias(address, domain, active)`, `maild_provision`, and column `UPDATE` on
+  `mailbox(password, modified)` only — it can never read a hash.
+- **No `env_file`**: an explicit allow-list (`ROUNDCUBE_*`, `BANNER_TITLE`, `PASSWORD_SCHEME`,
+  `MCP_SERVICE_EMAIL`, `MTA`/`MDA`, `POSTGRES_HOST/DB`, `AUTO_PROVISION`, `PROVISION_*`), so
+  `POSTGRES_PASSWORD` never enters it. Like cron, the build snapshots the image ENV defaults into
+  `/etc/maild-image.env` and the entrypoint restores the ones a bare key unset.
+- Entrypoint: des_key → `render-config.php` (env → `/run/maild-roundcube/maild.inc.php`,
+  root:www-data 0640; refuses to start on an unusable value) → bounded `maild_provision` gate →
+  `bin/initdb.sh` on an empty database / `bin/updatedb.sh` otherwise → `bin/gc.sh` →
+  `exec env -i … apache2ctl -D FOREGROUND` (Apache/PHP see no operator secret). The static
+  `config/config.inc.php` reads only the rendered file. `opcache.validate_timestamps=0`: a config
+  edit inside a running container needs `apache2ctl -k graceful`.
+- MailD integration: `plugins/maild_directory` (read-only "Directory" address book over the
+  catalogue — own domain by default, distribution lists as `List: <name>`, MCP service mailbox
+  hidden — registered for autocompletion; `autocomplete_min_length` 3, enforced server-side for
+  every free-text search; first-login identity name from `mailbox.name`); `password` plugin `sql`
+  driver → `UPDATE mailbox SET password=%P, modified=now() WHERE username=%u AND active`, hash per
+  `PASSWORD_SCHEME` (`hash-argon2id` + `{ARGON2ID}` = PHP defaults m=65536,t=4,p=1 like the
+  API; `md5-crypt` until 2027-02-01, re-checked per request); `managesieve` on `mda:4190`
+  STARTTLS (raw editor off); `markasjunk` move-only. IMAP `tls://mda:143`, SMTP `ssl://mta:465`
+  as the user (peer-name verification off on this internal hop, like `mua`).
+- Logging: Apache's ErrorLog (and so mod_php's errors and Roundcube's `log_driver=php`) goes to
+  the container log — `error_log` is deliberately unset in PHP (a www-data child cannot reopen
+  `/dev/stderr`), and Debian's own `security.conf` is disabled (it re-set `ServerTokens OS`).
+- Tests: `test.sh` section **Q** (Q1–Q7), skipped when the container is not running.
+
 ## cron — maintenance
 
 - **Environment (2026-10 audit M-06):** no `env_file` — the compose `environment:` block is an
@@ -468,12 +516,16 @@ more. See `.agents/services/provisioning.md`.
   resolute it is ≥ the catalogue server, so the PGDG repository, keyring and `curl` the jammy image
   needed are gone. `backup_db.sh` still refuses to dump when the client is older than the server
   (it mails a CRITICAL with the `PG_CLIENT_MAJOR` remedy instead of keeping an empty archive).
-- `backup_db.sh` writes **three** archives per run: `maild_backup_*.sql.gz` (the catalogue),
+- `backup_db.sh` writes **four** archives per run: `maild_backup_*.sql.gz` (the catalogue),
   `maild_adminng_*.sql.gz` (AdminNG: device approvals, sessions, TOTP seeds, audit trail —
   `ADMINNG_DB`, defaulted in the script) and `maild_mcp_*.sql.gz` (the MailD MCP: accounts,
-  tokens, settings — `MCP_DB`, default `mcp`; SKIPPED when that database is missing or has no
-  table yet). All get the same size/gzip/trailer validation and the same 15-day retention; a
-  failed AdminNG or MCP dump keeps the catalogue archive but marks the run FAILED.
+  tokens, settings — `MCP_DB`, default `mcp`) and `maild_roundcube_*.sql.gz` (the mua2
+  webmail: identities, signatures, prefs, personal contacts — `ROUNDCUBE_DB`, default
+  `roundcube`). The two service databases go through one `dump_service_db` function and are
+  SKIPPED when the database is missing or has no table yet. All get the same size/gzip/trailer
+  validation and the same 15-day retention; a failed AdminNG, MCP or Roundcube dump keeps the
+  catalogue archive but marks the run FAILED. `restore_db.sh` maps `maild_roundcube_` to
+  `ROUNDCUBE_DB`.
 - `pflogsumm` (1.1.14) lives in `/usr/bin` on resolute, so `resume.sh` resolves it from `PATH`;
   SpamAssassin 4.0.2 provides the `sa-learn` the Bayes job uses. The `cron/spamassassin/` file is a
   reference copy of Debian's `/etc/cron.daily/spamassassin` that the image never installs (the

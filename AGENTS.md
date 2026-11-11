@@ -15,6 +15,7 @@ for maintenance jobs.
 | `amavis` | Content filter (spam + AV relay, DKIM signing); 10024 ← mta, 10026 ← cron/mcp | — (internal) |
 | `clamav` | ClamAV antivirus engine                           | 3310                      |
 | `mua`    | SnappyMail webmail                                | 8081                      |
+| `mua2`   | Roundcube webmail on Debian trixie — **trial** replacement for `mua`, dev compose only (`mua2/README.md`) | 8086 |
 | `api`    | AdminNG API — FastAPI over the catalogue; first-boot provisioning leader (internal only) | —  |
 | `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083 (HTTP), 8084 (HTTPS, dev) |
 | `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
@@ -25,7 +26,7 @@ for maintenance jobs.
 ## Core Principles — never break these
 
 - **Never rename service hostnames** (`db`, `mta`, `mda`, `amavis`, `clamav`,
-  `mua`, `cron`, `api`, `adminng`, `mcp`) — they are hardcoded across entrypoints,
+  `mua`, `mua2`, `cron`, `api`, `adminng`, `mcp`) — they are hardcoded across entrypoints,
   Postfix/Dovecot/Amavis config and the test suite.
 - **Never change the database schema** without a migration script. `db/ensure_databases.sh`
   only *creates missing* databases (`POSTGRES_EXTRA_DB`); it never alters existing ones.
@@ -76,7 +77,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (200 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (208 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```

@@ -402,9 +402,21 @@ done
 # Re-resolve the peers every PEER_WATCH_INTERVAL seconds and repatch ONLY the effective
 # addresses (the boot render stays the source of truth for the structure), then reload
 # Postfix. Set PEER_WATCH_INTERVAL=0 to disable, e.g. on a fully static deployment.
-patch_param() { # <main.cf parameter> <old address> <new address> -> 0 when it was repatched
+#
+# The addresses are swapped in TWO phases: every moved peer's old address becomes a placeholder
+# token first, then every token becomes the new address. A single pass of s/OLD/NEW/ per peer
+# breaks when two peers trade addresses in the same round (amavis .9->.6 and mda .6->.9: the
+# mda pass rewrites amavis' fresh .6 back to .9, the 10025 allow-list loses amavis and every
+# message defers). Matches are anchored on address boundaries (172.23.0.6 never hits
+# 172.23.0.60), and a round is deferred while a peer's new address is still baked for a peer
+# that is NOT being repatched (its lookup failed): patching then would hit that peer's entry too.
+peer_sub() { # <text> <old address|token> <new address|token> -> text on stdout
+    printf '%s' "$1" | sed -E "s/(^|[^0-9.])${2//./\\.}([^0-9.]|\$)/\\1${3}\\2/g; s/(^|[^0-9.])${2//./\\.}([^0-9.]|\$)/\\1${3}\\2/g"
+}
+
+patch_param() { # <main.cf parameter> <old> <new> -> 0 when it was repatched
     PP_CUR="$(postconf -h "$1" 2>/dev/null | tr '\n' ' ' | sed 's/  */ /g')"
-    PP_NEW="$(printf '%s' "$PP_CUR" | sed "s/${2//./\\.}/${3}/g")"
+    PP_NEW="$(peer_sub "$PP_CUR" "$2" "$3")"
     if [ -n "$PP_CUR" ] && [ "$PP_CUR" != "$PP_NEW" ] ; then
         postconf -e "$1=$PP_NEW" >/dev/null 2>&1 || return 1
         return 0
@@ -412,14 +424,22 @@ patch_param() { # <main.cf parameter> <old address> <new address> -> 0 when it w
     return 1
 }
 
-patch_instance() { # <service/type> <parameter> <old address> <new address> -> 0 when repatched
+patch_instance() { # <service/type> <parameter> <old> <new> -> 0 when repatched
     PI_CUR="$(postconf -M "$1" 2>/dev/null | sed -n "s/.*-o ${2}=//p" | awk '{print $1}')"
-    PI_NEW="$(printf '%s' "$PI_CUR" | sed "s/${3//./\\.}/${4}/g")"
+    PI_NEW="$(peer_sub "$PI_CUR" "$3" "$4")"
     if [ -n "$PI_CUR" ] && [ "$PI_CUR" != "$PI_NEW" ] ; then
         postconf -P "$1/${2}=${PI_NEW}" >/dev/null 2>&1 || return 1
         return 0
     fi
     return 1
+}
+
+patch_all() { # <old> <new> — every place a peer address is baked
+    for PA_P in mynetworks smtpd_sasl_path virtual_transport smtpd_recipient_restrictions ; do
+        patch_param "$PA_P" "$1" "$2" || true
+    done
+    patch_instance "${OWN_IP}:10025/inet" mynetworks "$1" "$2" || true
+    patch_instance "${OWN_IP}:10025/inet" smtpd_authorized_xforward_hosts "$1" "$2" || true
 }
 
 peer_watchdog() {
@@ -429,27 +449,45 @@ peer_watchdog() {
         W_AMAVISIP="$(resolve_peer "${AMAVIS}")"
         W_MDAIP="$(resolve_peer "${MDA}")"
         W_MUAIP="$(resolve_peer "${MUA}")"
-        W_CHANGED=0
+        W_ALL="AMAVISIP:${AMAVISIP}:${W_AMAVISIP} MDAIP:${MDAIP}:${W_MDAIP} MUAIP:${MUAIP}:${W_MUAIP}"
 
-        for W_PAIR in "AMAVISIP:${AMAVISIP}:${W_AMAVISIP}" \
-                      "MDAIP:${MDAIP}:${W_MDAIP}" \
-                      "MUAIP:${MUAIP}:${W_MUAIP}" ; do
-            W_NAME="$(printf '%s' "$W_PAIR" | cut -d: -f1)"
-            W_OLD="$(printf '%s' "$W_PAIR" | cut -d: -f2)"
-            W_NEW="$(printf '%s' "$W_PAIR" | cut -d: -f3)"
-
-            # a lookup that fails right now yields an empty value: keep the baked address and
-            # retry next round -- never repatch with an empty one (the bug this watchdog exists for)
-            if [ -z "$W_OLD" ] || [ -z "$W_NEW" ] || [ "$W_OLD" = "$W_NEW" ] ; then
-                continue
+        # the moves of this round: NAME:OLD:NEW. A lookup that fails right now yields an empty
+        # value: keep the baked address and retry next round -- never repatch with an empty one
+        W_MOVES=""
+        for W_PAIR in $W_ALL ; do
+            IFS=: read -r W_NAME W_OLD W_NEW <<< "$W_PAIR"
+            if [ -n "$W_OLD" ] && [ -n "$W_NEW" ] && [ "$W_OLD" != "$W_NEW" ] ; then
+                W_MOVES="${W_MOVES} ${W_PAIR}"
             fi
+        done
+        [ -n "$W_MOVES" ] || continue
 
-            echo "mta: ${W_NAME} moved ${W_OLD} -> ${W_NEW}, repatching the Postfix maps"
-            for W_P in mynetworks smtpd_sasl_path virtual_transport smtpd_recipient_restrictions ; do
-                patch_param "$W_P" "$W_OLD" "$W_NEW" || true
+        # a new address still baked for a peer that is not moving this round: wait for it
+        W_BLOCKED=""
+        for W_MOVE in $W_MOVES ; do
+            IFS=: read -r W_NAME W_OLD W_NEW <<< "$W_MOVE"
+            for W_PAIR in $W_ALL ; do
+                IFS=: read -r W_ONAME W_OOLD W_ONEW <<< "$W_PAIR"
+                if [ "$W_ONAME" != "$W_NAME" ] && [ "$W_OOLD" = "$W_NEW" ] &&
+                   [[ " $W_MOVES " != *" ${W_PAIR} "* ]] ; then
+                    W_BLOCKED="${W_NAME} wants ${W_NEW}, still baked for ${W_ONAME} (not resolvable now)"
+                fi
             done
-            patch_instance "${OWN_IP}:10025/inet" mynetworks "$W_OLD" "$W_NEW" || true
-            patch_instance "${OWN_IP}:10025/inet" smtpd_authorized_xforward_hosts "$W_OLD" "$W_NEW" || true
+        done
+        if [ -n "$W_BLOCKED" ] ; then
+            echo "mta: WARNING - peer repatch deferred: ${W_BLOCKED}; retrying in ${PEER_WATCH_INTERVAL}s"
+            continue
+        fi
+
+        # phase 1: every old address -> its peer's token; phase 2: every token -> the new address
+        for W_MOVE in $W_MOVES ; do
+            IFS=: read -r W_NAME W_OLD W_NEW <<< "$W_MOVE"
+            echo "mta: ${W_NAME} moved ${W_OLD} -> ${W_NEW}, repatching the Postfix maps"
+            patch_all "$W_OLD" "MAILD_PEER_${W_NAME}"
+        done
+        for W_MOVE in $W_MOVES ; do
+            IFS=: read -r W_NAME W_OLD W_NEW <<< "$W_MOVE"
+            patch_all "MAILD_PEER_${W_NAME}" "$W_NEW"
 
             # keep this loop's bookkeeping and the healthcheck files in sync
             case "$W_NAME" in
@@ -457,19 +495,16 @@ peer_watchdog() {
                 MDAIP)    MDAIP="$W_NEW"    ; echo "$W_NEW" > /tmp/MDAIP ;;
                 MUAIP)    MUAIP="$W_NEW"    ; echo "$W_NEW" > /tmp/MUAIP ;;
             esac
-            W_CHANGED=1
         done
 
-        if [ "$W_CHANGED" = 1 ] ; then
-            if postfix check >/dev/null 2>&1 ; then
-                if postfix reload ; then
-                    echo "mta: configuration reloaded with the new peer addresses"
-                else
-                    echo "mta: WARNING - 'postfix reload' failed, the old addresses are still active"
-                fi
+        if postfix check >/dev/null 2>&1 ; then
+            if postfix reload ; then
+                echo "mta: configuration reloaded with the new peer addresses"
             else
-                echo "mta: WARNING - 'postfix check' rejected the repatched configuration, not reloading"
+                echo "mta: WARNING - 'postfix reload' failed, the old addresses are still active"
             fi
+        else
+            echo "mta: WARNING - 'postfix check' rejected the repatched configuration, not reloading"
         fi
     done
 }

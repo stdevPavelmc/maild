@@ -38,6 +38,9 @@ BACKUP_RETENTION_DAYS=15
 # The MailD MCP's own database (accounts, tokens, settings): created by the db image, owned by
 # the MCP role, dumped here as POSTGRES_USER (superuser), so the ownership does not get in the way.
 : "${MCP_DB:=mcp}"
+# Roundcube's own database (the mua2 webmail: identities, signatures, prefs, personal contacts),
+# created by the db image only when ROUNDCUBE_DB_PASSWORD is set; skipped while it is absent.
+: "${ROUNDCUBE_DB:=roundcube}"
 # An empty dump compressed is ~20 bytes and a real mailddb dump is tens of KB, so anything
 # below this is not a backup (overridable from the environment).
 BACKUP_MIN_BYTES="${BACKUP_MIN_BYTES:-1024}"
@@ -46,7 +49,8 @@ BACKUP_FILE="${BACKUP_DIR}/maild_backup_${DATE}.sql.gz"
 LOG_FILE="${BACKUP_DIR}/backup.log"
 # Every archive this job (or restore_db.sh's safety dump) writes, plain or encrypted (.age)
 ARCHIVES=( \( -name "maild_backup_*.sql.gz*" -o -name "maild_adminng_*.sql.gz*" \
-              -o -name "maild_mcp_*.sql.gz*" -o -name "pre-restore_*.sql.gz*" \) )
+              -o -name "maild_mcp_*.sql.gz*" -o -name "maild_roundcube_*.sql.gz*" \
+              -o -name "pre-restore_*.sql.gz*" \) )
 # Optional encryption (2026-10 audit L-10): one or more age recipients (age1… public keys, or
 # ssh-ed25519/ssh-rsa public keys), comma- or newline-separated. Only PUBLIC keys live here:
 # the private key never touches this server. Unset/empty = archives stay plain gzip.
@@ -100,6 +104,7 @@ log "=== Starting PostgreSQL backup ==="
     echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
     [ -n "${ADMINNG_DB:-}" ] && echo "$POSTGRES_HOST:5432:$ADMINNG_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
     [ -n "${MCP_DB:-}" ] && echo "$POSTGRES_HOST:5432:$MCP_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
+    [ -n "${ROUNDCUBE_DB:-}" ] && echo "$POSTGRES_HOST:5432:$ROUNDCUBE_DB:$POSTGRES_USER:$POSTGRES_PASSWORD"
 } > ~/.pgpass
 chmod 0600 ~/.pgpass
 
@@ -282,88 +287,97 @@ if [ "${ADMINNG_STATUS}" = "FAILED" ]; then
     FAIL_REASON="the AdminNG database dump failed: ${ADMINNG_FAIL} (the catalogue archive was kept)"
 fi
 
-# --- MailD MCP database (accounts, addresses, tokens, settings) ----------------
-# A third archive with the same treatment and the same failure rule as AdminNG. SKIPPED (not
-# FAILED) when the database does not exist or has no table yet: the db image creates it on
-# every boot, but it stays empty until the mcp container has run its migrations.
-MCP_BACKUP_FILE="${BACKUP_DIR}/maild_mcp_${DATE}.sql.gz"
-MCP_STATUS="SKIPPED"
-MCP_BYTES=0
-MCP_SIZE="n/a"
-MCP_TABLES=0
-MCP_FAIL=""
+# --- Service databases: MailD MCP, Roundcube (mua2) ------------------------------------
+# One more archive each, with the same treatment and the same failure rule as AdminNG.
+# SKIPPED (not FAILED) when the database does not exist or has no table yet: the db image
+# creates each one only when that service is configured, and it stays empty until the
+# service has created its schema (the mcp's migrations, the mua2 entrypoint's initdb).
+# Dumped as POSTGRES_USER (superuser), so the restricted owner roles do not get in the way.
+#
+# dump_service_db <label> <database> <archive> — sets SVC_STATUS SVC_BYTES SVC_SIZE
+# SVC_TABLES SVC_FAIL; a failed archive is deleted.
+dump_service_db() {
+    local label="$1" db="$2" file="$3" has_tables err dump_rc gzip_rc markers header rest trailer
+    SVC_STATUS="SKIPPED" ; SVC_BYTES=0 ; SVC_SIZE="n/a" ; SVC_TABLES=0 ; SVC_FAIL=""
 
-if [ "${BACKUP_STATUS}" = "SUCCESS" ] && [ -n "${MCP_DB:-}" ]; then
-    MCP_HAS_TABLES=$(psql -h ${POSTGRES_HOST} -U ${POSTGRES_USER} -d "${MCP_DB}" -w -tA \
+    [ "${BACKUP_STATUS}" = "SUCCESS" ] && [ -n "${db}" ] || return 0
+
+    has_tables=$(psql -h ${POSTGRES_HOST} -U ${POSTGRES_USER} -d "${db}" -w -tA \
         -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" 2>/dev/null | tr -d '[:space:]')
-    if [ -z "${MCP_HAS_TABLES}" ] || [ "${MCP_HAS_TABLES}" = "0" ]; then
-        log "MCP database ${MCP_DB} missing or empty, skipping its archive"
+    if [ -z "${has_tables}" ] || [ "${has_tables}" = "0" ]; then
+        log "${label} database ${db} missing or empty, skipping its archive"
+        return 0
+    fi
+
+    log "Backing up ${label} database: ${db}"
+    err=$(mktemp)
+    pg_dump -h ${POSTGRES_HOST} \
+            -U ${POSTGRES_USER} \
+            -d "${db}" \
+            -w \
+            --no-owner \
+            --no-acl \
+            2> ${err} \
+        | gzip > "${file}" 2>> ${LOG_FILE}
+    local pipe_rc=("${PIPESTATUS[@]}")
+    dump_rc="${pipe_rc[0]:-1}"
+    gzip_rc="${pipe_rc[1]:-1}"
+
+    if [ -s "${err}" ]; then
+        log "pg_dump (${db}) reported:"
+        sed 's/^/    /' ${err} | tee -a ${LOG_FILE} > /dev/null
+    fi
+    rm -f ${err}
+
+    if [ "${dump_rc}" -ne 0 ]; then
+        SVC_STATUS="FAILED" ; SVC_FAIL="pg_dump exited with ${dump_rc}"
+    elif [ "${gzip_rc}" -ne 0 ]; then
+        SVC_STATUS="FAILED" ; SVC_FAIL="gzip exited with ${gzip_rc}"
     else
-        log "Backing up MCP database: ${MCP_DB}"
-
-        MCP_ERR=$(mktemp)
-        pg_dump -h ${POSTGRES_HOST} \
-                -U ${POSTGRES_USER} \
-                -d "${MCP_DB}" \
-                -w \
-                --no-owner \
-                --no-acl \
-                2> ${MCP_ERR} \
-            | gzip > "${MCP_BACKUP_FILE}" 2>> ${LOG_FILE}
-
-        PIPE_RC=("${PIPESTATUS[@]}")
-        MCP_DUMP_RC="${PIPE_RC[0]:-1}"
-        MCP_GZIP_RC="${PIPE_RC[1]:-1}"
-
-        if [ -s "${MCP_ERR}" ]; then
-            log "pg_dump (${MCP_DB}) reported:"
-            sed 's/^/    /' ${MCP_ERR} | tee -a ${LOG_FILE} > /dev/null
-        fi
-        rm -f ${MCP_ERR}
-
-        if [ "${MCP_DUMP_RC}" -ne 0 ]; then
-            MCP_STATUS="FAILED" ; MCP_FAIL="pg_dump exited with ${MCP_DUMP_RC}"
-        elif [ "${MCP_GZIP_RC}" -ne 0 ]; then
-            MCP_STATUS="FAILED" ; MCP_FAIL="gzip exited with ${MCP_GZIP_RC}"
+        SVC_BYTES=$(stat -c %s "${file}" 2>/dev/null || echo 0)
+        SVC_SIZE=$(du -h "${file}" | cut -f1)
+        if [ "${SVC_BYTES}" -lt "${BACKUP_MIN_BYTES}" ]; then
+            SVC_STATUS="FAILED" ; SVC_FAIL="archive is only ${SVC_BYTES} bytes"
+        elif ! gzip -t "${file}" 2>> ${LOG_FILE}; then
+            SVC_STATUS="FAILED" ; SVC_FAIL="gzip -t failed"
         else
-            MCP_BYTES=$(stat -c %s "${MCP_BACKUP_FILE}" 2>/dev/null || echo 0)
-            MCP_SIZE=$(du -h "${MCP_BACKUP_FILE}" | cut -f1)
-            if [ "${MCP_BYTES}" -lt "${BACKUP_MIN_BYTES}" ]; then
-                MCP_STATUS="FAILED" ; MCP_FAIL="archive is only ${MCP_BYTES} bytes"
-            elif ! gzip -t "${MCP_BACKUP_FILE}" 2>> ${LOG_FILE}; then
-                MCP_STATUS="FAILED" ; MCP_FAIL="gzip -t failed"
+            markers=$(zcat "${file}" | awk '
+                /^-- PostgreSQL database dump$/          { header = 1 }
+                /^-- PostgreSQL database dump complete$/ { trailer = 1 }
+                /^CREATE TABLE /                         { tables++ }
+                END { printf "%d %d %d", header, trailer, tables+0 }')
+            header="${markers%% *}"
+            rest="${markers#* }"
+            trailer="${rest%% *}"
+            SVC_TABLES="${rest##* }"
+            if [ "${header}" != "1" ] || [ "${trailer}" != "1" ]; then
+                SVC_STATUS="FAILED"
+                SVC_FAIL="payload is not a complete SQL dump (header=${header}, trailer=${trailer})"
             else
-                MCP_MARKERS=$(zcat "${MCP_BACKUP_FILE}" | awk '
-                    /^-- PostgreSQL database dump$/          { header = 1 }
-                    /^-- PostgreSQL database dump complete$/ { trailer = 1 }
-                    /^CREATE TABLE /                         { tables++ }
-                    END { printf "%d %d %d", header, trailer, tables+0 }')
-                MCP_HEADER="${MCP_MARKERS%% *}"
-                MCP_REST="${MCP_MARKERS#* }"
-                MCP_TRAILER="${MCP_REST%% *}"
-                MCP_TABLES="${MCP_REST##* }"
-                if [ "${MCP_HEADER}" != "1" ] || [ "${MCP_TRAILER}" != "1" ]; then
-                    MCP_STATUS="FAILED"
-                    MCP_FAIL="payload is not a complete SQL dump (header=${MCP_HEADER}, trailer=${MCP_TRAILER})"
-                else
-                    MCP_STATUS="SUCCESS"
-                fi
+                SVC_STATUS="SUCCESS"
             fi
         fi
-
-        if [ "${MCP_STATUS}" = "FAILED" ]; then
-            rm -f "${MCP_BACKUP_FILE}"
-            log "ERROR: MCP backup FAILED: ${MCP_FAIL}"
-        else
-            log "MCP backup completed: ${MCP_BACKUP_FILE} (${MCP_SIZE}, ${MCP_BYTES} bytes, ${MCP_TABLES} tables)"
-        fi
     fi
-fi
 
-if [ "${MCP_STATUS}" = "FAILED" ]; then
-    BACKUP_STATUS="FAILED"
-    FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }the MCP database dump failed: ${MCP_FAIL} (the catalogue archive was kept)"
-fi
+    if [ "${SVC_STATUS}" = "FAILED" ]; then
+        rm -f "${file}"
+        log "ERROR: ${label} backup FAILED: ${SVC_FAIL}"
+        BACKUP_STATUS="FAILED"
+        FAIL_REASON="${FAIL_REASON:+${FAIL_REASON}; }the ${label} database dump failed: ${SVC_FAIL} (the catalogue archive was kept)"
+    else
+        log "${label} backup completed: ${file} (${SVC_SIZE}, ${SVC_BYTES} bytes, ${SVC_TABLES} tables)"
+    fi
+}
+
+# MailD MCP (accounts, addresses, tokens, settings)
+MCP_BACKUP_FILE="${BACKUP_DIR}/maild_mcp_${DATE}.sql.gz"
+dump_service_db "MCP" "${MCP_DB:-}" "${MCP_BACKUP_FILE}"
+MCP_STATUS="${SVC_STATUS}" ; MCP_BYTES="${SVC_BYTES}" ; MCP_SIZE="${SVC_SIZE}" ; MCP_TABLES="${SVC_TABLES}"
+
+# Roundcube, the mua2 webmail (identities, signatures, prefs, personal contacts, responses)
+ROUNDCUBE_BACKUP_FILE="${BACKUP_DIR}/maild_roundcube_${DATE}.sql.gz"
+dump_service_db "Roundcube" "${ROUNDCUBE_DB:-}" "${ROUNDCUBE_BACKUP_FILE}"
+ROUNDCUBE_STATUS="${SVC_STATUS}" ; ROUNDCUBE_BYTES="${SVC_BYTES}" ; ROUNDCUBE_SIZE="${SVC_SIZE}" ; ROUNDCUBE_TABLES="${SVC_TABLES}"
 
 # --- Optional encryption ----------------------------------------------------------
 # Each archive was validated in plain form above (gzip -t + dump markers), then it is
@@ -385,7 +399,7 @@ if [ "${#RECIPIENT_ARGS[@]}" -gt 0 ]; then
     if ! age -e "${RECIPIENT_ARGS[@]}" < /dev/null > /dev/null 2>> ${LOG_FILE}; then
         ENCRYPT_FAIL="BACKUP_AGE_RECIPIENT is not a valid age/ssh public key list (see the log); the archives were kept UNENCRYPTED"
     else
-        for var in BACKUP_FILE ADMINNG_BACKUP_FILE MCP_BACKUP_FILE; do
+        for var in BACKUP_FILE ADMINNG_BACKUP_FILE MCP_BACKUP_FILE ROUNDCUBE_BACKUP_FILE; do
             f="${!var}"
             [ -f "${f}" ] || continue
             if encrypt_archive "${f}"; then
@@ -460,6 +474,10 @@ AdminNG Size: ${ADMINNG_SIZE} (${ADMINNG_BYTES} bytes, ${ADMINNG_TABLES} tables)
 MCP database: ${MCP_DB:-mcp} (${MCP_STATUS})
 MCP File: ${MCP_BACKUP_FILE}
 MCP Size: ${MCP_SIZE} (${MCP_BYTES} bytes, ${MCP_TABLES} tables)
+
+Roundcube database: ${ROUNDCUBE_DB:-roundcube} (${ROUNDCUBE_STATUS})
+Roundcube File: ${ROUNDCUBE_BACKUP_FILE}
+Roundcube Size: ${ROUNDCUBE_SIZE} (${ROUNDCUBE_BYTES} bytes, ${ROUNDCUBE_TABLES} tables)
 
 Encryption: ${ENCRYPTION}
 Retention Policy: ${BACKUP_RETENTION_DAYS} days

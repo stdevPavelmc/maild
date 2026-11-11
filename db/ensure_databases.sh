@@ -10,6 +10,9 @@
 #                      audit trail)
 #   MCP_DB             the MailD MCP's own database (accounts, tokens, settings);
 #                      owned by the MCP_DB_USER role, see ensure_roles.sh
+#   ROUNDCUBE_DB       the Roundcube webmail's own database (mua2: users, prefs,
+#                      contacts, sessions); owned by the ROUNDCUBE_DB_USER role.
+#                      Only created when ROUNDCUBE_DB_PASSWORD is set (mua2 deployed)
 #
 # ADMINNG_DB is a variable of its own on purpose: POSTGRES_EXTRA_DB is a *list*
 # here, but mua/config-setup.php reads the same variable as a SINGLE database
@@ -24,6 +27,8 @@
 set -euo pipefail
 
 LIST="${POSTGRES_DB},${POSTGRES_EXTRA_DB:-},${ADMINNG_DB:-},${MCP_DB:-}"
+# mua2 (Roundcube) is opt-in: its database exists only when its role will (ensure_roles.sh)
+[ -n "${ROUNDCUBE_DB_PASSWORD:-}" ] && LIST="${LIST},${ROUNDCUBE_DB:-roundcube}"
 seen=""
 
 IFS=',' read -ra DBS <<< "$LIST"

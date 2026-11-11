@@ -9,6 +9,7 @@ The `cron` container dumps the three MailD databases every day at **08:00 UTC** 
 | `maild_backup_<date>.sql.gz` | catalogue (`POSTGRES_DB`, `mailddb`) | domains, mailboxes (password hashes), aliases, admins |
 | `maild_adminng_<date>.sql.gz` | AdminNG (`ADMINNG_DB`, `adminng`) | devices, sessions, TOTP seeds (encrypted), audit trail |
 | `maild_mcp_<date>.sql.gz` | MailD MCP (`MCP_DB`, `mcp`) | accounts, token hashes, OAuth clients, settings |
+| `maild_roundcube_<date>.sql.gz` | Roundcube webmail, `mua2` (`ROUNDCUBE_DB`, `roundcube`) | users' identities, signatures, preferences, personal contacts, canned responses |
 
 The directory is root-only (`0700`, archives `0600`). The archives still hold password
 hashes and the audit trail, and copies tend to end up on less trusted storage. **Encrypt them**
@@ -129,7 +130,8 @@ maild_backup_20261101_080000.sql.gz                  plain            5467  2026
 2. It decrypts and decompresses the archive and checks that it is a complete `pg_dump`.
    **Nothing is changed before this check passes.**
 3. It works out the target database from the file name (`maild_backup_` → catalogue,
-   `maild_adminng_` → AdminNG, `maild_mcp_` → MCP); `--database NAME` overrides that.
+   `maild_adminng_` → AdminNG, `maild_mcp_` → MCP, `maild_roundcube_` → Roundcube);
+   `--database NAME` overrides that.
 4. It refuses to run while other clients are connected to that database (see 2.2), and asks
    you to **type the database name** to confirm (`--yes` skips the question).
 5. It writes a **safety dump** of the current database (`pre-restore_<db>_<date>.sql.gz`,
@@ -144,9 +146,10 @@ Stop the services that write to the database you are restoring:
 
 | Restoring | Stop first |
 |-----------|-----------|
-| catalogue (`maild_backup_…`) | `docker compose stop api mta mda mua amavis mcp` |
+| catalogue (`maild_backup_…`) | `docker compose stop api mta mda mua mua2 amavis mcp` |
 | AdminNG (`maild_adminng_…`) | `docker compose stop api` |
 | MCP (`maild_mcp_…`) | `docker compose stop mcp` |
+| Roundcube (`maild_roundcube_…`) | `docker compose stop mua2` |
 
 Run the restore. `docker compose exec` gives it a terminal, so it can ask for the key and the
 confirmation:
@@ -194,7 +197,7 @@ docker compose exec cron /scripts/restore_db.sh maild_backup_20261110_080000.sql
 ```
 
 With a renamed file the target cannot be guessed from the name: pass
-`--database mailddb|adminng|mcp`.
+`--database mailddb|adminng|mcp|roundcube`.
 
 ### 2.5 Without the script
 

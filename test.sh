@@ -392,6 +392,13 @@ cleanup() {
             dcx mda sh -c "doveadm mailbox list -u alice@$DOMAIN | grep -E '^P2r?-maild-p2-' | while read -r f; do doveadm mailbox delete -u alice@$DOMAIN \"\$f\"; done" > /dev/null 2>&1 || true
             dcx db psql -U maild -d mcp -q -c "DELETE FROM send_counter; DELETE FROM confirm_handle;" > /dev/null 2>&1 || true
         fi
+        # Phase Q (mua2): the fixture's password hash as found, the probe messages.
+        if [ "$MUA2_TOUCHED" = 1 ]; then
+            [ -n "${Q_HASH_BEFORE:-}" ] && sql "UPDATE mailbox SET password='$Q_HASH_BEFORE' WHERE username='$Q_PW_USER'" > /dev/null 2>&1 || true
+            dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+            dcx mda doveadm expunge -u "bob@$DOMAIN" mailbox INBOX subject "maild-mua2-" > /dev/null 2>&1 || true
+            dcx mda doveadm expunge -u "alice@$DOMAIN" mailbox Sent subject "maild-mua2-" > /dev/null 2>&1 || true
+        fi
         # Phase L (amavis listeners): the 10026 probe mail and, if L6 was interrupted, its placeholder.
         dcx mda doveadm expunge -u "$DEPLOY_ADMIN" mailbox INBOX subject "maild-p1b-internal-" > /dev/null 2>&1 || true
         [ -n "${L_PLACEHOLDER:-}" ] && docker rm -f "$L_PLACEHOLDER" > /dev/null 2>&1 || true
@@ -1447,6 +1454,23 @@ else
             t_ok "the same run also dumps the MCP database (admin_user + trailer present)"
         else
             t_fail "the MCP archive carries the mcp schema (no admin_user / trailer)"
+        fi
+    fi
+
+    # G4c2 — and Roundcube's database (the mua2 webmail), when mua2 is deployed and initialised
+    if [ -z "$(env_value "$ENV_FILE" ROUNDCUBE_DB_PASSWORD || true)" ] ; then
+        t_skip "the Roundcube archive (ROUNDCUBE_DB_PASSWORD not set in $ENV_FILE: no mua2 deployed)"
+    else
+        BK_RNEW="$(dcx cron sh -c 'ls -1t /backups/db/maild_roundcube_*.sql.gz 2>/dev/null | head -n1' | tr -d '\r')"
+        if [ -z "$BK_RNEW" ] ; then
+            t_fail "the run also writes the Roundcube archive (maild_roundcube_*.sql.gz; has mua2 started once?)"
+        elif ! dcx cron gzip -t "$BK_RNEW" 2>/dev/null ; then
+            t_fail "the Roundcube archive passes 'gzip -t' ($BK_RNEW)"
+        elif dcx cron sh -c "zcat '$BK_RNEW' | grep -q 'CREATE TABLE public.identities'" &&
+             dcx cron sh -c "zcat '$BK_RNEW' | grep -q '^-- PostgreSQL database dump complete\$'" ; then
+            t_ok "the same run also dumps the Roundcube database (identities + trailer present)"
+        else
+            t_fail "the Roundcube archive carries the roundcube schema (no identities / trailer)"
         fi
     fi
 
@@ -4003,6 +4027,165 @@ else
         L_PLACEHOLDER=""
     else
         t_skip "L7 mda master watchdog (no MCP deployed)"
+    fi
+fi
+
+# ============================ Q. mua2 — Roundcube trial webmail (mua2/README.md) ==========
+# Only when the mua2 container runs (dev-only while it is evaluated). Every check drives the
+# webmail over HTTP like a browser (session cookie + request token), then verifies the effect in
+# the catalogue / Dovecot / the mailboxes. Q5 changes dylan@'s password through the webmail and
+# cleanup() puts the original hash back whatever happens.
+section "Q. mua2 — Roundcube (login, directory autocomplete, password change, send, hardening)"
+
+MUA2_HTTP="${MUA2_HTTP:-http://$SERVER:8086}"
+MUA2_TOUCHED=0
+Q_PW_USER="dylan@$DOMAIN"
+Q_HASH_BEFORE=""
+RC_PY='import http.cookiejar, json, re, sys, urllib.error, urllib.parse, urllib.request
+base, user, pw, action, args = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5:]
+op = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+def call(path, data=None, hdr=None):
+    body = urllib.parse.urlencode(data).encode() if data is not None else None
+    try:
+        return op.open(urllib.request.Request(base + path, data=body, headers=hdr or {}), timeout=60).read().decode()
+    except urllib.error.HTTPError as exc:
+        return "HTTP%d" % exc.code
+page = call("/?_task=login")
+tok = re.search(r"name=\"_token\" value=\"([^\"]+)\"", page)
+page = call("/?_task=login", {"_token": tok.group(1) if tok else "", "_task": "login", "_action": "login",
+                              "_timezone": "UTC", "_url": "", "_user": user, "_pass": pw})
+rt = re.search(r"\"request_token\":\"([^\"]+)\"", page)
+if not rt:
+    print("LOGIN-FAIL"); sys.exit(0)
+if action == "login":
+    print("LOGIN-OK")
+elif action == "auto":
+    hdr = {"X-Roundcube-Request": rt.group(1), "X-Requested-With": "XMLHttpRequest"}
+    raw = call("/?_task=mail&_action=autocomplete&_reqid=1&_remote=1&_search=" + urllib.parse.quote(args[0]), hdr=hdr)
+    try:
+        # only the directory (source "maild"): the personal books answer too (collected recipients)
+        found = re.findall(r"<([^<>@\s]+@[^<>\s]+)>\"[^{}]*?\"source\":\"maild\"", json.loads(raw).get("exec", ""))
+    except ValueError:
+        found = ["ERROR:" + raw[:60]]
+    print("AUTO " + " ".join(sorted(set(found))))
+elif action == "passwd":
+    page = call("/?_task=settings&_action=plugin.password")
+    t2 = re.search(r"\"request_token\":\"([^\"]+)\"", page).group(1)
+    page = call("/?_task=settings&_action=plugin.password-save",
+                {"_token": t2, "_curpasswd": pw, "_newpasswd": args[0], "_confpasswd": args[0]})
+    # "<text>:<type>" per message: the check keys on the type (confirmation), not the language
+    print("PASSWD " + ("|".join(f"{t}:{k}" for t, k in re.findall(r"display_message\(\"([^\"]+)\",\"(\w+)\"", page)) or "none"))
+elif action == "send":
+    page = call("/?_task=mail&_action=compose")
+    cid = re.search(r"\"compose_id\":\"([^\"]+)\"", page).group(1)
+    t2 = re.search(r"\"request_token\":\"([^\"]+)\"", page).group(1)
+    ident = re.search(r"<select name=\"_from\"[^>]*>\s*<option value=\"(\d+)\"", page).group(1)
+    page = call("/?_task=mail&_action=send", {"_token": t2, "_id": cid, "_from": ident, "_to": args[0],
+        "_subject": args[1], "_message": "mua2 probe", "_is_html": "0", "_draft": "", "_store_target": "Sent", "_framed": "1"})
+    # the sent_successfully command, not its text: the UI language is ROUNDCUBE_LANGUAGE
+    print("SEND-OK" if re.search(r"sent_successfully\(\"confirmation\"", page) else "SEND-FAIL")
+elif action == "sieve":
+    page = call("/?_task=settings&_action=plugin.managesieve")
+    vac = call("/?_task=settings&_action=plugin.managesieve-vacation")
+    ok = "filtersetslist" in page and "vacation" in vac.lower() and "managesieve_conn_error" not in page + vac
+    print("SIEVE-OK" if ok else "SIEVE-FAIL")'
+rc_py() { python3 -c "$RC_PY" "$MUA2_HTTP" "$@" 2>/dev/null; }
+
+if [ "$SKIP_DOCKER" = 1 ] ; then
+    t_skip "mua2 checks (--skip-docker)"
+elif [ "$(docker inspect -f '{{.State.Running}}' maild-dev-mua2 2>/dev/null)" != "true" ] ; then
+    t_skip "mua2 checks (the mua2 container is not running: compose up -d mua2)"
+else
+    MUA2_TOUCHED=1
+    Q_ALICE_PW="${CRED[alice@${DOMAIN,,}]:-}"
+    Q_PW_OLD="${CRED[${Q_PW_USER,,}]:-}"
+
+    # Q1 — healthy, and the login page renders (PHP + rendered config + db session store)
+    Q1_HEALTH="$(docker inspect -f '{{.State.Health.Status}}' maild-dev-mua2 2>/dev/null)"
+    if [ "$Q1_HEALTH" = healthy ] && curl -fsS --max-time 10 "$MUA2_HTTP/" 2>/dev/null | grep -q rcmloginuser ; then
+        t_ok "Q1 mua2 is healthy and serves the Roundcube login page"
+    else
+        t_fail "Q1 mua2 health/login page (health: ${Q1_HEALTH:-none})"
+    fi
+
+    # Q2 — hardening: no installer, nothing outside public_html, no version in Server:
+    Q2_BAD=""
+    for q_path in /installer.php /installer/ /config/config.inc.php /bin/initdb.sh /SQL/postgres.initial.sql \
+                  /composer.json /vendor/autoload.php /static.php/config/config.inc.php ; do
+        q_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$MUA2_HTTP$q_path")"
+        case "$q_code" in 403|404) ;; *) Q2_BAD="$Q2_BAD $q_path=$q_code" ;; esac
+    done
+    Q2_SERVER="$(curl -sI --max-time 10 "$MUA2_HTTP/" | tr -d '\r' | sed -n 's/^[Ss]erver: //p')"
+    if [ -z "$Q2_BAD" ] && [ "$Q2_SERVER" = Apache ] ; then
+        t_ok "Q2 installer and internal paths are not served, Server: carries no version"
+    else
+        t_fail "Q2 mua2 exposure (served:${Q2_BAD:- none}; Server: $Q2_SERVER)"
+    fi
+
+    # Q3 — secrets: the web server runs with a scrubbed environment, the db role cannot read hashes
+    Q3_ENV="$(docker exec maild-dev-mua2 sh -c 'tr "\0" "\n" < /proc/1/environ' 2>/dev/null | grep -c 'PASSWORD\|SECRET\|DES_KEY')"
+    Q3_ROLE_PW="$(env_value "$ENV_FILE" ROUNDCUBE_DB_PASSWORD || true)"
+    Q3_HASH="$(dcx db env PGPASSWORD="$Q3_ROLE_PW" psql -h 127.0.0.1 -U maild_roundcube -d mailddb -X -tAc \
+        "SELECT password FROM mailbox LIMIT 1" 2>&1)"
+    if [ "$Q3_ENV" = 0 ] && printf '%s' "$Q3_HASH" | grep -q 'permission denied' ; then
+        t_ok "Q3 Apache/PHP see no operator secret; the maild_roundcube role cannot read password hashes"
+    else
+        t_fail "Q3 mua2 secrets (secret vars in PID 1: $Q3_ENV; role reading mailbox.password: ${Q3_HASH:0:40})"
+    fi
+
+    # Q4 — directory autocomplete (the "maild" source only: alice's collected recipients answer as
+    # well): nothing under 3 characters, the fixtures from 3 on, own domain only. The browser
+    # itself sends no request under autocomplete_min_length; this is the server-side guard.
+    Q4_SHORT="$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" auto bo)"
+    Q4_BOB="$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" auto bob)"
+    Q4_LIST="$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" auto postm)"
+    Q4_FOREIGN="$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" auto "${MAIL_ADMIN_USER:0:3}")"
+    if [ "$Q4_SHORT" = "AUTO " ] && [ "$Q4_BOB" = "AUTO bob@$DOMAIN" ] &&
+       printf '%s' "$Q4_LIST" | grep -q "postmaster@$DOMAIN" &&
+       ! printf '%s' "$Q4_FOREIGN" | grep -q "@${DEFAULT_DOMAIN}" ; then
+        t_ok "Q4 autocomplete: 'bo' → nothing, 'bob' → bob@$DOMAIN, lists found, no ${DEFAULT_DOMAIN} entry leaks to $DOMAIN"
+    else
+        t_fail "Q4 directory autocomplete ('bo': $Q4_SHORT | 'bob': $Q4_BOB | 'postm': $Q4_LIST | '${MAIL_ADMIN_USER:0:3}': $Q4_FOREIGN)"
+    fi
+
+    # Q5 — password change through the webmail: PASSWORD_SCHEME hash in the catalogue, Dovecot
+    # accepts the new password and refuses the old one (cleanup() restores the original hash)
+    Q_HASH_BEFORE="$(sql "SELECT password FROM mailbox WHERE username='$Q_PW_USER'" | tr -d '\r')"
+    Q5_NEW="Mua2-$(chrono | cut -c1-12)-Q5"
+    Q5_OUT="$(rc_py "$Q_PW_USER" "$Q_PW_OLD" passwd "$Q5_NEW")"
+    Q5_HASH="$(sql "SELECT password FROM mailbox WHERE username='$Q_PW_USER'" | tr -d '\r')"
+    Q5_SCHEME="$(env_value "$ENV_FILE" PASSWORD_SCHEME || true)"
+    case "${Q5_SCHEME:-argon2id}" in
+        md5crypt) Q5_RE='^\$1\$' ;;
+        *)        Q5_RE='^\{ARGON2ID\}\$argon2id\$v=19\$m=65536,t=4,p=1\$' ;;
+    esac
+    dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+    Q5_NEWOK=no; Q5_OLDOK=no
+    dcx mda doveadm auth test "$Q_PW_USER" "$Q5_NEW" 2>/dev/null | grep -q 'auth succeeded' && Q5_NEWOK=yes
+    dcx mda doveadm auth test "$Q_PW_USER" "$Q_PW_OLD" 2>/dev/null | grep -q 'auth succeeded' && Q5_OLDOK=yes
+    if printf '%s' "$Q5_OUT" | grep -q ':confirmation' && printf '%s' "$Q5_HASH" | grep -Eq "$Q5_RE" &&
+       [ "$Q5_NEWOK" = yes ] && [ "$Q5_OLDOK" = no ] ; then
+        t_ok "Q5 password change in the webmail writes ${Q5_SCHEME:-argon2id} (${Q5_HASH:0:24}…), Dovecot takes the new password only"
+    else
+        t_fail "Q5 webmail password change ($Q5_OUT; hash ${Q5_HASH:0:30}; new=$Q5_NEWOK old=$Q5_OLDOK)"
+    fi
+    sql "UPDATE mailbox SET password='$Q_HASH_BEFORE' WHERE username='$Q_PW_USER'" > /dev/null 2>&1
+    dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
+
+    # Q6 — send through the webmail (SMTPS + SASL as the user): delivered and kept in Sent
+    Q6_SUBJ="maild-mua2-$(chrono | cut -c1-10)"
+    Q6_OUT="$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" send "bob@$DOMAIN" "$Q6_SUBJ")"
+    if [ "$Q6_OUT" = SEND-OK ] && wait_msg "bob@$DOMAIN" INBOX "$Q6_SUBJ" && msg_in "alice@$DOMAIN" Sent "$Q6_SUBJ" ; then
+        t_ok "Q6 a message sent from the webmail reaches bob@$DOMAIN and is stored in alice's Sent"
+    else
+        t_fail "Q6 webmail send ($Q6_OUT)"
+    fi
+
+    # Q7 — Sieve filters and vacation pages talk to the mda's ManageSieve (STARTTLS)
+    if [ "$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" sieve)" = SIEVE-OK ] ; then
+        t_ok "Q7 filters and vacation settings load over ManageSieve"
+    else
+        t_fail "Q7 webmail ManageSieve settings"
     fi
 fi
 

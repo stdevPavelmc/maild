@@ -8,7 +8,9 @@ FROM postgres:18-trixie
 
 # Extra databases are ensured on *every* boot by the entrypoint wrapper; schema migrations
 # (the maild_provision sentinel) are applied right after, by migrate.sh, and the MCP role
-# (MCP_DB_USER, only when MCP_DB_PASSWORD is set) is ensured last, by ensure_roles.sh. ADMINNG_DB
+# (MCP_DB_USER, only when MCP_DB_PASSWORD is set) and the mua2 Roundcube role (ROUNDCUBE_DB_USER,
+# owner of ROUNDCUBE_DB, only when ROUNDCUBE_DB_PASSWORD is set) are ensured last, by
+# ensure_roles.sh. ADMINNG_DB
 # (AdminNG's own database) is created there too — kept separate from POSTGRES_EXTRA_DB
 # because mua reads that variable as a single database name (contacts DSN).
 
@@ -35,7 +37,9 @@ ENV POSTGRES_HOST=db \
     POSTGRES_EXTRA_DB=contacts \
     ADMINNG_DB=adminng \
     MCP_DB=mcp \
-    MCP_DB_USER=maild_mcp
+    MCP_DB_USER=maild_mcp \
+    ROUNDCUBE_DB=roundcube \
+    ROUNDCUBE_DB_USER=maild_roundcube
 
 COPY ensure_databases.sh /usr/local/bin/ensure_databases.sh
 COPY migrate.sh /usr/local/bin/migrate.sh
@@ -60,4 +64,4 @@ LABEL org.opencontainers.image.title="MailD PostgreSQL catalogue" \
       org.opencontainers.image.url="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.source="https://github.com/stdevPavelmc/maild" \
       org.opencontainers.image.licenses="GPL-3.0-or-later" \
-      org.opencontainers.image.created="2026-10-29"
+      org.opencontainers.image.created="2026-11-11"

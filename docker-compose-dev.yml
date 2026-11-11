@@ -37,6 +37,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in env.dev}
       # MailD MCP role (db/ensure_roles.sh); empty = no MCP role, the stack still boots
       MCP_DB_PASSWORD: ${MCP_DB_PASSWORD:-}
+      # mua2 Roundcube role + database (db/ensure_roles.sh); empty = no mua2
+      ROUNDCUBE_DB_PASSWORD: ${ROUNDCUBE_DB_PASSWORD:-}
     # operator env file (fake dev secrets); overrides any same-named image ENV default
     env_file:
       - env.dev
@@ -175,6 +177,64 @@ services:
     depends_on:
       - mda
     # 2026-10 audit L-08: setuid/setgid binaries cannot raise privileges in this container
+    security_opt:
+      - "no-new-privileges:true"
+    networks:
+      - maild-dev
+
+  # mua2 — Roundcube on Debian trixie, the candidate replacement for the SnappyMail `mua`
+  # (mua2/README.md). Dev-only while it is evaluated: not in the production compose files yet.
+  mua2:
+    image: pavelmc/maild-mua2:develop
+    build: ./mua2/
+    container_name: maild-dev-mua2
+    hostname: mua2
+    restart: unless-stopped
+    # NO env_file on purpose (same rule as mcp): the operator file carries POSTGRES_PASSWORD and
+    # every other service's secrets, and mua2 connects to the db only as the restricted
+    # ROUNDCUBE_DB_USER role. Allow-list: a new ROUNDCUBE_* tunable must be added here; bare keys
+    # pass the operator value through and stay UNSET when absent (the image ENV default applies).
+    environment:
+      DEFAULT_DOMAIN: ${DEFAULT_DOMAIN:?set DEFAULT_DOMAIN in env.dev}
+      ROUNDCUBE_DB_PASSWORD: ${ROUNDCUBE_DB_PASSWORD:?set ROUNDCUBE_DB_PASSWORD in env.dev}
+      ROUNDCUBE_DB:
+      ROUNDCUBE_DB_USER:
+      ROUNDCUBE_DES_KEY:
+      ROUNDCUBE_PRODUCT_NAME:
+      ROUNDCUBE_LANGUAGE:
+      ROUNDCUBE_SESSION_LIFETIME:
+      ROUNDCUBE_TRUSTED_HOSTS:
+      ROUNDCUBE_TRUSTED_PROXIES:
+      ROUNDCUBE_DIRECTORY_SCOPE:
+      ROUNDCUBE_DIRECTORY_ALIASES:
+      ROUNDCUBE_DIRECTORY_HIDE:
+      ROUNDCUBE_AUTOCOMPLETE_MIN:
+      ROUNDCUBE_PASSWORD_MIN_LENGTH:
+      ROUNDCUBE_UPLOAD_MAX:
+      # the mta's message-size limit: caps Roundcube's encoded message size
+      MAX_MESSAGESIZE:
+      ROUNDCUBE_DEBUG:
+      BANNER_TITLE:
+      PASSWORD_SCHEME:
+      MCP_SERVICE_EMAIL:
+      MTA:
+      MDA:
+      POSTGRES_HOST:
+      POSTGRES_DB:
+      AUTO_PROVISION:
+      PROVISION_VERSION:
+      PROVISION_WAIT_TIMEOUT:
+    ports:
+      - "8086:80"  # Exposed for local access
+    volumes:
+      # only the generated des_key lives here (Roundcube's state is in the roundcube database)
+      - ./ldata/mua2:/var/lib/roundcube
+    tmpfs:
+      - /tmp:mode=1777,size=256m
+    depends_on:
+      - db
+      - mda
+      - mta
     security_opt:
       - "no-new-privileges:true"
     networks:
@@ -330,6 +390,7 @@ services:
       POSTGRES_USER:
       ADMINNG_DB:
       MCP_DB:
+      ROUNDCUBE_DB:
       MTA:
       AMAVIS_SUBMIT_PORT:
       MX_HOSTNAME:

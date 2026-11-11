@@ -51,6 +51,7 @@ compose network.
 | `adminng` | `pavelmc/maild-adminng:develop` | AdminNG PWA + `/api/v1/` proxy | 8083 (HTTP), 8084 (HTTPS, dev) | api |
 | `api` | `pavelmc/maild-api:develop` | AdminNG API + first-boot seeder | — (internal) | db |
 | `mua` | `pavelmc/maild-mua:develop` | SnappyMail webmail | 8081 | mda |
+| `mua2` | `pavelmc/maild-mua2:develop` | Roundcube webmail on Debian trixie — **trial** replacement for `mua`, dev only (`mua2/README.md`) | 8086 | db, mda, mta |
 | `cron` | `pavelmc/maild-cron:develop` | maintenance jobs | — | db |
 | `mcp` | `pavelmc/maild-mcp:develop` | MailD MCP: AI-assistant access to the mailboxes (IMAP master user; 21 tools over MCP `/api/v1/mcp` with OAuth 2.1 and over REST `/api/v1/mail/<tool>` + OpenAPI + SKILL.md; user page, admin panel `/adminmcp`; mail via amavis:10026) | 8085 | db, mda, amavis |
 | `dozzle` | `amir20/dozzle:latest` | live log viewer (dev only) | 8082 | — |
@@ -98,6 +99,7 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 | `ldata/amavis` | `/var/lib/amavis` | clamav, amavis (quarantine in `virusmails/`); cron **read-only** (the DKIM keys `dkim/db.txt` + `dkim/*.txt` for `check_dns.sh`) |
 | `ldata/spamassassin` | `/var/lib/spamassassin` | amavis (bayes db), cron (learning) |
 | `ldata/mua_web` | `/var/www/html/data` | mua (only the writable `data/` dir!) |
+| `ldata/mua2` | `/var/lib/roundcube` | mua2 (only the generated `des_key`; Roundcube's state is the `roundcube` database) |
 | `ldata/logs` | `/var/log` | cron (empty in dev — JSON logging, see DEV-SETUP.md; production binds the host `/var/log` read-only) |
 | `ldata/backups` | `/backups` | cron (db dumps) |
 | `ldata/mcp_logs` | `/var/log/maild-mcp` | mcp (audit/access/error logs; owner 10001, prepared by bootstrap) |
@@ -118,10 +120,11 @@ block (bounded) on that sentinel **before** their DB-dependent config stage
 | api | `/app/entrypoint.sh` → `python -m app.bootstrap` → `uvicorn app.main:app` | HTTP `GET /health` |
 | adminng | stock nginx entrypoint → `nginx -g daemon off` | busybox `wget -q -O /dev/null http://127.0.0.1/` |
 | mua | `/docker-entrypoint.sh` → apache (base image default) | `curl -f http://localhost/` |
+| mua2 | `/usr/local/lib/maild/docker-entrypoint.sh` → render config, sentinel gate, `initdb`/`updatedb` → `env -i apache2ctl -D FOREGROUND` | `check.sh`: the login page renders (`rcmloginuser`) |
 | cron | `/docker-entrypoint.sh` → `cron -f -L 2` | none |
 | mcp | `/docker-entrypoint.sh` → `manage.py mcp_boot` → `uvicorn asgi:application` | HTTP `GET /healthz` (db + catalogue + IMAP greeting) |
 
-The `amavis`, `mua` and `mta` entrypoints additionally gate on the `maild_provision` sentinel
+The `amavis`, `mua`, `mua2` and `mta` entrypoints additionally gate on the `maild_provision` sentinel
 before their DB-dependent config stage; the `api` bootstrap (`app/provision.py`) seeds the
 catalogue and writes it. See `.agents/services/provisioning.md`.
 
