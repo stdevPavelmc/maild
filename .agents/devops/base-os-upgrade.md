@@ -6,7 +6,7 @@ move.
 
 Scope: the five services built `FROM ubuntu:<codename>` today — `mta`, `mda`,
 `amavis`, `clamav`, `cron`. Out of scope: `db` (`postgres:<major>-bookworm`),
-`admin` / `mua` (`php:8.x-apache`). Those have their own upstream cadence and
+`admin` (`php:8.x-apache`), `mua` (`debian:trixie-slim` + Debian PHP). Those have their own upstream cadence and
 their own upgrade path; do not bundle them into an Ubuntu LTS rollover.
 
 Canonical base rule + current drift table: `.agents/devops/base-images.md`.

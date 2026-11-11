@@ -4,9 +4,9 @@
 
 Default for new services: **Ubuntu `resolute` (26.04 LTS)**. Use Debian only when a
 Debian-specific feature is required — then **Debian `trixie`**. The db is special:
-**`postgres:18-trixie`** (never try postgres:16); the web UIs use the official
-`php:<branch>-apache` images — **`mua` on `php:8.5-apache`**, **`admin` on
-`php:8.1-apache-bookworm`** (see the web UI table below).
+**`postgres:18-trixie`** (never try postgres:16); **`mua`** (Roundcube) is
+`debian:trixie-slim` with Debian's own PHP 8.4, and the retired **`admin`** used the official
+`php:8.1-apache-bookworm` (see the web UI table below).
 
 The two Python services use the official **`python:3.14-slim-trixie`** image instead: `api`
 (AdminNG) and `mcp` (MailD MCP, chosen in `mcp/technical-proposal.md` §12 to match `api`).
@@ -14,15 +14,12 @@ Both run non-root; `mcp` also runs on a read-only rootfs.
 
 ### Web UI base images (current state + pending work)
 
-The two web UIs follow PHP's own release cadence, not the Ubuntu LTS rollover. Both are Debian
-images, and `php:8.3-apache`, `php:8.4-apache` and `php:8.5-apache` are all **trixie** (each bare
-tag has the same digest as its `-trixie` sibling), so the `apt-get install` list does not change
-between them — the `mua` bump touched nothing but the PHP branch.
+The PHP web UIs follow their own release cadence (Debian/PHP security fixes, the app's
+releases), not the Ubuntu LTS rollover.
 
 | Service | Base today | Notes |
 |---------|-----------|-------|
-| mua | `php:8.5-apache` (trixie) | Moved from `php:8.3-apache` on 2026-10-17: 8.3 left *active* support on 2025-12-31 (security-only since then, EOL 2027-12-31), 8.5 is active until 2027-12-31 and gets security fixes until 2029-12-31. The bump needed two settings in `mua/snappymail.ini` (`display_errors = Off` + `error_reporting` without the deprecation levels): SnappyMail 2.38.2 predates PHP 8.4 and raises `E_DEPRECATED` from its own code (its `MailSo\Log\Logger` maps `E_STRICT`, deprecated in 8.4), which was printed into the responses — that breaks every later `header()` call and prefixes the JSON API with HTML, killing the webmail in the browser. Details: `.agents/services/catalog.md` → mua. |
-| mua2 | `debian:trixie-slim` + Debian's PHP 8.4 (`libapache2-mod-php8.4`) | Trial Roundcube webmail (dev only, `mua2/README.md`). Deliberately **not** an official `php:` image: the request was the latest Debian with its own PHP, which the Debian Security Team patches for the release's lifetime (trixie's PHP is 8.4; the build runs `apt-get upgrade` so a rebuild picks up every published fix). Rebuild on every Debian PHP DSA and every Roundcube security release. |
+| mua | `debian:trixie-slim` + Debian's PHP 8.4 (`libapache2-mod-php8.4`) | Roundcube webmail (`mua/README.md`) since 2.0.0-rc3; it replaced the SnappyMail image (`php:8.5-apache`). Deliberately **not** an official `php:` image: the request was the latest Debian with its own PHP, which the Debian Security Team patches for the release's lifetime (trixie's PHP is 8.4; the build runs `apt-get upgrade` so a rebuild picks up every published fix). Rebuild on every Debian PHP DSA and every Roundcube security release. |
 | admin | `php:8.1-apache-bookworm` | **PHP 8.1 reached end of life on 2025-12-31.** Not a one-line bump: PHP 8.4 unbundled `ext/imap` to PECL while `admin/Dockerfile` builds `imap` (`docker-php-ext-install imap`) because PostfixAdmin needs it. Pending — its own branch, do not bundle it with `mua`. |
 
 `clamav`, `amavis`, `mda`, `cron` and `mta` all moved to `ubuntu:resolute` on 2026-10-15/16: the

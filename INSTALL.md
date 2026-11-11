@@ -1,7 +1,7 @@
 # MailD install instructions
 
 MailD is a complete mail server built from Docker containers (Postfix, Dovecot, Amavis +
-ClamAV, AdminNG, SnappyMail and a maintenance cron) that keeps its domain/user
+ClamAV, AdminNG, Roundcube webmail and a maintenance cron) that keeps its domain/user
 catalogue in PostgreSQL.
 
 This guide takes you from a bare host to a **working server in one command**: on the first
@@ -46,10 +46,13 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
    - `MAIL_ADMIN_USER` — the administrator local part (default `sysadmin`).
    - `MAIL_ADMIN_PASSWORD` — the superadmin login *and* the password of its mailbox — is optional: comment the line out and one is generated and printed in `docker compose logs api`.
    - `POSTGRES_PASSWORD` — the database password (`openssl rand -hex 18`).
+   - `ROUNDCUBE_DB_PASSWORD` — the webmail's own restricted database role (`maild_roundcube`);
+     the `db` service creates it and the `mua` uses it, never `POSTGRES_PASSWORD`
+     (`openssl rand -hex 18`).
    - `ADMINNG_SECRET_KEY` — signs the AdminNG JWTs and encrypts the enrolled TOTP seeds
      (`openssl rand -hex 32`).
 
-   Note that `POSTGRES_PASSWORD` and `ADMINNG_SECRET_KEY` are **enforced**, not suggested: the
+   Note that `POSTGRES_PASSWORD`, `ROUNDCUBE_DB_PASSWORD` and `ADMINNG_SECRET_KEY` are **enforced**, not suggested: the
    compose files carry a `${VAR:?…}` guard, and `docker compose` refuses to start (or even to
    interpolate) without them giving:
    `error while interpolating services.api.environment.ADMINNG_SECRET_KEY`:
@@ -117,8 +120,10 @@ automated (see [What happens automatically on the first boot](#what-happens-auto
 
   ```sh
   docker run --rm --network maild curlimages/curl:latest -s -o /dev/null -w 'adminng %{http_code}\n' http://adminng/
-  docker run --rm --network maild curlimages/curl:latest -s -o /dev/null -w 'webmail %{http_code}\n' http://mua/
+  docker run --rm --network maild curlimages/curl:latest -s -o /dev/null -w 'webmail %{http_code}\n' -H 'Host: localhost' http://mua/
   ```
+
+  (The webmail only answers the host names in `ROUNDCUBE_TRUSTED_HOSTS`, hence the `Host:` header.)
 
   Expect `adminng 200` and `webmail 200`. `docker compose exec api adminng.py --list-devices`
   must answer too (that one proves the API reached `ADMINNG_DB`).
@@ -134,7 +139,8 @@ That's it — the deployment is usable. Jump to [First login](#first-login).
 
 The stack creates its schema and seeds the catalogue for you:
 
-1. **`db`** creates the databases (`mailddb`, `contacts`, `adminng`) and applies its
+1. **`db`** creates the databases (`mailddb`, `adminng`, `mcp`, `roundcube`) and the restricted
+   service roles, and applies its
    migrations: `001_maild_provision.sql` (the `maild_provision` sentinel table) and
    `002_postfixadmin_catalogue.sql` (the PostfixAdmin catalogue schema — MailD's own
    snapshot, no PostfixAdmin container involved).
@@ -147,7 +153,7 @@ The stack creates its schema and seeds the catalogue for you:
 3. **`amavis`, `mua`, `mta`** wait (bounded, `PROVISION_WAIT_TIMEOUT`) for that sentinel
    before they run their configuration, because they cache the domain list at start:
    - `amavis` generates the DKIM key(s),
-   - `mua` writes the SnappyMail per-domain config,
+   - `mua` creates (or upgrades) Roundcube's own schema in the `roundcube` database,
    - `mta` builds the virtual aliases.
 
    Waiting *before* their config stage is what removes the old "take the stack down and up"
@@ -170,30 +176,27 @@ internet to be accepted" check that made the old manual setup fail on fresh doma
 - From there create **additional** domains, users and aliases (a new domain gets the four
   default aliases automatically). Bulk import is supported (CSV, "Carga inicial").
   > The first domain is already there: do **not** recreate it, or you will get a duplicate.
-- **Webmail (SnappyMail):** open `https://webmail.<DEFAULT_DOMAIN>` — served behind your TLS
+- **Webmail (Roundcube):** open `https://webmail.<DEFAULT_DOMAIN>` — served behind your TLS
   ingress (the production compose files expose no webmail port; the dev stack is at
-  `http://localhost:8081`) — and log in with a mailbox you created.
-- **Webmail admin panel:** disabled by default (`/?admin` answers 403; it would sit on the
-  public webmail host). To use it set `MUA_ADMIN_PANEL=on` in `.env`, `docker compose up -d mua`,
-  open `https://webmail.domain.com/​?admin`, and switch it off again afterwards. The login (default `maild`)
-  and the password are printed by the webmail container on every boot, as an OTP:
-  `docker compose logs mua | grep -A3 'admin panel'`. The password is generated on the first
-  boot and kept in the data volume; set `MUA_ADMIN_PASSWORD` to pin a known one.
+  `http://localhost:8081`) — and log in with a mailbox you created. There is no webmail admin
+  panel: everything is set from `.env` (`ROUNDCUBE_*`, see [`mua/README.md`](./mua/README.md)).
+  The "Directory" address book lists the mailboxes (and distribution lists) of the user's own
+  domain; recipient autocompletion starts at 3 characters. Filters, vacation and forwarding
+  live under **Settings → Filters / Out of Office / Forwarding** (Sieve on the mda).
 - **Changing a mailbox password:** users do it themselves from the webmail (**Settings →
-  Password**). MailD ships the SnappyMail `change-password` plugin wired to its own catalogue
-  driver, so the new password is immediately valid over IMAP/POP3/SMTP.
+  Password**). Roundcube's `password` plugin writes the catalogue directly (hash per
+  `PASSWORD_SCHEME`), so the new password is immediately valid over IMAP/POP3/SMTP.
   Because Dovecot caches authentication results for a minute (`auth_cache_ttl` in
   `mda/dovecot/conf.d/10-auth.conf`), the *previous* password can still be accepted for up to
   that minute — the new one always works at once, and
   `docker compose exec mda doveadm auth cache flush` removes any doubt.
-  The baseline plugins (X-Originating-IP header, change-password, TOTP two-factor) are installed
-  and enabled on every boot — `MUA_PLUGINS` in `env.sample` lists them.
+- The webmail has **no two-factor authentication** (TOTP stays on AdminNG and the MCP).
 
 ## Password hashes and the 2027-02-01 deadline
 
 Mailbox/administrator passwords are hashed with **Argon2id** by default
 (`{ARGON2ID}$argon2id$…`, `PASSWORD_SCHEME=argon2id`), written identically by
-first-boot provisioning, the AdminNG API and the webmail change-password driver.
+first-boot provisioning, the AdminNG API and the webmail's password plugin.
 Older deployments carry **legacy md5crypt (`$1$…`)** hashes; both formats are
 valid in the same column and Dovecot verifies either, so nothing breaks on
 upgrade. Two things to know:
@@ -344,7 +347,7 @@ what needs fixing.
 |---------|------------|
 | **Single server** | `docker compose -f compose-*.yml up -d`; the stack provisions itself. |
 | **Docker stack / swarm** | `docker stack deploy`; the sentinel + advisory lock make the concurrent start safe. |
-| **GitLab CI** | The pipeline builds `.env` from `env.sample_gitlab` + the CI/CD variables (`DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `POSTGRES_PASSWORD`, `MAIL_ADMIN_PASSWORD`) and deploys `compose-gitlab.yml`. The first deploy seeds itself; the CI can poll `maild_provision` to confirm readiness. |
+| **GitLab CI** | The pipeline builds `.env` from `env.sample_gitlab` + the CI/CD variables (`DEFAULT_DOMAIN`, `MAIL_ADMIN_USER`, `POSTGRES_PASSWORD`, `ROUNDCUBE_DB_PASSWORD`, `MAIL_ADMIN_PASSWORD`) and deploys `compose-gitlab.yml`. The first deploy seeds itself; the CI can poll `maild_provision` to confirm readiness. |
 
 ## Manual mode (AUTO_PROVISION=no)
 
@@ -372,6 +375,24 @@ administrator password at a specific moment:
 4. The amavis/mua/mta gates wait out `PROVISION_WAIT_TIMEOUT` (180s by default) in this mode
    before configuring themselves. To make that instant, restart them after step 2:
    `docker compose -f docker-compose.yml restart amavis mua mta`, then do [DKIM](#dkim).
+
+## Upgrading from SnappyMail (before 2.0.0-rc3)
+
+SnappyMail was replaced by Roundcube in 2.0.0-rc3 (same `mua` service, hostname and
+`webmail.<DEFAULT_DOMAIN>` route). Before pulling the new images:
+
+1. Ask users to **export their personal contacts** from SnappyMail (Contacts → Export, vCard):
+   they are not migrated; they can import the `.vcf` into Roundcube afterwards. Signatures and
+   other SnappyMail preferences are not migrated either (users re-create them), and the webmail
+   no longer offers two-factor authentication.
+2. Add `ROUNDCUBE_DB_PASSWORD` to `.env` (`openssl rand -hex 18`) — it is required — and drop the
+   obsolete `MUA_ADMIN_PANEL`, `MUA_ADMIN_USER`, `MUA_ADMIN_PASSWORD`, `MUA_PLUGINS`,
+   `MUA_CONFIG_WAIT_TIMEOUT`, `MUA_DEBUG`, `CTDB` and `POSTGRES_EXTRA_DB=contacts` lines.
+3. `docker compose pull && docker compose up -d`: `db` creates the `maild_roundcube` role and the
+   `roundcube` database, and `mua` creates Roundcube's schema on its first start.
+4. Optional clean-up once nobody needs the old data: remove the obsolete SnappyMail volume
+   (`docker volume rm <project>_mua_web`) and the legacy `contacts` database
+   (`docker compose exec db dropdb -U maild contacts`). Neither is dropped automatically.
 
 ## Upgrading the database (PostgreSQL major)
 
@@ -411,7 +432,8 @@ hung server.
 - **Volumes:** all persistent data lives in Docker volumes (mail, catalogue, filters, certs).
 - **SSL certs:** a self-signed cert is generated if no Let's Encrypt one is found (for the
   MTA/MDA); setting up Let's Encrypt is up to you.
-- **Webmail:** SnappyMail is the default; swap/comment the `mua` service if you prefer another.
+- **Webmail:** Roundcube (`mua`, see [`mua/README.md`](./mua/README.md)); swap/comment the `mua`
+  service if you prefer another.
 - **AdminNG:** the web admin (per-domain admins, CSV bulk import, audit trail) — see
   [AdminNG](#adminng-optional-but-recommended).
 - **Maildir:** compatible with MailAD / Docker-MailAD; per-user maildirs live under a folder

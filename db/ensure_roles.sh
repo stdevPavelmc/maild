@@ -13,7 +13,7 @@
 #     mailbox.password) and alias_domain, SELECT on the maild_provision sentinel, EXECUTE on
 #     maild_mcp_ensure_service_mailbox() — its only write path (003_mcp_service_mailbox.sql).
 #
-# 2. mua2, the Roundcube webmail (mua2/README.md) — ROUNDCUBE_DB_USER, ROUNDCUBE_DB_PASSWORD.
+# 2. mua, the Roundcube webmail (mua/README.md) — ROUNDCUBE_DB_USER, ROUNDCUBE_DB_PASSWORD.
 #   - owner of ROUNDCUBE_DB: Roundcube's own state (users, prefs, contacts, sessions);
 #   - on the catalogue: column-level SELECT for the directory (address book) and the login
 #     identity — domain, mailbox (never mailbox.password), alias (never alias.goto) — SELECT on
@@ -87,7 +87,7 @@ GRANT CONNECT, TEMPORARY ON DATABASE :"rcdb" TO :"role";
 GRANT CONNECT ON DATABASE :"catdb" TO :"role";
 SQL
 
-# Roundcube creates its own tables as this role (mua2 entrypoint, bin/initdb.sh): as the database
+# Roundcube creates its own tables as this role (mua entrypoint, bin/initdb.sh): as the database
 # owner it already owns the public schema (pg_database_owner, PostgreSQL 15+), nothing to grant.
 
 # catalogue: directory reads (no password column) + the password change, column level
@@ -116,5 +116,5 @@ fi
 if [ -n "${ROUNDCUBE_DB_PASSWORD:-}" ]; then
   ensure_roundcube_role
 else
-  echo "db: INFO - ROUNDCUBE_DB_PASSWORD not set, skipping the Roundcube (mua2) role"
+  echo "db: INFO - ROUNDCUBE_DB_PASSWORD not set, skipping the Roundcube (mua) role"
 fi

@@ -196,10 +196,10 @@ if [ "${CLIENTS:-0}" -gt 0 ]; then
     if [ "${FORCE}" != 1 ]; then
         cat >&2 <<EOF
 restore: stop the services that write to it first, then run this again, e.g.
-    docker compose stop api mta mda mua mua2 amavis mcp # catalogue (${POSTGRES_DB})
+    docker compose stop api mta mda mua amavis mcp      # catalogue (${POSTGRES_DB})
     docker compose stop api                             # AdminNG (${ADMINNG_DB})
     docker compose stop mcp                             # MCP (${MCP_DB})
-    docker compose stop mua2                            # Roundcube (${ROUNDCUBE_DB})
+    docker compose stop mua                             # Roundcube (${ROUNDCUBE_DB})
 or pass --force: the swap is one transaction (readers see the old or the new data, never a
 mix), but anything written between the dump and now is lost either way.
 EOF

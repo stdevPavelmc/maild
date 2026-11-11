@@ -15,7 +15,7 @@ require_once __DIR__ . '/maild_directory_backend.php';
  *   - on a user's first login, takes their display name from the catalogue (mailbox.name) for the
  *     default identity, so the From: header is right from the first message.
  *
- * Configuration (rendered by mua2/render-config.php from the ROUNDCUBE_DIRECTORY_* variables):
+ * Configuration (rendered by mua/render-config.php from the ROUNDCUBE_DIRECTORY_* variables):
  *   maild_directory_dsn      catalogue DSN (the restricted ROUNDCUBE_DB_USER role: column-level
  *                            SELECT only, it cannot read password hashes)
  *   maild_directory_scope    domain | all | off

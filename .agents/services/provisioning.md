@@ -5,13 +5,16 @@ setup wizard, the "create domain" clicks, a down/up cycle or a per-service resta
 
 ## The problem it solves
 
-Three services cache the domain list **at boot** and never re-read it:
+Two services cache the domain list **at boot** and never re-read it:
 
 - `amavis` (`amavis/docker-entrypoint.sh`) queries `SELECT domain FROM domain;` and generates
   one DKIM key per domain;
-- `mua` (`mua/docker-entrypoint.sh`) builds one SnappyMail JSON config per domain;
 - `mta` (`mta/docker-entrypoint.sh`) materialises the `virtual_aliases`
   (postmaster/abuse, `POSTMASTER_ABUSE_SETUP`).
+
+`mua` (Roundcube, `mua/docker-entrypoint.sh`) keeps no per-domain state — it reads the
+catalogue live — but gates on the same sentinel before it creates/upgrades Roundcube's schema,
+so it never serves a login page over an unseeded catalogue.
 
 A domain created *after* they start is invisible to them, which is why the old guide told
 the operator to "take the stack down and up". A `docker restart` from inside a container is
@@ -21,7 +24,7 @@ impossible without the docker socket (and meaningless in swarm), so instead the 
 ## Design — schema owner + leader + sentinel
 
 ```
- db    : ensure_databases.sh → POSTGRES_DB, POSTGRES_EXTRA_DB, ADMINNG_DB
+ db    : ensure_databases.sh → POSTGRES_DB, POSTGRES_EXTRA_DB, ADMINNG_DB, MCP_DB, ROUNDCUBE_DB
          migrate.sh         → 001_maild_provision.sql          (the sentinel table)
                               002_postfixadmin_catalogue.sql   (the catalogue schema)
  api   : wait for the `domain` table → seed (LEADER) → sentinel row
@@ -103,8 +106,8 @@ of the operator file (`env.dev` in dev, `.env` in production).
   `--skip-default-domain` mode exports `AUTO_PROVISION=no` so the "domain not hosted" branch
   stays testable.
 - **Adding a *later* domain** through AdminNG writes the same four default aliases, but a
-  targeted `docker compose restart amavis mua` is still needed for DKIM / SnappyMail
-  (inherent: they cache at boot).
+  targeted `docker compose restart amavis mta` is still needed for DKIM / the virtual aliases
+  (inherent: they cache at boot). The webmail needs no restart.
 - **PostfixAdmin is retired.** Do not point an old PostfixAdmin instance at the catalogue:
   its `public/upgrade.php` would re-run unguarded migration steps against a schema MailD now
   owns. The `config('version')` row is still seeded so an inspection copy does not think the

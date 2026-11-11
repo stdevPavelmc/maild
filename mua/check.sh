@@ -1,20 +1,5 @@
 #!/bin/sh
-
-# is the apache service running?
-curl --silent --head --fail http://localhost || exit 1
-
-# if MTAIP still has the same IP, if not reboot
-MTAIP=`host ${MTA} | awk '/has address/ { print $4 }'`
-if [ "$MTAIP" != "$(cat /tmp/MTAIP)" ] ; then
-	echo "MTA IP has changed, need to reboot"
-	exit 1
-fi
-
-# if MDAIP still has the same IP, if not reboot
-MDAIP=`host ${MDA} | awk '/has address/ { print $4 }'`
-if [ "$MDAIP" != "$(cat /tmp/MDAIP)" ] ; then
-	echo "MDA IP has changed, need to reboot"
-	exit 1
-fi
-
+# MailD mua healthcheck: Apache answers and Roundcube renders its login page (PHP, the rendered
+# configuration and the database session store all work — a broken db_dsnw is a 500 here).
+curl -fsS --max-time 4 -H 'Host: localhost' http://127.0.0.1/ 2>/dev/null | grep -q 'rcmloginuser' || exit 1
 exit 0

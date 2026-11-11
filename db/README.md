@@ -1,8 +1,8 @@
 # PostgreSQL Catalogue (db) — Database for MailD
 
 The `db` container runs PostgreSQL 18 and acts as the central datastore for the MailD catalogue:
-domains, mailboxes, aliases, quotas, contacts, and AdminNG administration state (device authorizations,
-sessions, TOTP seeds, audit logs).
+domains, mailboxes, aliases, quotas, AdminNG administration state (device authorizations,
+sessions, TOTP seeds, audit logs), the MailD MCP's state and the Roundcube webmail's own database.
 
 ## Overview
 
@@ -10,11 +10,11 @@ sessions, TOTP seeds, audit logs).
 - **Data storage:** Uses `PGDATA=/var/lib/postgresql/data` pinned in `db/Dockerfile`.
 - **Boot process:** `db/docker-entrypoint-wrapper.sh` wraps the upstream PostgreSQL entrypoint:
   1. Boots the server and waits for socket readiness.
-  2. Runs `db/ensure_databases.sh` to create any missing databases (`POSTGRES_DB`, `POSTGRES_EXTRA_DB`, `ADMINNG_DB` and `MCP_DB`).
+  2. Runs `db/ensure_databases.sh` to create any missing databases (`POSTGRES_DB`, `POSTGRES_EXTRA_DB`, `ADMINNG_DB`, `MCP_DB` and `ROUNDCUBE_DB`).
   3. Executes `db/migrate.sh` to apply pending SQL migrations in `db/migrations/` (`001_maild_provision.sql`, `002_postfixadmin_catalogue.sql`, `003_mcp_service_mailbox.sql`).
-  4. Runs `db/ensure_roles.sh` (only when `MCP_DB_PASSWORD` is set): creates or re-asserts the restricted `MCP_DB_USER` role (default `maild_mcp`), owner of `MCP_DB`, with column-level read-only grants on the catalogue (never `mailbox.password`) and `EXECUTE` on `maild_mcp_ensure_service_mailbox()` — its only write path. Grants are revoked and re-applied on every boot.
+  4. Runs `db/ensure_roles.sh` (only when `MCP_DB_PASSWORD` is set): creates or re-asserts the restricted `MCP_DB_USER` role (default `maild_mcp`), owner of `MCP_DB`, with column-level read-only grants on the catalogue (never `mailbox.password`) and `EXECUTE` on `maild_mcp_ensure_service_mailbox()` — its only write path. Grants are revoked and re-applied on every boot. It also ensures the webmail's `ROUNDCUBE_DB_USER` role (default `maild_roundcube`, password `ROUNDCUBE_DB_PASSWORD`): owner of `ROUNDCUBE_DB`, column-level `SELECT` on the catalogue (never `mailbox.password`) and `UPDATE` on `mailbox.password`/`modified` only (the password change).
 - **Idempotency:** Never alters existing data or schema destructively on restart.
-- **Consumer services:** Postfix (`mta`), Dovecot (`mda`), Amavis (`amavis`), AdminNG API (`api`), Webmail (`mua`), and maintenance jobs (`cron`) all connect to this container; the MailD MCP (`mcp`) connects only as the restricted `maild_mcp` role.
+- **Consumer services:** Postfix (`mta`), Dovecot (`mda`), Amavis (`amavis`), AdminNG API (`api`), and maintenance jobs (`cron`) all connect to this container; the MailD MCP (`mcp`) connects only as the restricted `maild_mcp` role and the webmail (`mua`) only as `maild_roundcube`.
 
 ## Ports
 
@@ -35,15 +35,17 @@ production, `env.dev` in development) overrides any value.
 
 ### Mandatory deployment variables
 - `POSTGRES_PASSWORD`: Superuser and application database password.
+- `ROUNDCUBE_DB_PASSWORD`: password of the webmail's `maild_roundcube` role (the `mua` uses the same value). Rotation: change it in the env file, restart `db`, recreate `mua`.
 
 ### Image defaults (overridable)
 - `POSTGRES_HOST=db`: Database service hostname.
 - `POSTGRES_DB=mailddb`: Primary mail catalogue database.
 - `POSTGRES_USER=maild`: Primary database user.
-- `POSTGRES_EXTRA_DB=contacts`: Extra databases created at boot (used by SnappyMail for contacts DSN).
+- `POSTGRES_EXTRA_DB=` (empty): extra databases created at boot (comma-separated). It defaulted to `contacts` (SnappyMail's address book) before 2.0.0-rc3; an existing `contacts` database is left in place, never dropped.
 - `ADMINNG_DB=adminng`: AdminNG database for device approvals, audit trails, and 2FA credentials.
 - `MCP_DB=mcp`: the MailD MCP database (must match the mcp image).
 - `MCP_DB_USER=maild_mcp`: the MCP role (must match the mcp image).
+- `ROUNDCUBE_DB=roundcube` / `ROUNDCUBE_DB_USER=maild_roundcube`: the webmail's database and role (must match the mua image).
 
 ### Optional
 - `MCP_DB_PASSWORD`: password of the MCP role; unset means no MCP role is created (passed by the compose files as `${MCP_DB_PASSWORD:-}`). Rotation: change it in the env file, restart `db`, recreate `mcp`.
@@ -91,15 +93,16 @@ $DC exec db psql -U maild -d mailddb -c "SELECT username, domain, active FROM ma
 ## Full backup and restore (service level, every database)
 
 A **service-level** backup is the whole PostgreSQL cluster, not a single database: the mail
-catalogue (`POSTGRES_DB`), SnappyMail's contacts database (`POSTGRES_EXTRA_DB`), AdminNG's own
-state (`ADMINNG_DB`) and the cluster **globals** (roles, tablespaces). `pg_dumpall` is the tool
+catalogue (`POSTGRES_DB`), AdminNG's own state (`ADMINNG_DB`), the MCP's (`MCP_DB`), the
+Roundcube webmail's (`ROUNDCUBE_DB`), any `POSTGRES_EXTRA_DB` (e.g. a legacy `contacts`) and the
+cluster **globals** (roles, tablespaces). `pg_dumpall` is the tool
 for that; the per-database `pg_dump` archives are produced as well because they restore a single
 database surgically and match the shape of the daily cron archives.
 
 > [!NOTE]
 > The database is only *part* of a complete MailD backup. **Not in PostgreSQL:** the mail itself
 > (Maildir on the `vmail` volume), DKIM private keys (`amavis`), TLS certificates (`certs`),
-> SnappyMail's web data (`mua_web`) and the Postfix spool. Back those volumes up separately if
+> the webmail's generated `des_key` (`mua_data`; losing it only logs users out) and the Postfix spool. Back those volumes up separately if
 > you need a full recovery point.
 
 ### Backup
@@ -126,12 +129,15 @@ $DC exec -T db pg_dumpall -U maild --clean --if-exists | gzip > full-all-databas
 #    pg_restore pick individual objects). Add one line per extra database you created
 $DC exec -T db pg_dump -U maild -Fc -d mailddb  > mailddb.dump     # catalogue
 $DC exec -T db pg_dump -U maild -Fc -d adminng  > adminng.dump     # AdminNG state
-$DC exec -T db pg_dump -U maild -Fc -d contacts > contacts.dump    # SnappyMail address book
+$DC exec -T db pg_dump -U maild -Fc -d mcp      > mcp.dump         # MailD MCP state
+$DC exec -T db pg_dump -U maild -Fc -d roundcube > roundcube.dump  # webmail prefs, identities, contacts
+# only if the legacy SnappyMail `contacts` database still exists:
+# $DC exec -T db pg_dump -U maild -Fc -d contacts > contacts.dump
 
 # 5. verify BEFORE trusting the files — an unverified dump is not a backup
 ls -lh
 gzip -t full-all-databases.sql.gz && echo "gzip OK"
-zcat full-all-databases.sql.gz | grep -c 'CREATE DATABASE'   # 5 with --clean (3 without it: mailddb, contacts, adminng)
+zcat full-all-databases.sql.gz | grep -c 'CREATE DATABASE'   # 6 with --clean (4 without it: mailddb, adminng, mcp, roundcube; +1 for a legacy contacts)
 zcat full-all-databases.sql.gz | grep -c 'CREATE TABLE'      # sanity: must be > 0
 zcat full-all-databases.sql.gz | tail -3                     # must end with "PostgreSQL database cluster dump complete"
 $DC exec -T db pg_restore -l < mailddb.dump | wc -l          # catalogue object count
@@ -148,9 +154,10 @@ Two notes on scope:
   need it: on a fresh cluster the image recreates the role from `POSTGRES_PASSWORD`. Keep it for
   the record — and treat it as a secret.
 * The **daily cron job** (`cron/scripts/backup_db.sh`, 08:00 UTC) already writes
-  `maild_backup_*.sql.gz` (catalogue) and `maild_adminng_*.sql.gz` (AdminNG) into `/backups/db` —
+  `maild_backup_*.sql.gz` (catalogue), `maild_adminng_*.sql.gz` (AdminNG), `maild_mcp_*.sql.gz`
+  (MCP) and `maild_roundcube_*.sql.gz` (webmail) into `/backups/db` —
   dev `ldata/backups/db`, production the `db_backups` volume, 15-day retention, integrity-checked.
-  It does **not** cover `contacts` nor the globals, so use it as a fallback source rather than as
+  It does **not** cover a legacy `contacts` database nor the globals, so use it as a fallback source rather than as
   the service-level backup.
 
 ### Restore
@@ -220,8 +227,8 @@ $DC exec -T db psql -U maild -d postgres -c "\l"
   was never provisioned).
 * Migrations are applied on every boot (`db/migrate.sh`), so a restored cluster is brought up to
   the current schema automatically — no manual SQL step.
-* Restoring only `mailddb` leaves `contacts` and `adminng` untouched: use the full dump (or the
-  matching per-database dump) when you need a consistent point in time across all three.
+* Restoring only `mailddb` leaves `adminng`, `mcp` and `roundcube` untouched: use the full dump
+  (or the matching per-database dumps) when you need a consistent point in time across all of them.
 
 See also: [`db_upgrade.md`](../db_upgrade.md) (major-version upgrades — same dump/restore
 primitives) and [`cron/README.md`](../cron/README.md) (the automated daily backups).

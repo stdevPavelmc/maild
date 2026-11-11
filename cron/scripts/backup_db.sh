@@ -38,7 +38,7 @@ BACKUP_RETENTION_DAYS=15
 # The MailD MCP's own database (accounts, tokens, settings): created by the db image, owned by
 # the MCP role, dumped here as POSTGRES_USER (superuser), so the ownership does not get in the way.
 : "${MCP_DB:=mcp}"
-# Roundcube's own database (the mua2 webmail: identities, signatures, prefs, personal contacts),
+# Roundcube's own database (the mua webmail: identities, signatures, prefs, personal contacts),
 # created by the db image only when ROUNDCUBE_DB_PASSWORD is set; skipped while it is absent.
 : "${ROUNDCUBE_DB:=roundcube}"
 # An empty dump compressed is ~20 bytes and a real mailddb dump is tens of KB, so anything
@@ -287,11 +287,11 @@ if [ "${ADMINNG_STATUS}" = "FAILED" ]; then
     FAIL_REASON="the AdminNG database dump failed: ${ADMINNG_FAIL} (the catalogue archive was kept)"
 fi
 
-# --- Service databases: MailD MCP, Roundcube (mua2) ------------------------------------
+# --- Service databases: MailD MCP, Roundcube (mua) -------------------------------------
 # One more archive each, with the same treatment and the same failure rule as AdminNG.
 # SKIPPED (not FAILED) when the database does not exist or has no table yet: the db image
 # creates each one only when that service is configured, and it stays empty until the
-# service has created its schema (the mcp's migrations, the mua2 entrypoint's initdb).
+# service has created its schema (the mcp's migrations, the mua entrypoint's initdb).
 # Dumped as POSTGRES_USER (superuser), so the restricted owner roles do not get in the way.
 #
 # dump_service_db <label> <database> <archive> — sets SVC_STATUS SVC_BYTES SVC_SIZE
@@ -374,7 +374,7 @@ MCP_BACKUP_FILE="${BACKUP_DIR}/maild_mcp_${DATE}.sql.gz"
 dump_service_db "MCP" "${MCP_DB:-}" "${MCP_BACKUP_FILE}"
 MCP_STATUS="${SVC_STATUS}" ; MCP_BYTES="${SVC_BYTES}" ; MCP_SIZE="${SVC_SIZE}" ; MCP_TABLES="${SVC_TABLES}"
 
-# Roundcube, the mua2 webmail (identities, signatures, prefs, personal contacts, responses)
+# Roundcube, the mua webmail (identities, signatures, prefs, personal contacts, responses)
 ROUNDCUBE_BACKUP_FILE="${BACKUP_DIR}/maild_roundcube_${DATE}.sql.gz"
 dump_service_db "Roundcube" "${ROUNDCUBE_DB:-}" "${ROUNDCUBE_BACKUP_FILE}"
 ROUNDCUBE_STATUS="${SVC_STATUS}" ; ROUNDCUBE_BYTES="${SVC_BYTES}" ; ROUNDCUBE_SIZE="${SVC_SIZE}" ; ROUNDCUBE_TABLES="${SVC_TABLES}"

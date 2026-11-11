@@ -4,21 +4,18 @@
 #
 # Three sources, all optional except POSTGRES_DB:
 #   POSTGRES_DB        the PostfixAdmin catalogue (mailddb)
-#   POSTGRES_EXTRA_DB  comma-separated extras consumed by other services
-#                      (contacts — SnappyMail's address book)
+#   POSTGRES_EXTRA_DB  comma-separated operator extras (empty by default; it used to be
+#                      `contacts`, SnappyMail's address book — an existing one stays)
 #   ADMINNG_DB         AdminNG's own state database (devices, sessions, TOTP,
 #                      audit trail)
 #   MCP_DB             the MailD MCP's own database (accounts, tokens, settings);
 #                      owned by the MCP_DB_USER role, see ensure_roles.sh
-#   ROUNDCUBE_DB       the Roundcube webmail's own database (mua2: users, prefs,
-#                      contacts, sessions); owned by the ROUNDCUBE_DB_USER role.
-#                      Only created when ROUNDCUBE_DB_PASSWORD is set (mua2 deployed)
+#   ROUNDCUBE_DB       the webmail's (mua, Roundcube) own database: users, prefs,
+#                      personal contacts, sessions; owned by the ROUNDCUBE_DB_USER role.
+#                      Only created when ROUNDCUBE_DB_PASSWORD is set (its role needs it)
 #
-# ADMINNG_DB is a variable of its own on purpose: POSTGRES_EXTRA_DB is a *list*
-# here, but mua/config-setup.php reads the same variable as a SINGLE database
-# name for the SnappyMail contacts DSN. Appending "adminng" to that list would
-# silently break the webmail's address book, so AdminNG gets its own knob (the
-# api image bakes the same default — they must match).
+# Each service database has a knob of its own (the consuming image bakes the same
+# default — they must match) instead of riding POSTGRES_EXTRA_DB.
 #
 # Blanks are skipped and existing databases are left alone. Replaces the old
 # init-only multiple_db.sh, which ran once on an empty data directory and
@@ -27,7 +24,7 @@
 set -euo pipefail
 
 LIST="${POSTGRES_DB},${POSTGRES_EXTRA_DB:-},${ADMINNG_DB:-},${MCP_DB:-}"
-# mua2 (Roundcube) is opt-in: its database exists only when its role will (ensure_roles.sh)
+# the webmail's database exists only when its role will (ensure_roles.sh)
 [ -n "${ROUNDCUBE_DB_PASSWORD:-}" ] && LIST="${LIST},${ROUNDCUBE_DB:-roundcube}"
 seen=""
 

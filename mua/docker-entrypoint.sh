@@ -1,257 +1,145 @@
 #!/bin/bash
-set -m -o pipefail
+#
+# MailD mua — Roundcube entrypoint.
+#
+# Boot sequence (every start, idempotent, no manual step):
+#   1. resolve the des_key (operator value, or generated once and kept in the volume);
+#   2. render the deployment settings from the environment (render-config.php);
+#   3. wait (bounded) for the db and the first-boot provisioning sentinel (maild_provision),
+#      exactly like amavis and the mta — AUTO_PROVISION=no skips the wait;
+#   4. create Roundcube's schema on an empty ROUNDCUBE_DB, or upgrade it after an image bump
+#      (bin/initdb.sh / bin/updatedb.sh, as the restricted role);
+#   5. start Apache with a SCRUBBED environment: the web server (and every PHP request) never
+#      sees POSTGRES_PASSWORD, ROUNDCUBE_DB_PASSWORD, MCP_* or any other operator secret that
+#      env_file hands to this container. PHP reads its settings from the rendered file only.
+#
+# Any argument other than "apache" is executed instead (debugging), with no configuration step.
+set -euo pipefail
 
-# Author: Pavel Milane <pavelmc@gmail.com>
-# Goal: Configure an instance of snappy mail from the default config file.
-# But with one trick, We must start the apache service first
-
-# start apache, always
-apache2-foreground &
-
-# Run the CMD if passed
-if [ "$1" ] ; then
-    exec $@
+if [ "${1:-apache}" != "apache" ] ; then
+    exec "$@"
 fi
 
-# defaults
-CONFFOLDER="/var/www/html/data/_data_/_default_"
-DOMAINFOLDER="${CONFFOLDER}/domains"
-CONFIG="${CONFFOLDER}/configs/application.ini"
+# restore the image ENV defaults the compose allow-list dropped (a bare key the operator file
+# does not set arrives unset); a value the operator set always wins
+while IFS= read -r line ; do
+    key="${line%%=*}"
+    [ -n "${!key+x}" ] || export "$line"
+done < /etc/maild-image.env
 
-# SnappyMail builds its configuration on the first request it serves, so poke it until
-# application.ini exists: that is the file we have to patch below. Do NOT wait for
-# admin_password.txt instead -- SnappyMail deletes that file as soon as an administrator sets a
-# password of his own in the admin panel, and an unbounded wait on it left this entrypoint
-# spinning forever (container up, healthy and stuck).
-WAIT_CONFIG="${MUA_CONFIG_WAIT_TIMEOUT:-120}"
-T=0
-while [ ! -f "$CONFIG" ] ; do
-    wget -q 'http://localhost/?admin' -O /dev/null
-    wget -q 'http://localhost/?/AdminAppData/0/5220854561746323/' -O /dev/null
-    if [ "$T" -ge "$WAIT_CONFIG" ] ; then
-        echo "WARNING: SnappyMail did not create ${CONFIG} within ${T}s"
-        echo "WARNING: is /var/www/html/data writable by www-data?"
-        break
+log() { echo "mua: $*"; }
+dbg() { case "${ROUNDCUBE_DEBUG:-}" in yes|true|1|on) echo "mua: [debug] $*" ;; esac; return 0; }
+
+RC=/var/www/roundcube
+RUNDIR=/run/maild-roundcube
+STATE=/var/lib/roundcube
+CONF="${RUNDIR}/maild.inc.php"
+
+# ---------------------------------------------------------------- 1. des_key
+# Encrypts the IMAP password inside the session. Changing it only logs everybody out.
+install -d -m 0700 -o root -g root "$STATE"
+if [ -z "${ROUNDCUBE_DES_KEY:-}" ] ; then
+    if [ ! -s "${STATE}/des_key" ] ; then
+        ( umask 077 ; head -c 48 /dev/urandom | base64 -w0 | tr -d '/+=' | head -c 32 > "${STATE}/des_key" )
+        log "generated a new des_key in ${STATE}/des_key (kept across restarts by the volume)"
     fi
-    sleep 2 ; T=$((T+2))
-    echo "."
-done
-
-# List of environment variables to check
-env_vars=(BANNER_TITLE POSTGRES_EXTRA_DB MTA MDA POSTGRES_HOST POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD)
-
-# Loop over the environment variables
-for var in "${env_vars[@]}"; do
-    # Check if the variable is empty
-    if [ -z "${!var}" ]; then
-        echo "WARNING: $var is empty"
-        echo "WARNING: This whole shit will fail, check your config and RTFM!"
-        killall apache2
-        exit 1
-    fi
-done
-
-# Debug
-if [ "${MUA_DEBUG}" ] ; then
-    echo "Variable parse done"
+    ROUNDCUBE_DES_KEY="$(cat "${STATE}/des_key")"
 fi
+export ROUNDCUBE_DES_KEY
 
-# get the IPs of the MTA and the MDA
-MTAIP=`host ${MTA} | awk '/has address/ { print $4 }'`
-MDAIP=`host ${MDA} | awk '/has address/ { print $4 }'`
-echo $MTAIP > /tmp/MTAIP
-echo $MDAIP > /tmp/MDAIP
-
-# Debug
-if [ "${MUA_DEBUG}" ] ; then
-    echo "MDA IP: $MDAIP"
-    echo "MTA IP: $MTAIP"
+# ---------------------------------------------------------------- 2. settings
+install -d -m 0750 -o root -g www-data "$RUNDIR"
+install -d -m 0700 -o www-data -g www-data /tmp/roundcube
+if ! INFO="$(php /usr/local/lib/maild/render-config.php "$CONF")" ; then
+    log "ERROR - refusing to start with an unusable configuration (see above)"
+    exit 1
 fi
+chown root:www-data "$CONF"
+chmod 0640 "$CONF"
+dbg "$INFO"
 
-# --- SnappyMail plugins ------------------------------------------------------------------------
-# The plugin CODE comes from the image (pinned at build time, see mua/Dockerfile) and is copied
-# over the data volume on every boot: a fresh deployment gets the MailD baseline and a rebuilt
-# image refreshes it. The plugin SETTINGS live in the volume (configs/plugin-*.json) and are never
-# touched here; the baseline `enabled_list` is applied by config-setup.php just below.
-# Managed directories are replaced wholesale, any other directory is left alone, so a plugin
-# installed later from the admin panel survives.
-PLUGINS_SRC="/opt/maild/plugins"
-PLUGINS_DST="${CONFFOLDER}/plugins"
-if [ -d "$PLUGINS_SRC" ] ; then
-    mkdir -p "$PLUGINS_DST"
-    for d in "$PLUGINS_SRC"/* ; do
-        [ -d "$d" ] || continue
-        P="$(basename "$d")"
-        rm -rf "${PLUGINS_DST:?}/${P}"
-        cp -a "$d" "${PLUGINS_DST}/${P}"
+# PHP's upload limits follow ROUNDCUBE_UPLOAD_MAX (post_max_size gets 1M of headroom)
+UPLOAD_BYTES="$(echo "$INFO" | sed -n 's/^UPLOAD_MAX_BYTES=//p')"
+UPLOAD_MB=$(( (UPLOAD_BYTES + 1048575) / 1048576 ))
+cat > /etc/php/8.4/apache2/conf.d/95-maild-uploads.ini <<EOF
+; generated by the mua entrypoint from ROUNDCUBE_UPLOAD_MAX
+upload_max_filesize = ${UPLOAD_MB}M
+post_max_size = $((UPLOAD_MB + 1))M
+EOF
 
-        # Debug
-        if [ "${MUA_DEBUG}" ] ; then
-            echo "Plugin synced: ${P}"
-        fi
-    done
-    chown -R www-data:www-data "$PLUGINS_DST"
-    chmod -R go-rwx "$PLUGINS_DST"
-fi
+# ---------------------------------------------------------------- 3. db + provisioning gate
+DBHOST="${POSTGRES_HOST:-db}"
+DBUSER="${ROUNDCUBE_DB_USER:-maild_roundcube}"
+RCDB="${ROUNDCUBE_DB:-roundcube}"
+CATDB="${POSTGRES_DB:-mailddb}"
 
-# switcheroo voodo magic
-# One helper does it all: it writes MailD's settings (banner, contacts DB, admin panel login)
-# into SnappyMail's configuration, using the same quoting SnappyMail itself writes -- crudini
-# wrote them unquoted, PHP then refused the whole file, SnappyMail fell back to its factory
-# defaults (losing security.admin_password with them) and minted a new random password that no
-# log ever showed, so ?admin + the OTP printed here could not possibly work.
-if SETUP="$(php /config-setup.php)" ; then
-    ADMIN_PANEL="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_PANEL=//p')"
-    ADMIN_LOGIN="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_LOGIN=//p')"
-    ADMIN_PASSWORD="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_PASSWORD=//p')"
-    ADMIN_PASSWORD_SOURCE="$(echo "$SETUP" | sed -n 's/^MUA_ADMIN_PASSWORD_SOURCE=//p')"
+# a private pgpass, never a password on a command line or in the process environment of psql
+PGPASSFILE="$(mktemp)"
+export PGPASSFILE
+trap 'rm -f "$PGPASSFILE"' EXIT
+pw_escaped="$(printf '%s' "$ROUNDCUBE_DB_PASSWORD" | sed 's/\\/\\\\/g; s/:/\\:/g')"
+printf '%s:5432:*:%s:%s\n' "$DBHOST" "$DBUSER" "$pw_escaped" > "$PGPASSFILE"
+chmod 0600 "$PGPASSFILE"
 
-    # Expose for the admin user the credentials of the SnappyMail admin panel (printed even
-    # while it is disabled: a generated password is shown only on the boot that mints it)
-    echo "======================================================================"
-    if [ "${ADMIN_PANEL}" = "on" ] ; then
-        echo "|| SnappyMail admin panel: <your webmail URL>/?admin  [ENABLED]"
-        echo "|| (internet-facing: set MUA_ADMIN_PANEL=off again once you are done)"
-    else
-        echo "|| SnappyMail admin panel: DISABLED (MUA_ADMIN_PANEL=off, the default)"
-        echo "|| set MUA_ADMIN_PANEL=on and restart mua to use <your webmail URL>/?admin"
-    fi
-    echo "|| login    : ${ADMIN_LOGIN}"
-    case "${ADMIN_PASSWORD_SOURCE}" in
-        env)
-            echo "|| password : the one in MUA_ADMIN_PASSWORD" ;;
-        stored)
-            echo "|| password : unchanged, set from the admin panel" ;;
-        *)
-            echo "|| password : ${ADMIN_PASSWORD}   [${ADMIN_PASSWORD_SOURCE}]" ;;
-    esac
-    echo "======================================================================"
-else
-    echo "ERROR: SnappyMail could not be configured, see the messages above"
-    echo "ERROR: the webmail may be running on its factory defaults and a random password"
-fi
+q() { # <database> <sql>
+    psql -X -tAq -w -h "$DBHOST" -U "$DBUSER" -d "$1" -c "$2" 2>/dev/null
+}
 
-# Debug
-if [ "${MUA_DEBUG}" ] ; then
-    echo "Config parse done"
-fi
-
-# --- first-boot provisioning gate ------------------------------------------
-# SnappyMail builds one JSON config per domain at start, so it waits (bounded) for the admin
-# container to finish provisioning the catalogue: a fresh deploy then gets its per-domain
-# configs with no manual restart. Opt out with AUTO_PROVISION=no.
 if [ "${AUTO_PROVISION:-yes}" != "no" ] ; then
-    echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
-    chmod 0600 ~/.pgpass
     T=0
     while : ; do
-        if [ "$(psql -tAq -w -h "$POSTGRES_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
-                -c "SELECT 1 FROM maild_provision WHERE id=1 AND version >= ${PROVISION_VERSION:-1}" 2>/dev/null)" = "1" ] ; then
-            echo "mua: catalogue is provisioned, configuring"
+        if [ "$(q "$CATDB" "SELECT 1 FROM maild_provision WHERE id=1 AND version >= ${PROVISION_VERSION:-1}")" = "1" ] ; then
+            log "catalogue is provisioned"
             break
         fi
         if [ "$T" -ge "${PROVISION_WAIT_TIMEOUT:-180}" ] ; then
-            echo "mua: WARNING - catalogue not provisioned after ${T}s, continuing"
+            log "WARNING - catalogue not provisioned (or role '${DBUSER}' cannot log in) after ${T}s, continuing"
             break
         fi
         sleep 3 ; T=$((T+3))
     done
 fi
 
-# get the domains on the DB
-function get_domains() {
-    # query to get the domains
-    QUERY="SELECT domain FROM domain;"
-
-    # craft the auth credentials & secure it
-    echo "$POSTGRES_HOST:5432:$POSTGRES_DB:$POSTGRES_USER:$POSTGRES_PASSWORD" > ~/.pgpass
-    chmod 0600 ~/.pgpass
-
-    # Run psql command to connect to database and run query
-    psql -h $POSTGRES_HOST -d $POSTGRES_DB -U $POSTGRES_USER -c "$QUERY" -w > /tmp/domains.txt
-
-    # validate
-    R=$?
-    if [ ! $R -eq 0 ] ; then
-        echo "Error, could not connect to database"
+# the role and its database come from the db container (ensure_databases.sh / ensure_roles.sh,
+# only when ROUNDCUBE_DB_PASSWORD is set there too): wait a little for them, then insist
+T=0
+until q "$RCDB" "SELECT 1" > /dev/null ; do
+    if [ "$T" -ge 120 ] ; then
+        log "ERROR - cannot connect to database '${RCDB}' as '${DBUSER}' on ${DBHOST}"
+        log "ERROR - is ROUNDCUBE_DB_PASSWORD set for the db service too (it creates the role)?"
         exit 1
     fi
-
-    # debug
-    if [ "${MUA_DEBUG}" ] ; then
-        echo "DB query result dump:" >&2
-        cat /tmp/domains.txt >&2
-    fi
-
-    # output format
-    #  domain  
-    #----------
-    # ALL
-    # sample1.com.jm
-    # exercises.jm
-    #(2 rows)
-
-    # match any domain like string on the results
-    cat /tmp/domains.txt | grep -E '\b[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b' | tr -d ' ' | xargs
-}
-
-# clean the domains configs: SnappyMail keeps one json file per domain and the loop below
-# recreates them from the catalogue. Any stale file -- or leftover of an older run -- would
-# advertise a domain that no longer exists (the old `for f in $(ls); do rm -f ${f}` also choked
-# on names with spaces, and a stray `2` file used to land here on every boot)
-find "${DOMAINFOLDER}" -maxdepth 1 -type f -delete
-
-# Debug
-if [ "${MUA_DEBUG}" ] ; then
-    echo "Domain configs cleaned"
-fi
-
-# Cycle through domains
-for domain in $(get_domains); do
-    # Debug
-    if [ "${MUA_DEBUG}" ] ; then
-        echo "Parsing config file for Domain: $domain"
-    fi
-
-    # create a domain config file (short filename)
-    DEST="${DOMAINFOLDER}/${domain}.json"
-    cp /tmp/domain.json ${DEST}
-    sed s/"_DOMAIN_"/"${domain}"/g -i "${DEST}"
-    sed s/"_MTA_"/"${MTAIP}"/g -i "${DEST}"
-    sed s/"_MDA_"/"${MDAIP}"/g -i "${DEST}"
-    chown www-data:www-data "${DEST}"
-    chmod 0600 "${DEST}"
+    sleep 3 ; T=$((T+3))
 done
 
-# Debug
-if [ "${MUA_DEBUG}" ] ; then
-    echo "Config finished..."
+# ---------------------------------------------------------------- 4. Roundcube schema
+# (CLI scripts read the same config.inc.php → the rendered file → db_dsnw as the role)
+cd "$RC"
+if [ "$(q "$RCDB" "SELECT to_regclass('public.system') IS NOT NULL")" = "t" ] ; then
+    log "upgrading the Roundcube schema if needed"
+    php bin/updatedb.sh --package=roundcube --dir="${RC}/SQL" || { log "ERROR - schema upgrade failed"; exit 1; }
+else
+    log "empty database '${RCDB}': creating the Roundcube schema"
+    php bin/initdb.sh --dir="${RC}/SQL" || { log "ERROR - schema creation failed"; exit 1; }
 fi
 
-# recognize PIDs
-pidlist=$(jobs -p)
+# managesieve keeps its schema in the same database (no own tables), nothing else to init.
+# Expired sessions/caches/deleted contacts are purged by Roundcube's own garbage collector
+# on requests (session_lifetime); bin/gc.sh is run here once per boot as a safety net.
+php bin/gc.sh > /dev/null 2>&1 || true
 
-# initialize latest result var
-latest_exit=0
+log "Roundcube $(sed -n "s/.*define('RCMAIL_VERSION', '\([^']*\)'.*/\1/p" program/include/iniset.php) ready: $(echo "$INFO" | sed -n 's/^PASSWORD_ALGORITHM=/password hash /p'), directory scope $(echo "$INFO" | sed -n 's/^DIRECTORY_SCOPE=//p')"
+log "trusted host names: $(echo "$INFO" | sed -n 's/^TRUSTED_HOSTS=//p'), default language $(echo "$INFO" | sed -n 's/^LANGUAGE=//p')"
 
-# define shutdown helper
-function shutdown() {
-    trap "" SIGINT
+rm -f "$PGPASSFILE"
+trap - EXIT
 
-    for single in $pidlist; do
-        if ! kill -0 "$single" 2> /dev/null; then
-            wait "$single"
-            latest_exit=$?
-        fi
-    done
-
-    kill "$pidlist" 2> /dev/null
-}
-
-# run shutdown
-cd /tmp/
-trap shutdown SIGINT
-wait -n
-
-# return received result
-exit $latest_exit
+# ---------------------------------------------------------------- 5. Apache, scrubbed env
+# Debian's apache2ctl reads /etc/apache2/envvars itself; nothing else is passed on.
+install -d -m 0755 /run/apache2 /var/lock/apache2
+exec env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=C.UTF-8 \
+    TZ=UTC \
+    MTA="${MTA:-mta}" MDA="${MDA:-mda}" \
+    /usr/sbin/apache2ctl -D FOREGROUND

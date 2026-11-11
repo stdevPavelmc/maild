@@ -2,7 +2,7 @@
 
 MailD is a Docker-based complete mail server (derived from MailAD) that replaces the LDAP
 backend with **PostgreSQL**: Postfix (SMTP), Dovecot (IMAP/POP3/Sieve), Amavis + ClamAV
-(content filtering), AdminNG (web admin PWA + API), SnappyMail (webmail) and a cron container
+(content filtering), AdminNG (web admin PWA + API), Roundcube (webmail) and a cron container
 for maintenance jobs.
 
 ## Quick Reference
@@ -14,8 +14,7 @@ for maintenance jobs.
 | `mda`    | Dovecot — IMAP/POP3/Sieve, mail delivery          | 110, 143, 993, 995, 4190  |
 | `amavis` | Content filter (spam + AV relay, DKIM signing); 10024 ← mta, 10026 ← cron/mcp | — (internal) |
 | `clamav` | ClamAV antivirus engine                           | 3310                      |
-| `mua`    | SnappyMail webmail                                | 8081                      |
-| `mua2`   | Roundcube webmail on Debian trixie — **trial** replacement for `mua`, dev compose only (`mua2/README.md`) | 8086 |
+| `mua`    | Roundcube webmail (Debian trixie, PHP 8.4; `mua/README.md`) | 8081                      |
 | `api`    | AdminNG API — FastAPI over the catalogue; first-boot provisioning leader (internal only) | —  |
 | `adminng`| AdminNG PWA frontend (nginx + `/api/v1/` proxy)   | 8083 (HTTP), 8084 (HTTPS, dev) |
 | `pwa-test`| Dev-only Playwright + Lighthouse browser harness (one-shot) | —                |
@@ -26,7 +25,7 @@ for maintenance jobs.
 ## Core Principles — never break these
 
 - **Never rename service hostnames** (`db`, `mta`, `mda`, `amavis`, `clamav`,
-  `mua`, `mua2`, `cron`, `api`, `adminng`, `mcp`) — they are hardcoded across entrypoints,
+  `mua`, `cron`, `api`, `adminng`, `mcp`) — they are hardcoded across entrypoints,
   Postfix/Dovecot/Amavis config and the test suite.
 - **Never change the database schema** without a migration script. `db/ensure_databases.sh`
   only *creates missing* databases (`POSTGRES_EXTRA_DB`); it never alters existing ones.
@@ -44,7 +43,7 @@ for maintenance jobs.
   manual setup, no stack restart). Keep the seeder idempotent and non-destructive, and keep
   `AUTO_PROVISION=no` + `adminng.py --provision` working as the manual fallback.
 - **Password hashes are Argon2id by default** (`PASSWORD_SCHEME=argon2id`; the shared writers
-  are the `api` seeder, the AdminNG API and the mua change-password driver). Legacy md5crypt
+  are the `api` seeder, the AdminNG API and the mua (Roundcube `password` plugin)). Legacy md5crypt
   `$1$` hashes coexist and migrate on password change or rehash-on-login, but **weak-scheme
   support is removed on 2027-02-01** (date-gated at runtime) — never add a new md5crypt-only
   path.
@@ -77,7 +76,7 @@ for maintenance jobs.
 
 ```bash
 ./bootstrap-dev.sh                       # provision + start the dev stack with fixtures (idempotent)
-./test.sh                                # black-box acceptance suite (208 checks) against the fixtures
+./test.sh                                # black-box acceptance suite (207 checks) against the fixtures
 ./test.sh --skip-content --skip-quota    # faster subset (skip AV/SPAM and the quota fixture)
 docker compose --env-file env.dev -f docker-compose-dev.yml logs -f mta
 ```

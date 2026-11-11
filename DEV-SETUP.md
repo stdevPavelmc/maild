@@ -17,7 +17,7 @@ This guide explains how to set up the mail system for local development.
 
 2. **Create the local data directory:**
    ```bash
-   mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua_web,logs,certs,dozzle,backups}
+   mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua,logs,certs,dozzle,backups}
    ```
 
 3. **Generate self-signed certificates (if needed):**
@@ -75,9 +75,9 @@ What it does, idempotently (a second run re-asserts the same state and changes n
 - provisions **`example.net`** with `alice`, `bob`, `charlie`, `dylan`, the default aliases
   (`postmaster`, `abuse`, `hostmaster`, `webmaster` → `alice@example.net`) and **alice as the
   domain admin** of `example.net` in PostfixAdmin;
-- repairs the ownership of the fresh bind mounts (`ldata/vmail` → uid/gid 5000, `ldata/mua_web` →
-  `www-data`, both are created root-owned by docker) and restarts `mua` so SnappyMail regenerates
-  its per-domain config;
+- repairs the ownership of the fresh `ldata/vmail` bind mount (→ uid/gid 5000, docker creates
+  it root-owned); the webmail needs nothing per domain (`ldata/mua` only keeps Roundcube's
+  generated `des_key`, root-owned);
 - restarts `mta` when a peer container changed address: the MTA writes the MDA's IP into
   `main.cf` at start (`virtual_transport = lmtp:inet:<ip>:24`) and would otherwise deliver to a
   dead address while reporting `unhealthy`;
@@ -106,7 +106,7 @@ The `api` container's first-boot seeder (`adminng/api/app/provision.py`, `AUTO_P
 by default) only handles `DEFAULT_DOMAIN` from `env.dev`: the domain row,
 `<MAIL_ADMIN_USER>@<DEFAULT_DOMAIN>` as superadmin + mailbox, the four default aliases and the
 `maild_provision` sentinel that `mta`/`mda`/`amavis`/`mua` gate on. It **never** creates the
-`example.net` fixtures, the vmail homes, the SnappyMail domain configs or `test.creds` — that is
+`example.net` fixtures, the vmail homes or `test.creds` — that is
 `bootstrap-dev.sh`'s job. Confirm the seeder ran with:
 
 ```bash
@@ -268,11 +268,10 @@ All services expose debugging ports:
 ## Accessing Services
 
 - **Webmail:** http://localhost:8081
-- **Webmail admin panel:** http://localhost:8081/​?admin — login `maild`, password = the OTP the
-  mua container prints at boot (`docker compose logs mua | grep -A3 'admin panel'`)
-- **Mailbox password change:** from the webmail itself (Settings → Password) — the `change-password`
-  plugin and the MailD catalogue driver ship with the image, as do the X-Originating-IP header and
-  TOTP two-factor plugins (`MUA_PLUGINS`), installed on every boot
+  (Roundcube; UI in Spanish by default in dev, `ROUNDCUBE_LANGUAGE=es_ES` in `env.dev`; no admin
+  panel — every setting is a `ROUNDCUBE_*` variable, see `mua/README.md`)
+- **Mailbox password change:** from the webmail itself (Settings → Password) — Roundcube's
+  `password` plugin (`sql` driver) writes the catalogue, hashed per `PASSWORD_SCHEME`
 - **AdminNG PWA:** http://localhost:8083
   - LAN/phone (HTTPS, dev): https://<lan-ip>:8084 — install `ldata/certs/adminng-ca.der` on the
     device first (`bootstrap-dev.sh` generates the local CA; see `adminng/pwa/README.md` §2.1)
@@ -383,7 +382,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml down
 sudo rm -rf ldata/
 
 # Start fresh
-mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua_web,logs,certs,dozzle,backups}
+mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua,logs,certs,dozzle,backups}
 docker compose --env-file env.dev -f docker-compose-dev.yml up -d
 ```
 

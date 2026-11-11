@@ -49,7 +49,7 @@ To create a really dynamic setup we split the mail server in services:
 - [**ClamAV**](./clamav/) AV scanning solution
 - [**Postgres DB**](./db/) this is the database to hold the user's data.
 - [**AdminNG**](./adminng/) The administration UI: PWA frontend (`adminng`) + FastAPI (`api`) over the catalogue
-- [**MUA**](./mua/) This is the mail user agent, aka: Webmail provided by [Snappy Mail](https://snappymail.eu/)
+- [**MUA**](./mua/) This is the mail user agent, aka: Webmail provided by [Roundcube](https://roundcube.net/)
 - [**Cron**](./cron/) This has to deal with scheduled tasks, backups, cleanups, statistics, etc.
 - [**MCP**](./mcp/) MailD MCP: lets AI assistants (Claude, ChatGPT, Gemini CLI, Claude Code, …) read, organise and send the user's mail — MCP endpoint with OAuth, a REST mirror with OpenAPI and a SKILL.md, a user page and an admin panel (`mcp.<DEFAULT_DOMAIN>`)
 

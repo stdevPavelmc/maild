@@ -1,10 +1,10 @@
 <?php
 
 /*
- * MailD mua2 — Roundcube configuration.
+ * MailD mua — Roundcube configuration.
  *
  * This file is static (baked into the image). Everything that depends on the deployment is
- * rendered from the container environment on every boot by mua2/render-config.php into
+ * rendered from the container environment on every boot by mua/render-config.php into
  * /run/maild-roundcube/maild.inc.php (root:www-data 0640), which returns a plain array: no
  * environment variable is read at request time, and the web server runs with a scrubbed
  * environment (see docker-entrypoint.sh).
@@ -24,8 +24,8 @@ $config['db_dsnw'] = $maild['db_dsn'];
 
 // IMAP/Sieve on the mda over STARTTLS (Dovecot has ssl = required), SMTP submission on the
 // mta over implicit TLS (465). The certificates are issued for the public mail hostname, not
-// for the internal service names, so peer-name verification is off on this internal hop — the
-// same trade-off the SnappyMail mua makes.
+// for the internal service names, so peer-name verification is off on this internal hop (an
+// internal network hop between two containers of the stack).
 $maild_tls = [
     'ssl' => [
         'verify_peer' => false,
@@ -51,7 +51,7 @@ $config['login_lc'] = 2;
 $config['login_username_filter'] = 'email';
 
 // ---------------------------------------------------------------------------------- logging
-// PHP's error_log is the container's stderr (php/maild.ini): `docker compose logs mua2`
+// PHP's error_log is the container's stderr (php/maild.ini): `docker compose logs mua`
 $config['log_driver'] = 'php';
 $config['log_logins'] = true;
 $config['log_session'] = false;
@@ -76,8 +76,8 @@ $config['password_charset'] = 'UTF-8';
 $config['trusted_host_patterns'] = $maild['trusted_hosts'];
 // X-Forwarded-For / X-Real-IP are only honoured from the ingress (production: Traefik)
 $config['proxy_whitelist'] = $maild['trusted_proxies'];
-// the client's IP in a Received: header of sent mail (what SnappyMail's X-Originating-IP
-// plugin did); 1.7.6 only uses trusted hosts and proxied IPs here
+// the client's IP in a Received: header of sent mail (abuse tracing; replaces the former
+// webmail's X-Originating-IP header); 1.7.6 only uses trusted hosts and proxied IPs here
 $config['http_received_header'] = true;
 $config['http_received_header_encrypt'] = false;
 // one identity per real address: users manage names/signatures, not sender addresses (the
@@ -110,7 +110,7 @@ $config['plugins'] = [
     'identity_select',
 ];
 
-// --- maild_directory (mua2/plugins/maild_directory) -------------------------------------
+// --- maild_directory (mua/plugins/maild_directory) -------------------------------------
 $config['maild_directory_dsn'] = $maild['catalogue_dsn'];
 $config['maild_directory_scope'] = $maild['directory_scope'];        // domain | all | off
 $config['maild_directory_aliases'] = $maild['directory_aliases'];
@@ -122,7 +122,7 @@ $config['addressbook_search_mode'] = 0;         // substring: "ali" finds "Alice
 
 // --- password (Roundcube's sql driver against the catalogue) -----------------------------
 // The restricted role may UPDATE only mailbox.password/modified. The hash follows the
-// stack-wide PASSWORD_SCHEME exactly like the AdminNG API, the SnappyMail driver and
+// stack-wide PASSWORD_SCHEME exactly like the AdminNG API, the api seeder and
 // Dovecot's rehash-on-login: Argon2id via password_hash() with PHP's defaults (m=65536, t=4,
 // p=1) and the '{ARGON2ID}' prefix Dovecot dispatches on; or, until 2027-02-01 only, the
 // legacy raw md5crypt '$1$…' (weak-scheme removal: after that date argon2id is used anyway).

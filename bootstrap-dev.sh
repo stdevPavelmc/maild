@@ -34,7 +34,7 @@ readonly WAIT_HTTP=120       # seconds to wait for a web UI
 readonly WAIT_MDA=300        # seconds to wait for Dovecot's auth socket (cold first boot
                              # generates the self-signed cert + `openssl dhparam -5 2048`,
                              # a safe prime: its cost is unpredictable, seconds to minutes)
-readonly WAIT_MUA=120        # seconds to wait for the webmail per-domain config
+readonly WAIT_MUA=120        # seconds to wait for the webmail login page
 readonly WAIT_CLAMAV=900     # seconds to wait for the first ClamAV signature download
 
 # The default aliases a new domain gets (PostfixAdmin's $CONF['default_aliases'], now
@@ -544,7 +544,7 @@ creds_tmp="$(mktemp "${CREDS_FILE}.XXXXXX")"
 	printf '# legacy MD5-CRYPT scheme on purpose; new passwords are Argon2id).\n'
 	printf '#\n'
 	printf '# AdminNG (PWA)        : http://localhost:%s\n' "$ADMINNG_PORT"
-	printf '# Webmail (SnappyMail) : http://localhost:%s\n' "$MUA_PORT"
+	printf '# Webmail (Roundcube)  : http://localhost:%s\n' "$MUA_PORT"
 	printf '#\n'
 	printf '# Accounts in the catalogue:\n'
 	for addr in "${ADDRESSES[@]}"; do
@@ -791,34 +791,19 @@ timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mda chmod 0700 "${home_dirs[@]}"
 ok "vmail homes ready (owner 5000:5000, ${#home_dirs[@]} mailboxes)"
 
 # --------------------------------------------------------------- webmail -----
-step "webmail domain configuration"
+step "webmail (Roundcube)"
 
-MUA_DOMAINS=("$TEST_DOMAIN")
-[ "$SKIP_DEFAULT_DOMAIN" = 0 ] && MUA_DOMAINS=("$DEFAULT_DOMAIN" "$TEST_DOMAIN")
-mua_configs_present() {
-	# Checked *inside* the container: SnappyMail keeps its data directory at mode 0700 owned by
-	# www-data, so the host mount point is not readable for the user running this script.
-	local dom
-	for dom in "${MUA_DOMAINS[@]}"; do
-		timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mua \
-			test -f "/var/www/html/data/_data_/_default_/domains/${dom}.json" || return 1
-	done
+# Roundcube keeps no per-domain config (every hosted domain logs in with its full address), so
+# a new domain needs nothing here: just make sure the webmail is up and serves its login page.
+# Its first start creates Roundcube's schema in the roundcube database (mua entrypoint).
+mua_ready() {
+	curl -fsS --max-time 5 "http://localhost:${MUA_PORT}/" 2>/dev/null | grep -q rcmloginuser
 }
-
-# SnappyMail builds one JSON config per domain when its entrypoint runs (it queries the `domain`
-# table and deletes stale configs), so a *restart* — not a recreate, which would change the
-# container IP that mua/mta cache at boot — is what makes the new domains usable.
 timeout -k10 300 "${DC[@]}" up -d mua >/dev/null || die "'docker compose up -d mua' failed"
-# SnappyMail initialises itself by writing into /var/www/html/data (the bind mount above). A
-# fresh host directory is root-owned, so the web server (www-data) could not start up: hand the
-# directory over from inside the container, which runs as root — no sudo on the workstation.
-timeout -k10 "$EXEC_TIMEOUT" "${DC[@]}" exec -T mua chown -R www-data:www-data /var/www/html/data ||
-	warn "could not hand /var/www/html/data to www-data: the webmail may not initialise"
-timeout -k10 120 "${DC[@]}" restart mua >/dev/null || die "'docker compose restart mua' failed"
-if wait_up "$WAIT_MUA" mua_configs_present; then
-	ok "SnappyMail per-domain configs ready: ${MUA_DOMAINS[*]}"
+if wait_up "$WAIT_MUA" mua_ready; then
+	ok "webmail ready: http://localhost:${MUA_PORT}"
 else
-	warn "no SnappyMail per-domain config for ${MUA_DOMAINS[*]} yet: check 'docker compose -f $COMPOSE_FILE logs mua' and re-run"
+	warn "the webmail does not serve its login page yet: check 'docker compose -f $COMPOSE_FILE logs mua' and re-run"
 fi
 
 # ------------------------------------------------- content filter (DKIM) -----
@@ -933,7 +918,7 @@ printf '  %s\n' "domains     : ${PROVISIONED_DOMAINS[*]}"
 printf '  %s\n' "adminng UI  : http://localhost:${ADMINNG_PORT}   (AdminNG PWA)"
 printf '  %s\n' "adminng TLS : https://localhost:${ADMINNG_TLS_PORT}  (LAN/phone; install ldata/certs/adminng-ca.der first)"
 printf '  %s\n' "mcp         : http://localhost:${MCP_PORT}/   (MailD MCP user page; admin at /adminmcp)"
-printf '  %s\n' "webmail     : http://localhost:${MUA_PORT}   (SnappyMail)"
+printf '  %s\n' "webmail     : http://localhost:${MUA_PORT}   (Roundcube)"
 printf '  %s\n' "credentials : ${CREDS_FILE} (mode 600, git-ignored)"
 printf '\n  %-30s %-34s %s\n' "MAILBOX" "PASSWORD" "ROLE"
 printf '  %-30s %-34s %s\n' "------------------------------" "----------------------------------" "-------------------------------"

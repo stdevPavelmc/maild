@@ -26,7 +26,7 @@ state in it beyond what is dumped):
 | `mda` | `passdb`/`userdb` queries (auth, mailbox path, per-user quota) |
 | `mta` | `pgsql:` maps (virtual domains/mailboxes/aliases, sender login, relay domains) |
 | `amavis` | the domain list (DKIM key bootstrap) |
-| `mua` | the contacts DSN (SnappyMail's own database) |
+| `mua` | the Roundcube webmail: its own `roundcube` database + the directory/password columns of the catalogue (as `maild_roundcube`) |
 | `cron` | `psql`/`pg_dump` for the daily backup, quota and traffic reports |
 
 Inside the cluster:
@@ -34,16 +34,20 @@ Inside the cluster:
 * `mailddb` (`POSTGRES_DB`) — the catalogue: the PostfixAdmin table layout (created by
   `db/migrations/002_postfixadmin_catalogue.sql`, MailD's snapshot) plus MailD's
   `maild_provision` sentinel (`db/migrations/001_maild_provision.sql`).
-* `contacts` (`POSTGRES_EXTRA_DB`, a comma-separated list) — SnappyMail's database; empty in a
-  fresh deploy.
+* `roundcube` (`ROUNDCUBE_DB`) — the webmail's own state (users, identities, prefs, personal
+  contacts, sessions), owned by the `maild_roundcube` role.
+* `mcp` (`MCP_DB`) — the MailD MCP's state, owned by the `maild_mcp` role.
+* `POSTGRES_EXTRA_DB` (a comma-separated list, empty by default) — only on deployments from before
+  2.0.0-rc3 that still carry the legacy SnappyMail `contacts` database.
 * `adminng` (`ADMINNG_DB`) — AdminNG's own state (devices, sessions, TOTP, audit trail); created
   by `ensure_databases.sh` on every boot, empty until AdminNG is used.
 * `postgres` — the maintenance database (catalog only; nothing to move).
 * the `maild` role (`POSTGRES_USER`, superuser) — **recreated by the image** on the new cluster,
-  so the dump does not need to carry the roles.
+  so the dump does not need to carry the roles; `ensure_roles.sh` recreates `maild_mcp` and
+  `maild_roundcube` from `MCP_DB_PASSWORD` / `ROUNDCUBE_DB_PASSWORD` on every boot.
 
 **Not in the database:** the mail itself (Maildir, on the `vmail` volume), DKIM keys (amavis
-volume), TLS certificates (`certs`), SnappyMail's web data. The dump is therefore small (single
+volume), TLS certificates (`certs`), the webmail's `des_key` (`mua_data`). The dump is therefore small (single
 MBs) and the downtime window short.
 
 ## 2. Pre-flight checklist
@@ -116,8 +120,13 @@ $DC exec -T cron sh -c "PGPASSWORD=\$POSTGRES_PASSWORD pg_dumpall -U maild -h db
 # the catalogue and the extra databases, custom format (the surgical restore path)
 $DC exec -T cron sh -c "PGPASSWORD=\$POSTGRES_PASSWORD pg_dump -U maild -h db -Fc -d mailddb" \
     > pre-upgrade-15/mailddb.dump
-$DC exec -T cron sh -c "PGPASSWORD=\$POSTGRES_PASSWORD pg_dump -U maild -h db -Fc -d contacts" \
-    > pre-upgrade-15/contacts.dump
+for db in adminng mcp roundcube; do
+  $DC exec -T cron sh -c "PGPASSWORD=\$POSTGRES_PASSWORD pg_dump -U maild -h db -Fc -d $db" \
+      > pre-upgrade-15/$db.dump
+done
+# only if your deployment still has the legacy SnappyMail `contacts` database:
+# $DC exec -T cron sh -c "PGPASSWORD=\$POSTGRES_PASSWORD pg_dump -U maild -h db -Fc -d contacts" \
+#     > pre-upgrade-15/contacts.dump
 ```
 
 Verify before going on — an unverified backup is not a backup:
@@ -129,7 +138,7 @@ grep -c 'CREATE TABLE' pre-upgrade-15/full-all-databases.sql                    
 ```
 
 Then **copy the directory off the stack** (another disk/host) with restrictive permissions — the
-dumps carry `mailbox.password` hashes and SnappyMail credentials:
+dumps carry `mailbox.password` hashes, AdminNG/MCP secrets and webmail sessions:
 
 ```bash
 docker cp "$($DC ps -q cron):/backups/pre-upgrade-15" /root/db-pre-upgrade-15
@@ -195,7 +204,7 @@ LOG:  starting PostgreSQL 18.6 (Debian 18.6-1.pgdg13+2) ...
 LOG:  database system is ready to accept connections
 db: INFO - postgres is ready, ensuring extra databases
 db: database 'mailddb' already exists        # created by initdb as POSTGRES_DB
-db: created database 'contacts'              # POSTGRES_EXTRA_DB
+db: created database 'adminng'               # ADMINNG_DB (likewise mcp, roundcube)
 db: INFO - applying schema migrations
 db: applying migration 001_maild_provision.sql
 db: migrations up to date
@@ -215,8 +224,11 @@ $DC exec -T db psql -U maild -d mailddb -tAc \
 ```bash
 # the catalogue and every extra database, replacing what the fresh boot created
 $DC exec -i db pg_restore -U maild -d mailddb  --clean --if-exists < pre-upgrade-15/mailddb.dump  ; echo "rc=$?"
-$DC exec -i db pg_restore -U maild -d contacts --clean --if-exists < pre-upgrade-15/contacts.dump ; echo "rc=$?"
 $DC exec -i db pg_restore -U maild -d adminng  --clean --if-exists < pre-upgrade-15/adminng.dump  ; echo "rc=$?"
+$DC exec -i db pg_restore -U maild -d mcp      --clean --if-exists < pre-upgrade-15/mcp.dump      ; echo "rc=$?"
+$DC exec -i db pg_restore -U maild -d roundcube --clean --if-exists < pre-upgrade-15/roundcube.dump ; echo "rc=$?"
+# only if you dumped the legacy `contacts` database (and kept it in POSTGRES_EXTRA_DB):
+# $DC exec -i db pg_restore -U maild -d contacts --clean --if-exists < pre-upgrade-15/contacts.dump ; echo "rc=$?"
 ```
 
 * `--clean --if-exists` is **required**: `ensure_databases.sh` already created the databases and
@@ -306,8 +318,8 @@ The old cluster is untouched, so rolling back is a matter of putting it back in 
 - **`data_checksums`** is on by default in 18 (off in the 15 image). That is a benefit, but it
   makes a 18 cluster unable to run on a build without checksum support, and `pg_checksums` is the
   only way to change it later (offline operation).
-- **The fresh boot creates objects.** `ensure_databases.sh` creates `POSTGRES_DB` and every
-  `POSTGRES_EXTRA_DB` on every boot, and `migrate.sh` applies `db/migrations/*.sql` right after —
+- **The fresh boot creates objects.** `ensure_databases.sh` creates `POSTGRES_DB`, every
+  `POSTGRES_EXTRA_DB` and the service databases on every boot, and `migrate.sh` applies `db/migrations/*.sql` right after —
   hence the mandatory `--clean --if-exists` on the restore. `migrate.sh` is idempotent
   (`CREATE TABLE IF NOT EXISTS`), so re-running is always safe.
 - **The `maild_provision` sentinel travels in the dump.** It gates the boot-time config stages of
@@ -316,10 +328,10 @@ The old cluster is untouched, so rolling back is a matter of putting it back in 
 - **Password and DSN continuity.** `POSTGRES_PASSWORD` (from `env.dev`/`.env`) must stay the same:
   compose passes it explicitly to every client, and the entrypoint bakes it into the new role. The
   *mailbox* passwords are unaffected (they are md5crypt hashes inside `mailbox.password`).
-- **Extra databases are a list.** `POSTGRES_EXTRA_DB` is comma-separated (`contacts` today), and
-  AdminNG keeps its own `ADMINNG_DB` (default `adminng`): dump and restore **every** entry,
-  including `adminng`, and check the mua's env (`POSTGRES_EXTRA_DB`, defaulted in
-  `mua/Dockerfile`) if SnappyMail starts complaining about its contacts DSN.
+- **Every database travels.** AdminNG (`ADMINNG_DB`), the MCP (`MCP_DB`) and the webmail
+  (`ROUNDCUBE_DB`) each keep their own database, and `POSTGRES_EXTRA_DB` (comma-separated, empty
+  by default) may still list a legacy `contacts`: dump and restore **every** one. Keep
+  `MCP_DB_PASSWORD` / `ROUNDCUBE_DB_PASSWORD` unchanged so their roles come back as before.
 - **Downtime.** The whole mail path depends on `db`: while it is down, SMTP submissions fail at
   authentication, IMAP/POP3 logins fail and the admin UI is unusable. A remote sender will retry
   (the mta queues only what it has already accepted), so keep the window short and, ideally,
@@ -366,7 +378,7 @@ The old cluster is untouched, so rolling back is a matter of putting it back in 
 |-------|------|
 | `db/Dockerfile` | the image, the `PGDATA` pin and the entrypoint wrapper chain |
 | `db/docker-entrypoint-wrapper.sh` | boot order: stock entrypoint → readiness → `ensure_databases.sh` → `migrate.sh` |
-| `db/ensure_databases.sh` | creates `POSTGRES_DB` + `POSTGRES_EXTRA_DB` when missing (never alters) |
+| `db/ensure_databases.sh` | creates `POSTGRES_DB`, `POSTGRES_EXTRA_DB`, `ADMINNG_DB`, `MCP_DB`, `ROUNDCUBE_DB` when missing (never alters) |
 | `db/migrate.sh`, `db/migrations/` | idempotent schema migrations (the `maild_provision` sentinel) |
 | `cron/scripts/backup_db.sh` | the daily dump, its version guard and its verification |
 | `.agents/devops/base-images.md` | the canonical base-image rule for `db` and the drift table |

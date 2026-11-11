@@ -8,11 +8,11 @@ FROM postgres:18-trixie
 
 # Extra databases are ensured on *every* boot by the entrypoint wrapper; schema migrations
 # (the maild_provision sentinel) are applied right after, by migrate.sh, and the MCP role
-# (MCP_DB_USER, only when MCP_DB_PASSWORD is set) and the mua2 Roundcube role (ROUNDCUBE_DB_USER,
-# owner of ROUNDCUBE_DB, only when ROUNDCUBE_DB_PASSWORD is set) are ensured last, by
-# ensure_roles.sh. ADMINNG_DB
-# (AdminNG's own database) is created there too — kept separate from POSTGRES_EXTRA_DB
-# because mua reads that variable as a single database name (contacts DSN).
+# (MCP_DB_USER, only when MCP_DB_PASSWORD is set) and the webmail's Roundcube role
+# (ROUNDCUBE_DB_USER, owner of ROUNDCUBE_DB, only when ROUNDCUBE_DB_PASSWORD is set) are ensured
+# last, by ensure_roles.sh. ADMINNG_DB, MCP_DB and ROUNDCUBE_DB are variables of their own;
+# POSTGRES_EXTRA_DB is only for operator extras (empty by default since the SnappyMail
+# `contacts` database is gone — an existing one is never dropped).
 
 # Postgres 18 images changed the default data layout to major-version directories
 # (PGDATA=/var/lib/postgresql/18/docker) and *refuse to start* when they find the legacy
@@ -34,7 +34,7 @@ ENV PGDATA=/var/lib/postgresql/data
 ENV POSTGRES_HOST=db \
     POSTGRES_DB=mailddb \
     POSTGRES_USER=maild \
-    POSTGRES_EXTRA_DB=contacts \
+    POSTGRES_EXTRA_DB= \
     ADMINNG_DB=adminng \
     MCP_DB=mcp \
     MCP_DB_USER=maild_mcp \

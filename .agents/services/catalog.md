@@ -2,7 +2,7 @@
 
 All services live on the compose network `maild-dev` (dev) / `maild` (production, external).
 Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `mda`,
-`amavis`, `clamav`, `api`, `adminng`, `mua`, `mua2`, `cron` — never rename them.
+`amavis`, `clamav`, `api`, `adminng`, `mua`, `cron`, `mcp` — never rename them.
 
 ## db — PostgreSQL catalogue
 
@@ -15,13 +15,12 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
 - Stores: domains, mailboxes, aliases, quotas — everything Postfix/Dovecot/Amavis query.
 - `db/docker-entrypoint-wrapper.sh` starts the stock postgres entrypoint, waits for
   readiness (bounded) and then runs `db/ensure_databases.sh`, which creates any **missing**
-  databases from `POSTGRES_DB` + `POSTGRES_EXTRA_DB` (comma-separated, e.g. `contacts`) plus
+  databases from `POSTGRES_DB` + `POSTGRES_EXTRA_DB` (comma-separated, **empty by default**) plus
   `ADMINNG_DB` (AdminNG's own database, default `adminng`) on *every* boot. It never alters
-  existing databases or the schema. `ADMINNG_DB` is a separate variable on purpose:
-  `mua/config-setup.php` reads `POSTGRES_EXTRA_DB` as a single database name for the
-  SnappyMail contacts DSN, so the two lists must not be merged. `MCP_DB` (default `mcp`) is
-  ensured the same way for the MailD MCP, and `ROUNDCUBE_DB` (default `roundcube`) for mua2 —
-  the latter **only when `ROUNDCUBE_DB_PASSWORD` is set** (no mua2 → no database).
+  existing databases or the schema. `MCP_DB` (default `mcp`) is ensured the same way for the
+  MailD MCP, and `ROUNDCUBE_DB` (default `roundcube`) for the webmail (`mua`). Before
+  2.0.0-rc3 `POSTGRES_EXTRA_DB` defaulted to `contacts` (SnappyMail's address book): an existing
+  `contacts` database is neither dropped nor migrated — the operator drops it by hand.
 - Boot chain: postgres ready → `ensure_databases.sh` → `migrate.sh` (catalogue migrations,
   incl. `003_mcp_service_mailbox.sql`: the `SECURITY DEFINER` function
   `maild_mcp_ensure_service_mailbox(address, hash, name)`, insert-only, Argon2id hashes only,
@@ -33,12 +32,19 @@ Service keys are the DNS aliases used everywhere in the config: `db`, `mta`, `md
   `alias_domain(alias_domain, target_domain, active)` (P2: "external recipient"), `SELECT` on
   `maild_provision`, `EXECUTE` on the function. The password reaches psql as a stdin variable,
   never on a command line. Rotation = change the env file + restart db (and recreate mcp).
+  The same script ensures the webmail's **`ROUNDCUBE_DB_USER`** role (default `maild_roundcube`,
+  password `ROUNDCUBE_DB_PASSWORD`): owner of `ROUNDCUBE_DB`, column `SELECT` on
+  `domain(domain, active)`, `mailbox(username, domain, name, active)`,
+  `alias(address, domain, active)`, `maild_provision`, and column `UPDATE` on
+  `mailbox(password, modified)` only — it can never read a hash.
 - Env (new schema): defaults baked in `db/Dockerfile` (`POSTGRES_HOST/DB/USER/EXTRA_DB`);
   the operator file (`env.dev`/`.env`) is the `env_file:` and overrides any of them. The
   password is passed explicitly with a `${POSTGRES_PASSWORD:?}` guard (compose does not
   interpolate `env_file:` contents; a missing one fails at `compose config`).
   `MCP_DB_PASSWORD` is passed as `${MCP_DB_PASSWORD:-}` (empty = no MCP role; the stack still
   boots); `MCP_DB`/`MCP_DB_USER` are baked (`mcp`/`maild_mcp`) and must match the mcp image.
+  `ROUNDCUBE_DB_PASSWORD` is **required** (db and mua must share it); `ROUNDCUBE_DB`/
+  `ROUNDCUBE_DB_USER` are baked (`roundcube`/`maild_roundcube`) and must match the mua image.
 - Port 5432 published for local debugging.
 
 ## clamav — antivirus
@@ -358,110 +364,58 @@ more. See `.agents/services/provisioning.md`.
 - Clients (browser/PWA/APK) can only log in until their device is approved; the Android
   APK (Phase 4) is the only client that needs the server-URL onboarding screen.
 
-## mua — SnappyMail
+## mua — Roundcube
+
+Webmail; full reference in `mua/README.md` (features, security choices, variables, Roundcube
+bump procedure). Replaced SnappyMail in 2.0.0-rc3 (it was the `mua2` trial before): same
+service name/hostname, `webmail.${DEFAULT_DOMAIN}` behind Traefik in production.
 
 - `no-new-privileges` (2026-10 audit L-08).
-- Webmail on Apache; dev publishes 8081:80. The app is baked into the image at
-  `/var/www/html`; **only** `/var/www/html/data` is persisted (`ldata/mua_web`, owned by
-  `www-data` — bootstrap-dev.sh fixes the ownership and restarts mua).
-- Base image **`php:8.5-apache`** (trixie) since 2026-10-17, was `php:8.3-apache` (active support
-  for 8.3 ended on 2025-12-31: security-only until 2027-12-31, while 8.5 is active until
-  2027-12-31 and patched until 2029-12-31). SnappyMail 2.38.2 predates PHP 8.4 and so raises
-  deprecations from its own code — `MailSo\Log\Logger` maps `E_STRICT` (deprecated in 8.4, see
-  `Logger.php:153/171`) and its HTTP client calls `curl_close()`. `mua/snappymail.ini` therefore
-  keeps `display_errors = Off` (PHP's compiled default is *On*, because the official image activates
-  no `php.ini`; a printed notice fails every later `header()` call — no CSP/X-Frame-Options — and
-  prefixes the JSON API with HTML, so `POST /?/Json/` stops being valid JSON and the webmail dies
-  in the browser) and `error_reporting = E_ALL & ~E_DEPRECATED & ~E_USER_DEPRECATED`; every other
-  level still reaches `docker compose logs mua` through `log_errors`/`error_log=/dev/stderr`.
-  **Never patch SnappyMail's own files inside the image** — its version is pinned by
-  `ARG SNAPPY_VERSION` and refreshed by a normal image bump.
-- The image builds only `pdo` + `pdo_pgsql` (hence `libpq-dev`): it carries no `gd`/`mcrypt`, so
-  the `libfreetype6-dev` / `libjpeg62-turbo-dev` / `libmcrypt-dev` build deps it used to install
-  were dropped on 2026-10-17 (−11 MB, `php -m` byte-identical, no extension or Apache module links
-  them).
-- `config-setup.php` (a PHP helper the entrypoint runs) writes MailD's settings into
-  SnappyMail's `application.ini`: `BANNER_TITLE`, the contacts DSN (db `contacts`) with
-  `POSTGRES_PASSWORD`, and the admin panel credentials. It patches the file **at text level**
-  (comments and foreign settings untouched) quoting the values exactly like SnappyMail does,
-  then validates that it still parses and rolls back if it does not. `crudini --set` used to do
-  this job: it strips the quotes, PHP rejects the whole file, SnappyMail falls back to its
-  factory defaults — `security.admin_password` included — and mints a random password nobody
-  printed, so `/?admin` + the OTP from the logs could not work (see Changelog 1.4.0-rc).
-- Admin panel: `/?admin` — **off by default** (`MUA_ADMIN_PANEL=off`, `allow_admin_panel = Off`
-  → 403; audit M-03), `on` enables it. Login `MUA_ADMIN_USER` (**default `maild`**). The password is the OTP
-  of the entrypoint banner (`docker compose logs mua`): generated on the first boot and kept in
-  the data volume, or the one in `MUA_ADMIN_PASSWORD` when set. A password changed from the
-  panel is respected (SnappyMail deletes `admin_password.txt` then) and no OTP is printed.
-- Baseline plugins (**`MUA_PLUGINS`**, default `add-x-originating-ip-header,change-password,
-  two-factor-auth`): their packages are downloaded at **build time** (pinned `ARG`s in
-  `mua/Dockerfile` → `/opt/maild/plugins/`) and the entrypoint copies them over the volume on
-  every boot, so a fresh deployment has them and an image bump refreshes them. The plugin
-  *settings* live in `configs/plugin-*.json` (volume) and are never overwritten; the enabled
-  list is the union of `MUA_PLUGINS` and whatever the panel enabled. Only the managed
-  directories are replaced, so a plugin installed later from the panel survives. Bump the
-  `ARG PLUGIN_*` versions together with `SNAPPY_VERSION` and re-check each package's `REQUIRED`
-  const (the repository only keeps the newer builds:
-  `https://snappymail.eu/repository/v2/packages.json`).
-- `change-password` ships with **MailD's own driver** (`mua/plugins/change-password-maild/`), a
-  sibling package of the plugin (its documented extension point, so a plugin update cannot
-  overwrite it). It writes `mailbox.password` (+`modified`) in the catalogue in exactly the
-  same row format the AdminNG API uses, following `PASSWORD_SCHEME` (Argon2id
-  `{ARGON2ID}$…` by default; md5crypt `$1$…` is the legacy escape hatch, both verified by
-  Dovecot's passdb) — from the container's `POSTGRES_*`, with every
-  value overridable in the panel. `config-setup.php` keeps `driver_maild_enabled` on. After a
-  change, Dovecot's auth cache (`auth_cache_ttl` **1 minute**, negative caching off — MailD's
-  settings in `mda/dovecot/conf.d/10-auth.conf`) may still answer with the old result for up to
-  that minute: IMAP/SMTP logins with the *new* password are always accepted, and
-  `doveadm auth cache flush` clears the doubt.
-- Waits (bounded, `MUA_CONFIG_WAIT_TIMEOUT`) for SnappyMail to create `application.ini`, then
-  waits (bounded) on the `maild_provision` sentinel before building the per-domain configs, so
-  a fresh deploy gets them with no restart (`AUTO_PROVISION`).
-- env: defaults baked in `mua/Dockerfile` (`BANNER_TITLE`, `MUA_*`, `POSTGRES_EXTRA_DB`);
-  the operator file is the `env_file:` and overrides any of them.
-
-## mua2 — Roundcube (trial, dev only)
-
-Candidate replacement for `mua`; full reference in `mua2/README.md` (features, security
-choices, variables, Roundcube bump procedure, promotion checklist). Only in
-`docker-compose-dev.yml` until the main developer approves the switch.
-
 - Base `debian:trixie-slim` + Debian's **PHP 8.4** (`libapache2-mod-php8.4`, prefork) — Debian
   security backports + `apt-get upgrade` at build; Roundcube **1.7.6** complete tarball,
   `ARG ROUNDCUBE_VERSION`/`ROUNDCUBE_SHA256` (sha256-pinned, signature checked when bumping).
   Not installed on purpose: ImageMagick, php-gd, php-ldap, gnupg, aspell. The installer and
   unused plugins (enigma, squirrelmail_usercopy, autologon, debug_logger, example_addressbook)
-  are deleted from the image; the tree is root-owned, read-only for www-data.
-- Dev publishes 8086:80. Volume `/var/lib/roundcube` (`ldata/mua2`) holds only the generated
-  `des_key`; Roundcube's state (users, identities, prefs, personal contacts, sessions) is the
-  `ROUNDCUBE_DB` database, owned by the restricted **`ROUNDCUBE_DB_USER`** role
-  (`maild_roundcube`, `db/ensure_roles.sh`): catalogue column `SELECT` on
-  `domain(domain, active)`, `mailbox(username, domain, name, active)`,
-  `alias(address, domain, active)`, `maild_provision`, and column `UPDATE` on
-  `mailbox(password, modified)` only — it can never read a hash.
+  are deleted from the image; the tree (`/var/www/roundcube`) is root-owned, read-only for
+  www-data.
+- Dev publishes 8081:80; production publishes nothing (Traefik). Volume `/var/lib/roundcube`
+  (dev `ldata/mua`, production `mua_data`) holds only the generated `des_key`; Roundcube's state
+  (users, identities, prefs, personal contacts, sessions) is the `ROUNDCUBE_DB` database, owned
+  by the restricted **`ROUNDCUBE_DB_USER`** role (`maild_roundcube`, see db above) — it can
+  never read a hash. The old SnappyMail volume (`mua_web`, dev `ldata/mua_web`) is obsolete.
 - **No `env_file`**: an explicit allow-list (`ROUNDCUBE_*`, `BANNER_TITLE`, `PASSWORD_SCHEME`,
-  `MCP_SERVICE_EMAIL`, `MTA`/`MDA`, `POSTGRES_HOST/DB`, `AUTO_PROVISION`, `PROVISION_*`), so
-  `POSTGRES_PASSWORD` never enters it. Like cron, the build snapshots the image ENV defaults into
-  `/etc/maild-image.env` and the entrypoint restores the ones a bare key unset.
+  `MCP_SERVICE_EMAIL`, `MAX_MESSAGESIZE`, `MTA`/`MDA`, `POSTGRES_HOST/DB`, `AUTO_PROVISION`,
+  `PROVISION_*`), so `POSTGRES_PASSWORD` never enters it. Like cron, the build snapshots the
+  image ENV defaults into `/etc/maild-image.env` and the entrypoint restores the ones a bare key
+  unset.
 - Entrypoint: des_key → `render-config.php` (env → `/run/maild-roundcube/maild.inc.php`,
   root:www-data 0640; refuses to start on an unusable value) → bounded `maild_provision` gate →
   `bin/initdb.sh` on an empty database / `bin/updatedb.sh` otherwise → `bin/gc.sh` →
   `exec env -i … apache2ctl -D FOREGROUND` (Apache/PHP see no operator secret). The static
   `config/config.inc.php` reads only the rendered file. `opcache.validate_timestamps=0`: a config
-  edit inside a running container needs `apache2ctl -k graceful`.
+  edit inside a running container needs `apache2ctl -k graceful`. No per-domain config: a new
+  domain needs no mua restart.
 - MailD integration: `plugins/maild_directory` (read-only "Directory" address book over the
-  catalogue — own domain by default, distribution lists as `List: <name>`, MCP service mailbox
-  hidden — registered for autocompletion; `autocomplete_min_length` 3, enforced server-side for
-  every free-text search; first-login identity name from `mailbox.name`); `password` plugin `sql`
-  driver → `UPDATE mailbox SET password=%P, modified=now() WHERE username=%u AND active`, hash per
+  catalogue — own domain by default, `ROUNDCUBE_DIRECTORY_SCOPE=domain|all|off`, distribution
+  lists as `List: <name>`, MCP service mailbox hidden — registered for autocompletion;
+  `autocomplete_min_length` 3, enforced server-side for every free-text search; first-login
+  identity name from `mailbox.name`); `password` plugin `sql` driver →
+  `UPDATE mailbox SET password=%P, modified=now() WHERE username=%u AND active`, hash per
   `PASSWORD_SCHEME` (`hash-argon2id` + `{ARGON2ID}` = PHP defaults m=65536,t=4,p=1 like the
   API; `md5-crypt` until 2027-02-01, re-checked per request); `managesieve` on `mda:4190`
-  STARTTLS (raw editor off); `markasjunk` move-only. IMAP `tls://mda:143`, SMTP `ssl://mta:465`
-  as the user (peer-name verification off on this internal hop, like `mua`).
+  STARTTLS (filters, vacation, forward; raw editor off); `markasjunk` move-only; the client IP in
+  a `Received:` header (`http_received_header`); `archive`, `zipdownload`, `newmail_notifier`,
+  `attachment_reminder`, `hide_blockquote`, `identity_select`. IMAP `tls://mda:143`, SMTP
+  `ssl://mta:465` as the user (peer-name verification off on this internal hop). After a
+  password change, Dovecot's auth cache (`auth_cache_ttl` **1 minute**) may still accept the old
+  password for up to that minute; `doveadm auth cache flush` clears it.
+- Not available (vs SnappyMail): two-factor authentication in the webmail, an admin panel (all
+  settings are `ROUNDCUBE_*` variables; audit M-03 no longer applies), migration of SnappyMail
+  personal contacts (users export/import vCards).
 - Logging: Apache's ErrorLog (and so mod_php's errors and Roundcube's `log_driver=php`) goes to
   the container log — `error_log` is deliberately unset in PHP (a www-data child cannot reopen
   `/dev/stderr`), and Debian's own `security.conf` is disabled (it re-set `ServerTokens OS`).
-- Tests: `test.sh` section **Q** (Q1–Q7), skipped when the container is not running.
+- Tests: `test.sh` section **Q** (Q1–Q7) against port 8081.
 
 ## cron — maintenance
 
@@ -519,7 +473,7 @@ choices, variables, Roundcube bump procedure, promotion checklist). Only in
 - `backup_db.sh` writes **four** archives per run: `maild_backup_*.sql.gz` (the catalogue),
   `maild_adminng_*.sql.gz` (AdminNG: device approvals, sessions, TOTP seeds, audit trail —
   `ADMINNG_DB`, defaulted in the script) and `maild_mcp_*.sql.gz` (the MailD MCP: accounts,
-  tokens, settings — `MCP_DB`, default `mcp`) and `maild_roundcube_*.sql.gz` (the mua2
+  tokens, settings — `MCP_DB`, default `mcp`) and `maild_roundcube_*.sql.gz` (the mua
   webmail: identities, signatures, prefs, personal contacts — `ROUNDCUBE_DB`, default
   `roundcube`). The two service databases go through one `dump_service_db` function and are
   SKIPPED when the database is missing or has no table yet. All get the same size/gzip/trailer

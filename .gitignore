@@ -3,8 +3,7 @@ ldata/*
 # every operator env file (.env, .env-prod, .env.local, ...): real secrets, NEVER commit.
 # env.dev / env.sample carry no leading dot and stay tracked (fake/placeholder values).
 .env*
-snappymail-*
-mua/snappymail-*
+roundcubemail-*
 postfixadmin-*
 admin/postfixadmin-*
 test.creds

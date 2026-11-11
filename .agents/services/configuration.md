@@ -27,10 +27,10 @@ Two distinct mechanisms — do not mix them up:
    `--env-file` (`env.dev` in dev; `.env` by default in production) and never
    reads `env_file:` contents. The compose files use it for `domainname:`, the
    Traefik labels, `MAILADMIN` and the `${POSTGRES_PASSWORD:?}` /
-   `${DEFAULT_DOMAIN:?}` fail-fast guards.
+   `${DEFAULT_DOMAIN:?}` / `${ROUNDCUBE_DB_PASSWORD:?}` fail-fast guards.
 2. **Container env** — the operator file is injected via `env_file:` into the
-   **8 DB-consumer services** (db, admin, api, mua, mda, mta, amavis, cron) and wins
-   over the image `ENV` defaults. **clamav gets no `env_file`** (it needs no
+   DB-consumer services (db, api, mda, mta, amavis) and wins over the image `ENV`
+   defaults; `mua`, `mcp` and `cron` get an explicit `environment:` allow-list instead. **clamav gets no `env_file`** (it needs no
    catalogue access: variable separation); its two knobs are explicit
    `environment:` entries with `${VAR:-}` — an empty value behaves exactly
    like unset for both (the entrypoint tests them with `if [ "$VAR" ]`).
@@ -45,9 +45,12 @@ override catalogue) — copy to `.env`, edit, deploy. `env.sample_gitlab` is the
 CI variant: `.gitlab-ci.yml` crafts `.env` from it plus the CI/CD variables.
 `vars/*.env` is **gone**: its defaults moved into the Dockerfiles; its
 forwarding hacks (`AUTO_PROVISION=${AUTO_PROVISION:-yes}`) and hardcoded
-inter-service hostnames (`AMAVIS=amavis`, `MTA=mta`, `CTDB=contacts`) are image
-`ENV` now. Dead vars dropped with it: `CTDB` (unused — the mua reads
-`POSTGRES_EXTRA_DB`) and `AMAVIS_MTA` (unused — the amavis entrypoint reads `MTA`).
+inter-service hostnames (`AMAVIS=amavis`, `MTA=mta`) are image `ENV` now. Dead
+vars dropped with it: `CTDB` and `AMAVIS_MTA` (unused — the amavis entrypoint
+reads `MTA`). The SnappyMail-era `MUA_ADMIN_PANEL`, `MUA_ADMIN_USER`,
+`MUA_ADMIN_PASSWORD`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT` and `MUA_DEBUG`
+are gone too (2.0.0-rc3, Roundcube): the webmail reads only `ROUNDCUBE_*` and
+the shared variables.
 
 ### PWA build-time variables (not container env)
 
@@ -81,12 +84,11 @@ every DB consumer and is never baked.
 
 | Service | Image ENV defaults (overridable) | Mandatory from the operator file | Optional overrides (documented in env.sample) |
 |---------|----------------------------------|----------------------------------|-----------------------------------------------|
-| db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=contacts` `ADMINNG_DB=adminng` `MCP_DB=mcp` `MCP_DB_USER=maild_mcp` `ROUNDCUBE_DB=roundcube` `ROUNDCUBE_DB_USER=maild_roundcube` | `POSTGRES_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB`, `ADMINNG_DB` (advanced; `ADMINNG_DB` must match the api's), `MCP_DB_PASSWORD` (compose `${…:-}`; set ⇒ `ensure_roles.sh` creates the MCP role), `MCP_DB`/`MCP_DB_USER` (must match the mcp's), `ROUNDCUBE_DB_PASSWORD` (compose `${…:-}`; set ⇒ `ensure_databases.sh` creates `ROUNDCUBE_DB` and `ensure_roles.sh` the mua2 role), `ROUNDCUBE_DB`/`ROUNDCUBE_DB_USER` (must match the mua2's) |
+| db | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `POSTGRES_EXTRA_DB=` (empty) `ADMINNG_DB=adminng` `MCP_DB=mcp` `MCP_DB_USER=maild_mcp` `ROUNDCUBE_DB=roundcube` `ROUNDCUBE_DB_USER=maild_roundcube` | `POSTGRES_PASSWORD` `ROUNDCUBE_DB_PASSWORD` | `POSTGRES_HOST/DB/USER/EXTRA_DB`, `ADMINNG_DB` (advanced; `ADMINNG_DB` must match the api's), `MCP_DB_PASSWORD` (compose `${…:-}`; set ⇒ `ensure_roles.sh` creates the MCP role), `MCP_DB`/`MCP_DB_USER` (must match the mcp's), `ROUNDCUBE_DB`/`ROUNDCUBE_DB_USER` (must match the mua's; `ensure_databases.sh` creates `ROUNDCUBE_DB` and `ensure_roles.sh` the webmail role) |
 | admin | **retired** — its schema duty lives in `db/migrations/002_postfixadmin_catalogue.sql` and its seeder in `adminng/api/app/provision.py` | — | — |
 | api | `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `POSTGRES_USER=maild` `ADMINNG_DB=adminng` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `PROVISION_FORCE=no` `ADMINNG_API_PORT=8080` `ADMINNG_API_DOCS=no` `PASSWORD_SCHEME=argon2id` `ADMINNG_ACCESS_TTL=600` `ADMINNG_REFRESH_IDLE_TTL=900` `ADMINNG_REMEMBER_TTL=86400` `ADMINNG_REAUTH_TTL=30` `ADMINNG_FLOW_TTL=300` `ADMINNG_ENROLL_TTL=600` `ADMINNG_AUTO_APPROVE_FIRST=no` `ADMINNG_PENDING_TTL_DAYS=3` `ADMINNG_TOTP_REQUIRED=superadmin` `ADMINNG_TOTP_ISSUER=MailD AdminNG` `ADMINNG_WEBAUTHN_RP_ID=localhost` `ADMINNG_WEBAUTHN_ORIGINS=http://localhost:8083,https://localhost:8084` `ADMINNG_WEBAUTHN_CHALLENGE_TTL=300` `ADMINNG_LOGIN_MAX_FAILURES=5` `ADMINNG_LOCKOUT_SECONDS=900` `ADMINNG_SEARCH_LIMIT=20` `ADMINNG_QUOTA_CACHE_TTL=300` `VMAIL_ROOT=/home/vmail` | `POSTGRES_PASSWORD` `ADMINNG_SECRET_KEY` (JWT signing + TOTP encryption) `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` | `MAIL_ADMIN_PASSWORD` (empty ⇒ generated + logged), `PROVISION_*`, every `ADMINNG_*` knob, `PASSWORD_SCHEME`, `ADMINNG_TRUSTED_PROXIES` (**not baked**: unset ⇒ the subnets this container is attached to minus the docker gateway, read at boot; `none` ⇒ trust no proxy; the lockout/audit IP is the right-most untrusted `X-Forwarded-For` hop — 2026-10 audit H-02) |
 | adminng | (none — static PWA + nginx proxy) | — | — (no `env_file`); dev publishes 8083 (HTTP) and 8084 (HTTPS, local CA) |
-| mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST/DB/USER` `POSTGRES_EXTRA_DB=contacts` `PASSWORD_SCHEME=argon2id` `MUA_ADMIN_USER=maild` `MUA_ADMIN_PANEL=off` `MUA_CONFIG_WAIT_TIMEOUT=120` `MUA_PLUGINS=add-x-originating-ip-header,change-password,two-factor-auth` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `MUA_ADMIN_PASSWORD` (empty ⇒ generated + logged), `BANNER_TITLE`, `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT`, `PASSWORD_SCHEME` |
-| mua2 (trial, dev only) | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `PASSWORD_SCHEME=argon2id` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `ROUNDCUBE_DB=roundcube` `ROUNDCUBE_DB_USER=maild_roundcube` `ROUNDCUBE_LANGUAGE=en_US` (dev: `es_ES`; `auto` = browser) `ROUNDCUBE_SESSION_LIFETIME=30` `ROUNDCUBE_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` `ROUNDCUBE_DIRECTORY_SCOPE=domain` `ROUNDCUBE_DIRECTORY_ALIASES=yes` `ROUNDCUBE_AUTOCOMPLETE_MIN=3` `ROUNDCUBE_PASSWORD_MIN_LENGTH=8` `ROUNDCUBE_UPLOAD_MAX=24M` `MAX_MESSAGESIZE=34865152` (Roundcube's `max_message_size` = upload × 1.33 + 10 KB, capped by it); runtime: `ROUNDCUBE_TRUSTED_HOSTS` empty ⇒ `webmail.<domain>,webmail2.<domain>,localhost,127.0.0.1`, `ROUNDCUBE_PRODUCT_NAME` empty ⇒ `BANNER_TITLE`, `ROUNDCUBE_DES_KEY` empty ⇒ generated once into the volume | `DEFAULT_DOMAIN` `ROUNDCUBE_DB_PASSWORD` (never `POSTGRES_PASSWORD`) | every `ROUNDCUBE_*` above, `ROUNDCUBE_DIRECTORY_HIDE`, `ROUNDCUBE_DEBUG`, `PASSWORD_SCHEME`, `MCP_SERVICE_EMAIL` (hidden from the directory). **No `env_file`**: dev compose allow-list, image defaults restored from `/etc/maild-image.env` like cron |
+| mua | `BANNER_TITLE=Webmail` `MTA=mta` `MDA=mda` `POSTGRES_HOST=db` `POSTGRES_DB=mailddb` `PASSWORD_SCHEME=argon2id` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` `ROUNDCUBE_DB=roundcube` `ROUNDCUBE_DB_USER=maild_roundcube` `ROUNDCUBE_LANGUAGE=en_US` (dev: `es_ES`; `auto` = browser) `ROUNDCUBE_SESSION_LIFETIME=30` `ROUNDCUBE_TRUSTED_PROXIES=10.0.0.0/8,172.16.0.0/12,192.168.0.0/16` `ROUNDCUBE_DIRECTORY_SCOPE=domain` `ROUNDCUBE_DIRECTORY_ALIASES=yes` `ROUNDCUBE_AUTOCOMPLETE_MIN=3` `ROUNDCUBE_PASSWORD_MIN_LENGTH=8` `ROUNDCUBE_UPLOAD_MAX=24M` `MAX_MESSAGESIZE=34865152` (Roundcube's `max_message_size` = upload × 1.33 + 10 KB, capped by it); runtime: `ROUNDCUBE_TRUSTED_HOSTS` empty ⇒ `webmails.<domain>,webmail.<domain>,localhost,127.0.0.1`, `ROUNDCUBE_PRODUCT_NAME` empty ⇒ `BANNER_TITLE`, `ROUNDCUBE_DES_KEY` empty ⇒ generated once into the volume | `DEFAULT_DOMAIN` `ROUNDCUBE_DB_PASSWORD` (never `POSTGRES_PASSWORD`) | every `ROUNDCUBE_*` above, `ROUNDCUBE_DIRECTORY_HIDE`, `ROUNDCUBE_DEBUG`, `PASSWORD_SCHEME`, `MCP_SERVICE_EMAIL` (hidden from the directory), `MAX_MESSAGESIZE` (shared with the mta). **No `env_file`**: compose allow-list in every file (never `POSTGRES_PASSWORD`), image defaults restored from `/etc/maild-image.env` like cron |
 | mda | `POSTGRES_HOST/DB/USER` `PASSWORD_SCHEME=argon2id` `DEFAULT_MAILBOX_SIZE=200M` `QUOTA_REPORT_HOUR=0` `QUOTA_REPORT_MINUTE=1` `COUNTRY=JM` `STATE=Kingston` `CITY=Kingston` `ORG=MailD` `OU=MailD` `MCP=mcp` `PEER_WATCH_INTERVAL=30` (the master user's `allow_real_nets` follows the `MCP` host's address — N-01) | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `DEFAULT_MAILBOX_SIZE`, `QUOTA_REPORT_*`, cert subject (`COUNTRY/STATE/CITY/ORG/OU`), `PASSWORD_SCHEME` (rehash-on-login gate), `MCP_DOVECOT_MASTER_PASSWORD` (compose `${…:-}`; set ⇒ IMAP master user) + `MCP_DOVECOT_MASTER_USER` (default `mcp`, not baked) |
 | mta | `POSTGRES_HOST/DB/USER` `MAX_MESSAGESIZE=34865152` `SPF_ENABLE=True` `DNSBL_ENABLE=true` `DNSBL_LIST=zen.spamhaus.org=…` `SMTP_TARPIT_DELAY=2` `SMTP_AUTH_RATE_LIMIT=60` `SMTP_CONNECTION_RATE_LIMIT=60` `OUTBOUND_RATE_RECIPIENTS=200` `OUTBOUND_RATE_WINDOW=3600` `OUTBOUND_RATE_EXEMPT_USERS=` `PEER_WAIT_TIMEOUT=120` `PEER_WATCH_INTERVAL=30` `AMAVIS=amavis` `MDA=mda` `MUA=MUA` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `DEFAULT_DOMAIN` `MAIL_ADMIN_USER` `POSTGRES_PASSWORD` | `RELAY`, `ALWAYS_BCC`, `POSTMASTER_ABUSE_SETUP` (unset ⇒ off), `MAX_MESSAGESIZE`, `SPF_ENABLE`, `DNSBL_*`, `SMTP_TARPIT_DELAY` (0 ⇒ no tarpit), `OUTBOUND_RATE_*` (`OUTBOUND_RATE_RECIPIENTS=0` ⇒ no throttle), `PEER_*` |
 | amavis | `POSTGRES_HOST/DB/USER` `MTA=mta` `CLAMAV=clamav` `CRON=cron` `MCP=mcp` `PEER_WATCH_INTERVAL=30` `SPAM_FILTER_ENABLED=yes` `AV_ENABLED=yes` `DKIM_SIGNING=yes` `DKIM_KEY_BITS=2048` `SA_AUTOLEARN_NONSPAM=0.1` `SA_AUTOLEARN_SPAM=10` `JUNK_RETENTION_DAYS=7` `SA_HAM_SAMPLE_PER_USER=25` `SA_HAM_SAMPLE_MAX=400` `AUTO_PROVISION=yes` `PROVISION_VERSION=1` `PROVISION_WAIT_TIMEOUT=180` | `POSTGRES_PASSWORD` | `AV_ENABLED`, `SPAM_FILTER_ENABLED`, `DKIM_SIGNING`, `DKIM_KEY_BITS` (new keys only), `SA_*`, `JUNK_RETENTION_DAYS` |
@@ -118,7 +120,7 @@ Password/TOTP login remains the fallback.
 
 `PASSWORD_SCHEME` (`argon2id` default, `md5crypt` legacy) is shared by the
 three catalogue writers — the `api` seeder (first boot), the AdminNG `api`, and
-the `mua` change-password driver. New hashes are Argon2id:
+the `mua` (Roundcube `password` plugin). New hashes are Argon2id:
 `{ARGON2ID}$argon2id$v=19$m=65536,t=4,p=1$…` (the `{SCHEME}` prefix is required
 by Dovecot's SQL passdb; parameters are self-encoded, so any writer's output
 verifies). `mailbox.password` / `admin.password` may mix formats freely — the
@@ -139,12 +141,12 @@ clobbered) and is skipped when `PASSWORD_SCHEME=md5crypt`.
 
 **The PostfixAdmin UI is retired** and cannot verify Argon2id anyway (`crypt()`
 argon2id → false, no salt generator). The catalogue is now a plain PostgreSQL
-schema owned by MailD; only the admin (`api`/AdminNG, `mua` change-password) and
+schema owned by MailD; only the admin (`api`/AdminNG, the `mua` password plugin) and
 Dovecot paths touch it. Dev fixtures stay on MD5-CRYPT on purpose
 (`bootstrap-dev.sh`) to exercise the coexistence path.
 
 Debug switches (all off by default, never baked): `DEBUG` (mta alias-file
-dump), `MTA_DEBUG`, `MDA_DEBUG_INIT/AUTH/AUTH_PASSWORD/MAIL/SSL`, `MUA_DEBUG`,
+dump), `MTA_DEBUG`, `MDA_DEBUG_INIT/AUTH/AUTH_PASSWORD/MAIL/SSL`, `ROUNDCUBE_DEBUG`,
 `CLAMAV_DEBUG`, `AMAVIS_DEBUG`.
 
 ## Compose files & the chain rule
@@ -168,9 +170,9 @@ docker-compose.yml       (production source of truth, derived from -dev; env_fil
   network, **Traefik labels** on `mua` (`webmail.${DEFAULT_DOMAIN}`),
   `adminng` (`adminng.${DEFAULT_DOMAIN}`) and `mcp`
   (`${MCP_HOSTNAME:-mcp.${DEFAULT_DOMAIN}}`).
-- `mcp` is the one DB consumer **without** `env_file:` in every file: an explicit
+- `mcp` and `mua` are the DB consumers **without** `env_file:` in every file: an explicit
   `environment:` allow-list keeps `POSTGRES_PASSWORD` (and every other service's secret)
-  out of the internet-facing container. Bare keys (`MCP_DB:`) pass the operator value
+  out of the internet-facing containers (each connects as its own restricted role). Bare keys (`MCP_DB:`) pass the operator value
   through and stay unset otherwise, so the image default applies.
 - `compose-github.yml` / `compose-gitlab.yml` are **strict copies** — regenerate
   them from `docker-compose.yml` whenever it changes (only the `image:` lines
@@ -197,7 +199,7 @@ network; the Traefik labels are only the routing hints.
 6. Update `env.sample` comments, the matrix above and the matching `.agents/`
    file in the same commit.
 
-Debug switches follow the same pattern (`MTA_DEBUG`, `MDA_DEBUG_*`, `MUA_DEBUG`,
+Debug switches follow the same pattern (`MTA_DEBUG`, `MDA_DEBUG_*`, `ROUNDCUBE_DEBUG`,
 `CLAMAV_DEBUG`, `AMAVIS_DEBUG`) — but they are never baked as `ENV`: set them
 in the operator file to enable.
 

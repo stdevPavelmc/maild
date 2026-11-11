@@ -32,7 +32,7 @@ Re-run any time; `--help` lists all options.
 ## Manual path (what bootstrap automates)
 
 ```bash
-mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua_web,logs,certs,dozzle,backups,mcp_logs}
+mkdir -p ldata/{db,vmail,spool,clamav,amavis,spamassassin,mua,logs,certs,dozzle,backups,mcp_logs}
 openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout ldata/certs/mail.key -out ldata/certs/mail.crt \
   -subj "/C=JM/ST=Kingston/L=Kingston/O=MailD/OU=Dev/CN=mail.localhost"
@@ -47,20 +47,20 @@ First-boot provisioning (fresh stacks): the dev stack shares production's defaul
 container seeds `sysadmin@DEFAULT_DOMAIN` by itself on the first boot (watch
 `docker compose logs api`); `bootstrap-dev.sh` then re-asserts the `test.creds` passwords.
 It seeds **only** `DEFAULT_DOMAIN` + the sentinel row (`maild_provision`, which `mta`/`mda`/
-`amavis`/`mua` gate on) — the `example.net` fixtures, the vmail homes, the SnappyMail domain
-configs and `test.creds` come from `bootstrap-dev.sh`. For a hand-seeded stack set
+`amavis`/`mua` gate on) — the `example.net` fixtures, the vmail homes and `test.creds` come
+from `bootstrap-dev.sh` (the webmail has no per-domain config). For a hand-seeded stack set
 `AUTO_PROVISION=no` and run `docker compose exec api adminng.py --provision`.
 
 ## Access points (dev)
 
 | Service | URL / address |
 |---------|---------------|
-| Webmail (mua) | http://localhost:8081 |
+| Webmail (mua, Roundcube) | http://localhost:8081 |
 | AdminNG PWA | http://localhost:8083 |
 | AdminNG PWA (TLS, dev) | https://localhost:8084 — LAN: `https://<lan-ip>:8084`; import `ldata/certs/adminng-ca.der` on the device first |
 | Log viewer (dozzle) | http://localhost:8082 |
 | MailD MCP (P0: `/healthz` only) | http://localhost:8085/healthz — admin/service-mailbox passwords are printed once in `docker compose … logs mcp` on first boot |
-| PostgreSQL | localhost:5432 — user `maild`, db `mailddb` (+ `contacts`), password = `POSTGRES_PASSWORD` from `env.dev` |
+| PostgreSQL | localhost:5432 — user `maild`, db `mailddb` (+ `adminng`, `mcp`, `roundcube`), password = `POSTGRES_PASSWORD` from `env.dev` |
 | SMTP / SMTPS / Submission | localhost:25 / 465 / 587 |
 | POP3 / IMAP / TLS | 110 / 143 / 993 / 995 |
 | ManageSieve | 4190 |
@@ -92,7 +92,7 @@ purpose; the AdminNG API verifies legacy hashes until the 2027-02-01 removal).
    production volumes like that.
 3. `ldata/vmail` must be owned by uid/gid 5000 (the domain directories too: a root-owned
    `ldata/vmail/<domain>` stops Dovecot from creating any new mailbox home in it),
-   `ldata/mua_web` by `www-data`, `ldata/mcp_logs` by 10001 — bootstrap repairs all of them;
+   `ldata/mcp_logs` by 10001 — bootstrap repairs both (`ldata/mua` stays root-owned);
    `sudo chown -R 5000:5000 ldata/vmail` if you create them by hand.
 4. Never commit secrets/certs (`.env*`, `test.creds`, `ldata/`, `*.log`, `.local/` are
    git-ignored). Warn loudly if any are staged.

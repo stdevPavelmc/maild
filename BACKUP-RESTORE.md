@@ -1,6 +1,6 @@
 # Database backups: encryption and restore
 
-The `cron` container dumps the three MailD databases every day at **08:00 UTC** into
+The `cron` container dumps the four MailD databases every day at **08:00 UTC** into
 `/backups/db` (the `db_backups` volume in production, `ldata/backups` in dev), keeps them
 **15 days** and mails the result to `MAIL_ADMIN_USER@DEFAULT_DOMAIN`:
 
@@ -9,7 +9,7 @@ The `cron` container dumps the three MailD databases every day at **08:00 UTC** 
 | `maild_backup_<date>.sql.gz` | catalogue (`POSTGRES_DB`, `mailddb`) | domains, mailboxes (password hashes), aliases, admins |
 | `maild_adminng_<date>.sql.gz` | AdminNG (`ADMINNG_DB`, `adminng`) | devices, sessions, TOTP seeds (encrypted), audit trail |
 | `maild_mcp_<date>.sql.gz` | MailD MCP (`MCP_DB`, `mcp`) | accounts, token hashes, OAuth clients, settings |
-| `maild_roundcube_<date>.sql.gz` | Roundcube webmail, `mua2` (`ROUNDCUBE_DB`, `roundcube`) | users' identities, signatures, preferences, personal contacts, canned responses |
+| `maild_roundcube_<date>.sql.gz` | Roundcube webmail, `mua` (`ROUNDCUBE_DB`, `roundcube`) | users' identities, signatures, preferences, personal contacts, canned responses |
 
 The directory is root-only (`0700`, archives `0600`). The archives still hold password
 hashes and the audit trail, and copies tend to end up on less trusted storage. **Encrypt them**
@@ -146,10 +146,10 @@ Stop the services that write to the database you are restoring:
 
 | Restoring | Stop first |
 |-----------|-----------|
-| catalogue (`maild_backup_…`) | `docker compose stop api mta mda mua mua2 amavis mcp` |
+| catalogue (`maild_backup_…`) | `docker compose stop api mta mda mua amavis mcp` |
 | AdminNG (`maild_adminng_…`) | `docker compose stop api` |
 | MCP (`maild_mcp_…`) | `docker compose stop mcp` |
-| Roundcube (`maild_roundcube_…`) | `docker compose stop mua2` |
+| Roundcube (`maild_roundcube_…`) | `docker compose stop mua` |
 
 Run the restore. `docker compose exec` gives it a terminal, so it can ask for the key and the
 confirmation:

@@ -9,14 +9,15 @@ from ..models import DomainCreate, DomainCreated, DomainOut, DomainUpdate, Page
 router = APIRouter(prefix="/domains", tags=["domains"])
 
 # A domain created at runtime is invisible to the boot-time domain cachers
-# (amavis DKIM keys, mua SnappyMail config, mta virtual aliases) until they
-# restart. PostfixAdmin has the same caveat; here it is made explicit.
+# (amavis DKIM keys, mta virtual aliases) until they restart. PostfixAdmin has
+# the same caveat; here it is made explicit. The webmail (Roundcube) keeps no
+# per-domain config, so it needs no restart.
 RESTART_ADVISORY = {
     "code": "RESTART_REQUIRED",
-    "services": ["amavis", "mua", "mta"],
+    "services": ["amavis", "mta"],
     "message": (
-        "The domain was created. Restart amavis, mua and mta to generate its "
-        "DKIM keys, webmail config and virtual aliases."
+        "The domain was created. Restart amavis and mta to generate its "
+        "DKIM keys and virtual aliases."
     ),
 }
 

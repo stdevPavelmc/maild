@@ -116,7 +116,7 @@
     "targetDomain": "Dominio de destino",
     "saveTarget": "Guardar destino",
     "create": "Crear dominio",
-    "advisory": "Reinicia amavis, mua y mta para generar las claves DKIM, la configuración del webmail y los alias del nuevo dominio."
+    "advisory": "Reinicia amavis y mta para generar las claves DKIM y los alias del nuevo dominio."
   },
   "mailboxes": {
     "title": "Cuentas",

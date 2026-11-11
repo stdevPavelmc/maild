@@ -53,21 +53,16 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 - **Cron jobs by hand:** `… exec cron /scripts/backup_db.sh`;
   `… exec cron /scripts/resume.sh today`;
   `… exec mda /scripts/quota_report.sh --now --dry-run`.
-- **Webmail plugins:** the baseline is `MUA_PLUGINS` (downloaded at build, copied from the image
-  into the volume on every boot). What is installed vs enabled:
-  `… exec mua ls /var/www/html/data/_data_/_default_/plugins/` and
-  `… exec mua grep -A3 '\[plugins\]' /var/www/html/data/_data_/_default_/configs/application.ini`.
-- **Mailbox password change:** the webmail's *Settings → Password* runs the `change-password`
-  plugin against MailD's own driver (`mua/plugins/change-password-maild/`). Verify a password
+- **Webmail (Roundcube):** http://localhost:8081; `… logs -f mua` carries Apache, PHP and
+  Roundcube's own log. Settings come only from the `ROUNDCUBE_*` variables (no admin panel),
+  rendered at boot into `/run/maild-roundcube/maild.inc.php`: `… exec mua cat
+  /run/maild-roundcube/maild.inc.php` shows what is in effect (it carries the db password and
+  des_key — don't paste it). `ROUNDCUBE_DEBUG=yes` + recreate logs the IMAP/SMTP dialogues
+  (passwords included). Its database: `… exec db psql -U maild -d roundcube`.
+- **Mailbox password change:** the webmail's *Settings → Password* runs Roundcube's `password`
+  plugin (`sql` driver) as the `maild_roundcube` role, hash per `PASSWORD_SCHEME`. Verify a password
   with `… exec mda doveadm auth test <user> '<password>'` (mind the auth cache, below) or a real
   IMAP login: `curl --insecure -u '<user>:<password>' imaps://localhost:993/ -X 'LIST "" "INBOX"'`.
-- **Webmail admin panel (`/?admin`):** disabled by default (`MUA_ADMIN_PANEL=off` → 403, audit
-  M-03); set `MUA_ADMIN_PANEL=on` in `env.dev` and recreate `mua` to use it. The entrypoint prints the credentials at boot —
-  `… logs mua | grep -A3 'admin panel'`. The login is `MUA_ADMIN_USER` (`maild` by default) and
-  the password is the OTP shown there (generated on the first boot, kept in the data volume;
-  `MUA_ADMIN_PASSWORD` pins it). If the banner says `unchanged, set from the admin panel`, the
-  password is the one somebody set in the UI. Quick check that the config is intact:
-  `… exec mua php -r 'var_dump(parse_ini_file("/var/www/html/data/_data_/_default_/configs/application.ini", true) !== false);'`.
 
 ## Common issues
 
@@ -84,19 +79,11 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   on the spot. (Before 1.4.0-rc the TTLs were Dovecot's defaults — 10 min / 1 h — which made an
   old password look alive for ten minutes and could lock a user out of a password he had mistyped
   before adopting it.)
-- **A webmail plugin is gone/disabled after a boot:** the baseline is `MUA_PLUGINS` (see above) —
-  the entrypoint re-enables it on every boot, so disable it there *and* in the admin panel. The
-  plugin *settings* (`configs/plugin-*.json`) are never touched by the boot.
-- **Webmail 403 / no per-domain configs:** the mua volume must only cover
-  `/var/www/html/data` and be owned by `www-data` — never mount over `/var/www/html`. The
-  entrypoint waits (bounded, `MUA_CONFIG_WAIT_TIMEOUT`) for SnappyMail to write
-  `application.ini`; the `WARNING: SnappyMail did not create …` line means that volume is not
-  writable.
-- **`/?admin` rejects the OTP from the logs:** the SnappyMail config did not parse, so the app
-  fell back to its factory defaults and minted a password of its own (`AuthError[102]`).
-  `config-setup.php` now reports the credentials it stored (`MUA_ADMIN_PASSWORD_SOURCE` in
-  `docker compose logs mua`) and validates the file, rolling it back if it is damaged — check
-  that log line first, and set `MUA_ADMIN_PASSWORD` + restart `mua` to get a known password.
+- **mua does not start / restarts in a loop:** `render-config.php` refuses an unusable value
+  (the log names the variable), or the database is unreachable — `ROUNDCUBE_DB_PASSWORD` must be
+  the same for `db` and `mua`, and `db` must have been (re)started with it to create the role.
+- **Webmail answers HTTP 400 on a new host name:** the host is not in
+  `ROUNDCUBE_TRUSTED_HOSTS` (default `webmails.<domain>,webmail.<domain>,localhost,127.0.0.1`).
 - **Auth works, delivery loops:** the mta still points at a dead mda IP — restart the mta.
 - **Secret drift:** created the stack without `--env-file env.dev`? Postgres honours its
   password only on first init: `down` → `rm -rf ldata/` → bootstrap again.
@@ -106,7 +93,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
 
 ```bash
 ./bootstrap-dev.sh        # once, or after ldata/ reset — provisions test.creds
-./test.sh                 # 179 checks
+./test.sh                 # 207 checks
 ./test.sh --skip-content  # skip EICAR/GTUBE/banned (needs the ClamAV db ready)
 ./test.sh --skip-quota    # skip the self-cleaning bob@ quota fixture
 ./test.sh --skip-docker   # wire-level only (no `docker compose exec` assertions)
@@ -123,7 +110,7 @@ docker compose --env-file env.dev -f docker-compose-dev.yml exec mta /check.sh
   inactive mailbox, never rehashing a legacy `$1$` row with the master password — with a control
   proving the own-login rehash still works, and the `auth_user=<mcp>` login trail), the
   `maild_mcp` role grants, the service mailbox (created once, untouched on restart) and
-  `/healthz`; G4c checks the MCP backup archive and G4c2 the Roundcube (mua2) one. Section K covers the P1 user side: the
+  `/healthz`; G4c checks the MCP backup archive and G4c2 the Roundcube (mua) one. Section K covers the P1 user side: the
   domain allow-list CLI, web login (ALTCHA, lockout, refresh rotation + reuse revocation),
   secondary addresses (magic link through amavis, D11 conflicts + postmaster notice, owner wins,
   disabled secondary refused), PATs (scopes → 403 `insufficient_scope`, switch → 403, subset,

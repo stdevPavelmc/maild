@@ -392,12 +392,12 @@ cleanup() {
             dcx mda sh -c "doveadm mailbox list -u alice@$DOMAIN | grep -E '^P2r?-maild-p2-' | while read -r f; do doveadm mailbox delete -u alice@$DOMAIN \"\$f\"; done" > /dev/null 2>&1 || true
             dcx db psql -U maild -d mcp -q -c "DELETE FROM send_counter; DELETE FROM confirm_handle;" > /dev/null 2>&1 || true
         fi
-        # Phase Q (mua2): the fixture's password hash as found, the probe messages.
-        if [ "$MUA2_TOUCHED" = 1 ]; then
+        # Phase Q (webmail): the fixture's password hash as found, the probe messages.
+        if [ "$WEBMAIL_TOUCHED" = 1 ]; then
             [ -n "${Q_HASH_BEFORE:-}" ] && sql "UPDATE mailbox SET password='$Q_HASH_BEFORE' WHERE username='$Q_PW_USER'" > /dev/null 2>&1 || true
             dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
-            dcx mda doveadm expunge -u "bob@$DOMAIN" mailbox INBOX subject "maild-mua2-" > /dev/null 2>&1 || true
-            dcx mda doveadm expunge -u "alice@$DOMAIN" mailbox Sent subject "maild-mua2-" > /dev/null 2>&1 || true
+            dcx mda doveadm expunge -u "bob@$DOMAIN" mailbox INBOX subject "maild-webmail-" > /dev/null 2>&1 || true
+            dcx mda doveadm expunge -u "alice@$DOMAIN" mailbox Sent subject "maild-webmail-" > /dev/null 2>&1 || true
         fi
         # Phase L (amavis listeners): the 10026 probe mail and, if L6 was interrupted, its placeholder.
         dcx mda doveadm expunge -u "$DEPLOY_ADMIN" mailbox INBOX subject "maild-p1b-internal-" > /dev/null 2>&1 || true
@@ -587,16 +587,6 @@ if [ "$HAVE_DC" = 1 ] ; then
     else
         t_fail "cron env (mode=$CRON_ENV_MODE leaks='$CRON_LEAK' pw_copies=$CRON_PW_COPIES MX_HOSTNAME='$CRON_MX')"
     fi
-fi
-
-# M-03 (2026-10 audit) — the SnappyMail admin panel shares the public webmail host, so it is
-# off unless MUA_ADMIN_PANEL=on: /?admin answers 403 while the webmail itself still serves
-MUA_ADMIN_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$SERVER:8081/?admin")"
-MUA_HOME_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://$SERVER:8081/")"
-if [ "$MUA_ADMIN_CODE" = 403 ] && [ "$MUA_HOME_CODE" = 200 ] ; then
-    t_ok "webmail admin panel is disabled by default (/?admin 403, webmail 200)"
-else
-    t_fail "webmail admin panel exposure (/?admin=$MUA_ADMIN_CODE, /=$MUA_HOME_CODE; want 403/200)"
 fi
 
 if [ -z "$PASS" ] ; then
@@ -1457,13 +1447,13 @@ else
         fi
     fi
 
-    # G4c2 — and Roundcube's database (the mua2 webmail), when mua2 is deployed and initialised
+    # G4c2 — and Roundcube's database (the mua webmail), once mua has initialised it
     if [ -z "$(env_value "$ENV_FILE" ROUNDCUBE_DB_PASSWORD || true)" ] ; then
-        t_skip "the Roundcube archive (ROUNDCUBE_DB_PASSWORD not set in $ENV_FILE: no mua2 deployed)"
+        t_skip "the Roundcube archive (ROUNDCUBE_DB_PASSWORD not set in $ENV_FILE: no webmail database)"
     else
         BK_RNEW="$(dcx cron sh -c 'ls -1t /backups/db/maild_roundcube_*.sql.gz 2>/dev/null | head -n1' | tr -d '\r')"
         if [ -z "$BK_RNEW" ] ; then
-            t_fail "the run also writes the Roundcube archive (maild_roundcube_*.sql.gz; has mua2 started once?)"
+            t_fail "the run also writes the Roundcube archive (maild_roundcube_*.sql.gz; has mua started once?)"
         elif ! dcx cron gzip -t "$BK_RNEW" 2>/dev/null ; then
             t_fail "the Roundcube archive passes 'gzip -t' ($BK_RNEW)"
         elif dcx cron sh -c "zcat '$BK_RNEW' | grep -q 'CREATE TABLE public.identities'" &&
@@ -4030,15 +4020,15 @@ else
     fi
 fi
 
-# ============================ Q. mua2 — Roundcube trial webmail (mua2/README.md) ==========
-# Only when the mua2 container runs (dev-only while it is evaluated). Every check drives the
+# ============================ Q. mua — the Roundcube webmail (mua/README.md) ================
+# Skipped only when the mua container is not running. Every check drives the
 # webmail over HTTP like a browser (session cookie + request token), then verifies the effect in
 # the catalogue / Dovecot / the mailboxes. Q5 changes dylan@'s password through the webmail and
 # cleanup() puts the original hash back whatever happens.
-section "Q. mua2 — Roundcube (login, directory autocomplete, password change, send, hardening)"
+section "Q. mua — Roundcube webmail (login, directory autocomplete, password change, send, hardening)"
 
-MUA2_HTTP="${MUA2_HTTP:-http://$SERVER:8086}"
-MUA2_TOUCHED=0
+WEBMAIL_HTTP="${WEBMAIL_HTTP:-http://$SERVER:8081}"
+WEBMAIL_TOUCHED=0
 Q_PW_USER="dylan@$DOMAIN"
 Q_HASH_BEFORE=""
 RC_PY='import http.cookiejar, json, re, sys, urllib.error, urllib.parse, urllib.request
@@ -4081,7 +4071,7 @@ elif action == "send":
     t2 = re.search(r"\"request_token\":\"([^\"]+)\"", page).group(1)
     ident = re.search(r"<select name=\"_from\"[^>]*>\s*<option value=\"(\d+)\"", page).group(1)
     page = call("/?_task=mail&_action=send", {"_token": t2, "_id": cid, "_from": ident, "_to": args[0],
-        "_subject": args[1], "_message": "mua2 probe", "_is_html": "0", "_draft": "", "_store_target": "Sent", "_framed": "1"})
+        "_subject": args[1], "_message": "webmail probe", "_is_html": "0", "_draft": "", "_store_target": "Sent", "_framed": "1"})
     # the sent_successfully command, not its text: the UI language is ROUNDCUBE_LANGUAGE
     print("SEND-OK" if re.search(r"sent_successfully\(\"confirmation\"", page) else "SEND-FAIL")
 elif action == "sieve":
@@ -4089,48 +4079,48 @@ elif action == "sieve":
     vac = call("/?_task=settings&_action=plugin.managesieve-vacation")
     ok = "filtersetslist" in page and "vacation" in vac.lower() and "managesieve_conn_error" not in page + vac
     print("SIEVE-OK" if ok else "SIEVE-FAIL")'
-rc_py() { python3 -c "$RC_PY" "$MUA2_HTTP" "$@" 2>/dev/null; }
+rc_py() { python3 -c "$RC_PY" "$WEBMAIL_HTTP" "$@" 2>/dev/null; }
 
 if [ "$SKIP_DOCKER" = 1 ] ; then
-    t_skip "mua2 checks (--skip-docker)"
-elif [ "$(docker inspect -f '{{.State.Running}}' maild-dev-mua2 2>/dev/null)" != "true" ] ; then
-    t_skip "mua2 checks (the mua2 container is not running: compose up -d mua2)"
+    t_skip "webmail checks (--skip-docker)"
+elif [ "$(docker inspect -f '{{.State.Running}}' maild-dev-mua 2>/dev/null)" != "true" ] ; then
+    t_skip "webmail checks (the mua container is not running: compose up -d mua)"
 else
-    MUA2_TOUCHED=1
+    WEBMAIL_TOUCHED=1
     Q_ALICE_PW="${CRED[alice@${DOMAIN,,}]:-}"
     Q_PW_OLD="${CRED[${Q_PW_USER,,}]:-}"
 
     # Q1 — healthy, and the login page renders (PHP + rendered config + db session store)
-    Q1_HEALTH="$(docker inspect -f '{{.State.Health.Status}}' maild-dev-mua2 2>/dev/null)"
-    if [ "$Q1_HEALTH" = healthy ] && curl -fsS --max-time 10 "$MUA2_HTTP/" 2>/dev/null | grep -q rcmloginuser ; then
-        t_ok "Q1 mua2 is healthy and serves the Roundcube login page"
+    Q1_HEALTH="$(docker inspect -f '{{.State.Health.Status}}' maild-dev-mua 2>/dev/null)"
+    if [ "$Q1_HEALTH" = healthy ] && curl -fsS --max-time 10 "$WEBMAIL_HTTP/" 2>/dev/null | grep -q rcmloginuser ; then
+        t_ok "Q1 the webmail is healthy and serves the Roundcube login page"
     else
-        t_fail "Q1 mua2 health/login page (health: ${Q1_HEALTH:-none})"
+        t_fail "Q1 webmail health/login page (health: ${Q1_HEALTH:-none})"
     fi
 
     # Q2 — hardening: no installer, nothing outside public_html, no version in Server:
     Q2_BAD=""
     for q_path in /installer.php /installer/ /config/config.inc.php /bin/initdb.sh /SQL/postgres.initial.sql \
                   /composer.json /vendor/autoload.php /static.php/config/config.inc.php ; do
-        q_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$MUA2_HTTP$q_path")"
+        q_code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$WEBMAIL_HTTP$q_path")"
         case "$q_code" in 403|404) ;; *) Q2_BAD="$Q2_BAD $q_path=$q_code" ;; esac
     done
-    Q2_SERVER="$(curl -sI --max-time 10 "$MUA2_HTTP/" | tr -d '\r' | sed -n 's/^[Ss]erver: //p')"
+    Q2_SERVER="$(curl -sI --max-time 10 "$WEBMAIL_HTTP/" | tr -d '\r' | sed -n 's/^[Ss]erver: //p')"
     if [ -z "$Q2_BAD" ] && [ "$Q2_SERVER" = Apache ] ; then
         t_ok "Q2 installer and internal paths are not served, Server: carries no version"
     else
-        t_fail "Q2 mua2 exposure (served:${Q2_BAD:- none}; Server: $Q2_SERVER)"
+        t_fail "Q2 webmail exposure (served:${Q2_BAD:- none}; Server: $Q2_SERVER)"
     fi
 
     # Q3 — secrets: the web server runs with a scrubbed environment, the db role cannot read hashes
-    Q3_ENV="$(docker exec maild-dev-mua2 sh -c 'tr "\0" "\n" < /proc/1/environ' 2>/dev/null | grep -c 'PASSWORD\|SECRET\|DES_KEY')"
+    Q3_ENV="$(docker exec maild-dev-mua sh -c 'tr "\0" "\n" < /proc/1/environ' 2>/dev/null | grep -c 'PASSWORD\|SECRET\|DES_KEY')"
     Q3_ROLE_PW="$(env_value "$ENV_FILE" ROUNDCUBE_DB_PASSWORD || true)"
     Q3_HASH="$(dcx db env PGPASSWORD="$Q3_ROLE_PW" psql -h 127.0.0.1 -U maild_roundcube -d mailddb -X -tAc \
         "SELECT password FROM mailbox LIMIT 1" 2>&1)"
     if [ "$Q3_ENV" = 0 ] && printf '%s' "$Q3_HASH" | grep -q 'permission denied' ; then
         t_ok "Q3 Apache/PHP see no operator secret; the maild_roundcube role cannot read password hashes"
     else
-        t_fail "Q3 mua2 secrets (secret vars in PID 1: $Q3_ENV; role reading mailbox.password: ${Q3_HASH:0:40})"
+        t_fail "Q3 webmail secrets (secret vars in PID 1: $Q3_ENV; role reading mailbox.password: ${Q3_HASH:0:40})"
     fi
 
     # Q4 — directory autocomplete (the "maild" source only: alice's collected recipients answer as
@@ -4151,7 +4141,7 @@ else
     # Q5 — password change through the webmail: PASSWORD_SCHEME hash in the catalogue, Dovecot
     # accepts the new password and refuses the old one (cleanup() restores the original hash)
     Q_HASH_BEFORE="$(sql "SELECT password FROM mailbox WHERE username='$Q_PW_USER'" | tr -d '\r')"
-    Q5_NEW="Mua2-$(chrono | cut -c1-12)-Q5"
+    Q5_NEW="Webmail-$(chrono | cut -c1-12)-Q5"
     Q5_OUT="$(rc_py "$Q_PW_USER" "$Q_PW_OLD" passwd "$Q5_NEW")"
     Q5_HASH="$(sql "SELECT password FROM mailbox WHERE username='$Q_PW_USER'" | tr -d '\r')"
     Q5_SCHEME="$(env_value "$ENV_FILE" PASSWORD_SCHEME || true)"
@@ -4173,7 +4163,7 @@ else
     dcx mda doveadm auth cache flush > /dev/null 2>&1 || true
 
     # Q6 — send through the webmail (SMTPS + SASL as the user): delivered and kept in Sent
-    Q6_SUBJ="maild-mua2-$(chrono | cut -c1-10)"
+    Q6_SUBJ="maild-webmail-$(chrono | cut -c1-10)"
     Q6_OUT="$(rc_py "alice@$DOMAIN" "$Q_ALICE_PW" send "bob@$DOMAIN" "$Q6_SUBJ")"
     if [ "$Q6_OUT" = SEND-OK ] && wait_msg "bob@$DOMAIN" INBOX "$Q6_SUBJ" && msg_in "alice@$DOMAIN" Sent "$Q6_SUBJ" ; then
         t_ok "Q6 a message sent from the webmail reaches bob@$DOMAIN and is stored in alice's Sent"

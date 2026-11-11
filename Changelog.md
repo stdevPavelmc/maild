@@ -18,6 +18,29 @@ This is a note for developers about the recommended tags to keep track of the ch
 Dates must be YEAR-MONTH-DAY then version number in semver format.
 -->
 
+## 2026-11-11 2.0.0-rc3
+
+- **Breaking — Changed (2026-11-11): the webmail (`mua`) is now Roundcube; SnappyMail is
+  removed.** The `mua2` trial was promoted under the `mua` name: same service, hostname,
+  image (`maild-mua`), dev port 8081 and `webmail.${DEFAULT_DOMAIN}` route, now in all the
+  production compose files (`docker-compose.yml`, `compose-github.yml`, `compose-gitlab.yml`).
+  Upgrade notes: INSTALL.md → "Upgrading from SnappyMail".
+  - `ROUNDCUBE_DB_PASSWORD` is now **mandatory** (db creates the `maild_roundcube` role and the
+    `roundcube` database; compose refuses to start without it). `mua` gets an env allow-list
+    instead of `env_file` and never sees `POSTGRES_PASSWORD`; its volume is `mua_data`
+    (production) / `ldata/mua` (dev); cron dumps `ROUNDCUBE_DB` in production too.
+  - Removed: the SnappyMail image, `MUA_ADMIN_PANEL`/`MUA_ADMIN_USER`/`MUA_ADMIN_PASSWORD`,
+    `MUA_PLUGINS`, `MUA_CONFIG_WAIT_TIMEOUT`, `MUA_DEBUG`; `POSTGRES_EXTRA_DB` no longer
+    defaults to `contacts` (an existing `contacts` database is left alone, not migrated).
+  - Not carried over: personal contacts (export as vCard, import in Roundcube), signatures, and
+    two-factor authentication in the webmail.
+  - A new domain no longer needs a webmail restart (Roundcube has no per-domain config): the
+    AdminNG advisory now says "restart amavis and mta"; `bootstrap-dev.sh` waits for the
+    Roundcube login page instead of SnappyMail's per-domain JSON.
+  - `test.sh`: section Q runs against `mua` (8081); the SnappyMail `/?admin` check (M-03) is
+    gone (207 checks). Docs: README, INSTALL, DEV-SETUP, AGENTS.md, `.agents/`, db/README,
+    db_upgrade.md, BACKUP-RESTORE.md, `mua/README.md`.
+
 ## 2026-11-11 2.0.0-rc2
 - Fixed (2026-11-10): **the mta peer-IP watchdog broke when two peers swapped addresses.** It
   rewrote `s/OLD/NEW/` one peer at a time, so when amavis and mda traded addresses in the same
